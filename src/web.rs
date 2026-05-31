@@ -90,6 +90,8 @@ const SCRIPT: &str = r#"
     if (e.key === 'Escape') close();
     else if (e.key === 'ArrowLeft') go(-1);
     else if (e.key === 'ArrowRight') go(1);
+    else if (e.key === 'Home') show(0);
+    else if (e.key === 'End') show(imgs.length - 1);
   });
 
   // Horizontal swipe: left -> next, right -> prev.
