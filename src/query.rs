@@ -7,7 +7,7 @@ use serde::de::{self, Deserialize, Deserializer};
 use serde::{Serialize, Serializer};
 
 use crate::db::{album_display_path, AlbumRoot};
-use crate::error::{AppError, AppResult};
+use crate::error::AppResult;
 use crate::models::{Cover, Page, PhotoSummary, SubAlbum};
 
 pub const DEFAULT_LIMIT: u64 = 200;
@@ -61,8 +61,9 @@ impl<'de> Deserialize<'de> for Rating {
 /// Parsed query parameters for `GET /photos`.
 #[derive(Debug, Default)]
 pub struct PhotoQuery {
-    /// `/Root/relative/path`. `None` means no album filter.
-    pub album: Option<String>,
+    /// Album path as segments (`["Photos", "Lego"]` for `/Photos/Lego`); empty
+    /// means no album filter. The first segment is the `AlbumRoots.label`.
+    pub album: Vec<String>,
     /// When true, the album filter also matches sub-albums; otherwise only the
     /// named album itself. Has no effect without `album`.
     pub recursive: bool,
@@ -137,22 +138,22 @@ fn resolve_tag_ids(conn: &Connection, name: &str) -> AppResult<Vec<i64>> {
     Ok(ids)
 }
 
-/// Parse an album display path `/Root/rel...` into its root `label` and the
-/// album's `relativePath`: `None` for a collection's root album, else
-/// `Some("/seg/seg")`.
-fn parse_album(album: &str) -> AppResult<(&str, Option<String>)> {
-    let trimmed = album.trim_start_matches('/');
-    if trimmed.is_empty() {
-        return Err(AppError::BadRequest(
-            "album must be of the form /Root or /Root/relative/path".into(),
-        ));
-    }
-    let (label, rest) = match trimmed.split_once('/') {
-        Some((l, r)) => (l, r),
-        None => (trimmed, ""),
-    };
-    let rel = (!rest.is_empty()).then(|| format!("/{rest}"));
-    Ok((label, rel))
+/// Split a display path (`/Photos/Lego`) into album segments (`["Photos",
+/// "Lego"]`); an empty/`"/"` path yields `[]` (the virtual root).
+pub fn album_segments(path: &str) -> Vec<String> {
+    path.split('/')
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+/// Split album segments into the root `label` and the album's `relativePath`
+/// (`None` for a collection's root album, else `Some("/seg/seg")`). Returns
+/// `None` when there are no segments (the virtual root).
+fn album_root_and_rel(album: &[String]) -> Option<(&str, Option<String>)> {
+    let (label, rest) = album.split_first()?;
+    let rel = (!rest.is_empty()).then(|| format!("/{}", rest.join("/")));
+    Some((label.as_str(), rel))
 }
 
 /// Build the shared `FROM ... WHERE ...` fragment plus its bound parameters.
@@ -166,8 +167,7 @@ fn build_filter(conn: &Connection, q: &PhotoQuery) -> AppResult<(String, Vec<Val
     );
     let mut params: Vec<Value> = Vec::new();
 
-    if let Some(album) = &q.album {
-        let (label, rel) = parse_album(album)?;
+    if let Some((label, rel)) = album_root_and_rel(&q.album) {
         sql.push_str(" AND r.label = ?");
         params.push(Value::Text(label.to_string()));
 
@@ -310,17 +310,23 @@ pub fn list_photos(
 pub fn list_subalbums(
     conn: &Connection,
     roots: &HashMap<i64, AlbumRoot>,
-    album: &str,
+    album: &[String],
     filters: &Filters,
 ) -> AppResult<Vec<SubAlbum>> {
     // 0 makes the rating clause `max(...,0) >= 0` always true (i.e. no filter).
     let min = filters.min_rating.get();
+    // Display path of `album`, used to build each child's `path` ("" at the root).
+    let parent = if album.is_empty() {
+        String::new()
+    } else {
+        format!("/{}", album.join("/"))
+    };
 
     // Each mode produces the `matched` rows (image_id, image_name, category,
-    // cdate, bucket); only the bucketing/scope and the parent path differ.
-    let (matched, params, parent): (&str, Vec<(&str, Value)>, &str) = if album.is_empty() {
+    // cdate, bucket); only the bucketing/scope differs.
+    let (matched, params): (&str, Vec<(&str, Value)>) = match album_root_and_rel(album) {
         // Virtual top level: one bucket per album root (its label).
-        (
+        None => (
             "SELECT i.id AS image_id, i.name AS image_name, i.category AS category, \
                     ii.creationDate AS cdate, r.label AS bucket \
              FROM Images i JOIN Albums a ON a.id = i.album \
@@ -328,45 +334,43 @@ pub fn list_subalbums(
              LEFT JOIN ImageInformation ii ON ii.imageid = i.id \
              WHERE i.status = 1 AND max(ifnull(ii.rating, 0), 0) >= :min",
             vec![(":min", Value::Integer(min))],
-            "",
-        )
-    } else {
-        let (label, rel) = parse_album(album)?;
-        let Some((&root_id, _)) = roots.iter().find(|(_, r)| r.label == label) else {
-            return Ok(Vec::new());
-        };
-        // Path prefix shared by every album in the subtree (the root album is "/").
-        let prefix = match rel {
-            None => "/".to_string(),
-            Some(rel) => format!("{rel}/"),
-        };
-        let like = format!("{}%", escape_like(&prefix));
-        // Bucket each subtree photo by its direct-child path segment (the part of
-        // the relativePath after the prefix, up to the next '/'). Filtering by
-        // `albumRoot` id lets the `(albumRoot, relativePath)` index serve the scan.
-        (
-            "SELECT image_id, image_name, category, cdate, \
-                    CASE WHEN instr(rest, '/') > 0 \
-                         THEN substr(rest, 1, instr(rest, '/') - 1) ELSE rest END AS bucket \
-             FROM ( \
-               SELECT i.id AS image_id, i.name AS image_name, i.category AS category, \
-                      ii.creationDate AS cdate, \
-                      substr(a.relativePath, length(:prefix) + 1) AS rest \
-               FROM Images i JOIN Albums a ON a.id = i.album \
-               LEFT JOIN ImageInformation ii ON ii.imageid = i.id \
-               WHERE i.status = 1 AND a.albumRoot = :root \
-                 AND a.relativePath LIKE :like ESCAPE '\\' \
-                 AND length(a.relativePath) > length(:prefix) \
-                 AND max(ifnull(ii.rating, 0), 0) >= :min \
-             )",
-            vec![
-                (":prefix", Value::Text(prefix)),
-                (":root", Value::Integer(root_id)),
-                (":like", Value::Text(like)),
-                (":min", Value::Integer(min)),
-            ],
-            album.trim_end_matches('/'),
-        )
+        ),
+        Some((label, rel)) => {
+            let Some((&root_id, _)) = roots.iter().find(|(_, r)| r.label == label) else {
+                return Ok(Vec::new());
+            };
+            // Path prefix shared by every album in the subtree (root album is "/").
+            let prefix = match rel {
+                None => "/".to_string(),
+                Some(rel) => format!("{rel}/"),
+            };
+            let like = format!("{}%", escape_like(&prefix));
+            // Bucket each subtree photo by its direct-child path segment (the part
+            // of the relativePath after the prefix, up to the next '/'). Filtering
+            // by `albumRoot` id lets the `(albumRoot, relativePath)` index serve it.
+            (
+                "SELECT image_id, image_name, category, cdate, \
+                        CASE WHEN instr(rest, '/') > 0 \
+                             THEN substr(rest, 1, instr(rest, '/') - 1) ELSE rest END AS bucket \
+                 FROM ( \
+                   SELECT i.id AS image_id, i.name AS image_name, i.category AS category, \
+                          ii.creationDate AS cdate, \
+                          substr(a.relativePath, length(:prefix) + 1) AS rest \
+                   FROM Images i JOIN Albums a ON a.id = i.album \
+                   LEFT JOIN ImageInformation ii ON ii.imageid = i.id \
+                   WHERE i.status = 1 AND a.albumRoot = :root \
+                     AND a.relativePath LIKE :like ESCAPE '\\' \
+                     AND length(a.relativePath) > length(:prefix) \
+                     AND max(ifnull(ii.rating, 0), 0) >= :min \
+                 )",
+                vec![
+                    (":prefix", Value::Text(prefix)),
+                    (":root", Value::Integer(root_id)),
+                    (":like", Value::Text(like)),
+                    (":min", Value::Integer(min)),
+                ],
+            )
+        }
     };
 
     // Shared: group the matched rows into one tile per bucket (count + newest
@@ -429,12 +433,23 @@ mod tests {
     }
 
     #[test]
-    fn parses_album_paths() {
-        assert_eq!(parse_album("/Photos").unwrap(), ("Photos", None));
+    fn splits_album_segments() {
+        assert_eq!(album_segments("/Photos/Lego"), ["Photos", "Lego"]);
+        assert_eq!(album_segments("/Photos"), ["Photos"]);
+        assert!(album_segments("/").is_empty());
+        assert!(album_segments("").is_empty());
+    }
+
+    #[test]
+    fn splits_root_and_rel() {
+        assert_eq!(album_root_and_rel(&[]), None);
         assert_eq!(
-            parse_album("/Photos/Lego/Porsche911").unwrap(),
-            ("Photos", Some("/Lego/Porsche911".to_string()))
+            album_root_and_rel(&["Photos".to_string()]),
+            Some(("Photos", None))
         );
-        assert!(parse_album("/").is_err());
+        assert_eq!(
+            album_root_and_rel(&["Photos".to_string(), "Lego".to_string(), "X".to_string()]),
+            Some(("Photos", Some("/Lego/X".to_string())))
+        );
     }
 }

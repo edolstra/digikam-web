@@ -50,7 +50,7 @@ pub async fn list_photos(
         .unwrap_or_default();
 
     let q = PhotoQuery {
-        album: params.album.filter(|a| !a.is_empty()),
+        album: query::album_segments(params.album.as_deref().unwrap_or_default()),
         recursive: params.recursive,
         tags,
         min_rating: params.min_rating,
@@ -240,7 +240,7 @@ pub async fn list_subalbums(
     State(state): State<AppState>,
     Query(params): Query<SubalbumParams>,
 ) -> AppResult<Json<Vec<SubAlbum>>> {
-    let album = params.album.unwrap_or_default();
+    let album = query::album_segments(params.album.as_deref().unwrap_or_default());
 
     let filters = Filters {
         min_rating: params.min_rating,
