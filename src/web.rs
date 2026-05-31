@@ -97,12 +97,30 @@ const SCRIPT: &str = r#"
     document.body.classList.add('modal-open');
   }
 
+  // Open via a pushed history entry so the device Back button (and gesture)
+  // pops it and dismisses the photo, instead of navigating off the album page.
+  function open(i) {
+    if (!isOpen()) history.pushState({ lightbox: true }, '');
+    show(i);
+  }
+
+  // UI dismiss (X / Esc / tapping outside): step back in history so the Back
+  // button and these all funnel through popstate -> dismiss(), keeping the
+  // history stack consistent.
   function close() {
+    if (isOpen()) history.back();
+  }
+
+  function dismiss() {
     lb.classList.remove('open');
     document.body.classList.remove('modal-open');
     full.removeAttribute('src');
     idx = -1;
   }
+
+  window.addEventListener('popstate', function () {
+    if (isOpen()) dismiss();
+  });
 
   function go(d) {
     var n = idx + d;
@@ -110,7 +128,7 @@ const SCRIPT: &str = r#"
   }
 
   imgs.forEach(function (im, i) {
-    im.addEventListener('click', function () { show(i); });
+    im.addEventListener('click', function () { open(i); });
   });
 
   // The <img> fills the viewport (so small photos scale up too), with the
