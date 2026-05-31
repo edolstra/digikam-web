@@ -272,7 +272,7 @@ fn opt_u64(v: Option<i64>) -> Option<u64> {
 }
 
 /// Run a blocking database closure on the blocking thread pool.
-async fn run_blocking<F, T>(state: &AppState, f: F) -> AppResult<T>
+pub(crate) async fn run_blocking<F, T>(state: &AppState, f: F) -> AppResult<T>
 where
     F: FnOnce(&PooledConn, &AppState) -> AppResult<T> + Send + 'static,
     T: Send + 'static,

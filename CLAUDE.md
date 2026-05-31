@@ -38,6 +38,15 @@ All endpoints are served under the `/api` prefix.
 | `GET /api/tags` | Tag **tree** (`{id, name, children}`), internal tags excluded. |
 | `GET /api/health` | Liveness. |
 
+### Frontend (HTML)
+
+Server-rendered HTML pages live at the root (outside `/api`), in [src/web.rs](src/web.rs).
+This is the seed of the browsing UI (planned to grow into Leptos later).
+
+| Route | Notes |
+|-------|-------|
+| `GET /photos/<album path>` | e.g. `/photos/Photos/Lego/Porsche911`. Plain HTML page listing the file names of the photos directly in that album (non-recursive). |
+
 ### Query semantics
 - **`album=/Root/rel`** — the first path segment is the `AlbumRoots.label`; the
   remainder is a `relativePath`. By default it matches **only that album**
@@ -100,7 +109,8 @@ src/
   db.rs        read-only pool, album-root loading, path resolution  (+ unit tests)
   models.rs    serde response types (PhotoSummary, PhotoDetail, AlbumNode, TagNode, Page<T>)
   query.rs     /photos SQL + param building                          (+ unit tests)
-  handlers.rs  axum handlers, spawn_blocking DB helper
+  handlers.rs  axum JSON API handlers, run_blocking DB helper
+  web.rs       server-rendered HTML frontend pages           (+ unit tests)
   error.rs     AppError -> JSON HTTP responses
 ```
 

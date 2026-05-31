@@ -4,6 +4,7 @@ mod error;
 mod handlers;
 mod models;
 mod query;
+mod web;
 
 use std::sync::Arc;
 
@@ -51,6 +52,7 @@ async fn main() -> Result<()> {
 
     let app = Router::new()
         .nest("/api", api)
+        .route("/photos/*path", get(web::album_page))
         .layer(TraceLayer::new_for_http())
         .layer(CorsLayer::permissive())
         .with_state(state);
