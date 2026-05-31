@@ -23,13 +23,18 @@ h2 { font-size: 1rem; margin: 1.5rem 0 0.5rem; padding-bottom: 0.25rem;
      border-bottom: 1px solid #333; color: #aaa; }
 .count { color: #888; font-size: 0.85rem; }
 .albums { display: flex; flex-wrap: wrap; gap: 10px; margin: 0.5rem 0 1.5rem; }
-.album { width: 200px; text-decoration: none; color: #ccc; }
+.album { position: relative; width: 200px; height: 150px; display: block;
+         text-decoration: none; border-radius: 4px; overflow: hidden; }
 .album img { width: 200px; height: 150px; object-fit: cover; display: block;
-             background: #222; border-radius: 4px; }
-.album .name { display: block; font-size: 0.8rem; margin-top: 0.25rem;
-               white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.album .cnt { color: #888; }
-.album:hover .name { color: #fff; }
+             background: #222; }
+.album .caption { position: absolute; inset: 0; display: flex;
+                  flex-direction: column; align-items: center; justify-content: center;
+                  text-align: center; gap: 0.2rem; padding: 0.5rem;
+                  color: #fff; text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9);
+                  background: rgba(0, 0, 0, 0.3); }
+.album:hover .caption { background: rgba(0, 0, 0, 0.45); }
+.album .title { font-weight: bold; }
+.album .cnt { font-size: 0.8rem; }
 .grid { display: flex; flex-wrap: wrap; gap: 4px; align-items: flex-end; }
 .grid img { height: 200px; width: auto; display: block; background: #222; cursor: pointer; }
 body.modal-open { overflow: hidden; }
@@ -190,7 +195,10 @@ pub async fn album_page(
             albums_html.push_str(&format!(
                 "<a class=\"album\" href=\"{href}\">\
                  <img src=\"/api/photos/{cover_id}/file\" alt=\"{alt}\" loading=\"lazy\">\
-                 <span class=\"name\">{name} <span class=\"cnt\">({count})</span></span>\
+                 <span class=\"caption\">\
+                 <span class=\"title\">{name}</span>\
+                 <span class=\"cnt\">({count})</span>\
+                 </span>\
                  </a>\n",
                 href = escape_html(&album_href(&sub.path)),
                 cover_id = sub.cover.id,
