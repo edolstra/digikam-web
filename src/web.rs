@@ -192,21 +192,11 @@ async fn render(
     album: Option<String>,
     filters: Filters,
 ) -> AppResult<Html<String>> {
-    let Some(album) = album else {
-        // Virtual root: the album roots presented as sub-album tiles (an empty
-        // album string makes `list_subalbums` return the roots).
-        let filters_for_roots = filters.clone();
-        let roots = run_blocking(&state, move |conn, state| {
-            query::list_subalbums(conn, &state.roots, "", &filters_for_roots)
-        })
-        .await?;
-        let crumb = breadcrumb("", &filters);
-        let controls = rating_selector("", &filters);
-        let body = render_subalbums(&roots, &filters);
-        return Ok(Html(page_html("Photos", &crumb, &controls, &body)));
-    };
-
-    let q = PhotoQuery {
+    // "" is the virtual root (album roots as tiles, no photo grid); a non-empty
+    // path is a real album (sub-album tiles + its own photo grid). `list_subalbums`
+    // handles both; only a real album also runs a `PhotoQuery`.
+    let album = album.unwrap_or_default();
+    let q = (!album.is_empty()).then(|| PhotoQuery {
         album: Some(album.clone()),
         recursive: false,
         tags: Vec::new(),
@@ -214,13 +204,16 @@ async fn render(
         // No real pagination in this first cut; list everything in the album.
         limit: u64::MAX,
         offset: 0,
-    };
+    });
 
-    // Fetch the album's photos and its direct sub-albums on one connection.
+    // Fetch the (optional) photo page and the sub-album tiles on one connection.
     let album_for_subs = album.clone();
     let filters_for_subs = filters.clone();
     let (page, subalbums) = run_blocking(&state, move |conn, state| {
-        let page = query::list_photos(conn, &state.roots, &q)?;
+        let page = match &q {
+            Some(q) => Some(query::list_photos(conn, &state.roots, q)?),
+            None => None,
+        };
         let subalbums =
             query::list_subalbums(conn, &state.roots, &album_for_subs, &filters_for_subs)?;
         Ok((page, subalbums))
@@ -229,57 +222,65 @@ async fn render(
 
     let albums_html = render_subalbums(&subalbums, &filters);
 
-    // `list_photos` already orders newest-first, so photos of the same day are
-    // contiguous: we can group them by walking the list once.
-    let mut content = String::new();
-    if page.items.is_empty() {
-        content.push_str("<p>No photos in this album.</p>");
-    } else {
-        let mut current_day: Option<&str> = None;
-        let mut grid_open = false;
-        for photo in &page.items {
-            let day = photo_day(photo.creation_date.as_deref());
-            if day != current_day {
+    // The photo grid + count line, present only for a real album.
+    let grid = match &page {
+        None => String::new(),
+        Some(page) => {
+            let mut content = String::new();
+            if page.items.is_empty() {
+                content.push_str("<p>No photos in this album.</p>");
+            } else {
+                // `list_photos` already orders newest-first, so photos of the same
+                // day are contiguous: group them by walking the list once.
+                let mut current_day: Option<&str> = None;
+                let mut grid_open = false;
+                for photo in &page.items {
+                    let day = photo_day(photo.creation_date.as_deref());
+                    if day != current_day {
+                        if grid_open {
+                            content.push_str("</div>\n");
+                        }
+                        let heading = day.unwrap_or("Unknown date");
+                        content.push_str(&format!(
+                            "<h2>{}</h2>\n<div class=\"grid\">\n",
+                            escape_html(heading)
+                        ));
+                        grid_open = true;
+                        current_day = day;
+                    }
+                    if photo.is_video {
+                        // Placeholder tile (▶ badge via CSS); nothing is fetched
+                        // until it's opened. `data-src` carries the media URL.
+                        content.push_str(&format!(
+                            "<button class=\"vtile\" data-src=\"/api/photos/{id}/file\" title=\"{name}\"></button>\n",
+                            id = photo.id,
+                            name = escape_html(&photo.name),
+                        ));
+                    } else {
+                        // Originals are full-size, so let the browser load lazily.
+                        content.push_str(&format!(
+                            "<img src=\"/api/photos/{id}/file\" alt=\"{alt}\" loading=\"lazy\">\n",
+                            id = photo.id,
+                            alt = escape_html(&photo.name),
+                        ));
+                    }
+                }
                 if grid_open {
                     content.push_str("</div>\n");
                 }
-                let heading = day.unwrap_or("Unknown date");
-                content.push_str(&format!(
-                    "<h2>{}</h2>\n<div class=\"grid\">\n",
-                    escape_html(heading)
-                ));
-                grid_open = true;
-                current_day = day;
             }
-            if photo.is_video {
-                // Placeholder tile (▶ badge via CSS); nothing is fetched until
-                // it's opened in the lightbox. `data-src` carries the media URL.
-                content.push_str(&format!(
-                    "<button class=\"vtile\" data-src=\"/api/photos/{id}/file\" title=\"{name}\"></button>\n",
-                    id = photo.id,
-                    name = escape_html(&photo.name),
-                ));
-            } else {
-                // Originals are full-size, so let the browser load lazily.
-                content.push_str(&format!(
-                    "<img src=\"/api/photos/{id}/file\" alt=\"{alt}\" loading=\"lazy\">\n",
-                    id = photo.id,
-                    alt = escape_html(&photo.name),
-                ));
-            }
+            format!("<p class=\"count\">{} photo(s)</p>\n{content}", page.total)
         }
-        if grid_open {
-            content.push_str("</div>\n");
-        }
-    }
+    };
 
-    let title = escape_html(&album);
+    let title = if album.is_empty() {
+        "Photos".to_string()
+    } else {
+        escape_html(&album)
+    };
     let crumb = breadcrumb(&album, &filters);
     let controls = rating_selector(&album, &filters);
-    let body = format!(
-        "{albums_html}<p class=\"count\">{count} photo(s)</p>\n{content}",
-        count = page.total,
-    );
+    let body = format!("{albums_html}{grid}");
     Ok(Html(page_html(&title, &crumb, &controls, &body)))
 }
 
