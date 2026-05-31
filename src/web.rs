@@ -20,28 +20,64 @@ const WEBPGF_PATH: &str = env!("WEBPGF_PATH");
 const WEBPGF_JS: &[u8] = include_bytes!(concat!(env!("WEBPGF_PATH"), "/webpgf.js"));
 const WEBPGF_WASM: &[u8] = include_bytes!(concat!(env!("WEBPGF_PATH"), "/webpgf.wasm"));
 
+/// The site favicon (Digikam's), embedded at build time and served at
+/// `/favicon.ico`. Its `ETag` is a content hash so it busts the cache if replaced.
+const FAVICON: &[u8] = include_bytes!("favicon.ico");
+
 /// `GET /webpgf.js` — the Emscripten loader for the PGF decoder.
 pub async fn webpgf_js(headers: HeaderMap) -> Response {
-    static_asset(&headers, WEBPGF_JS, "text/javascript; charset=utf-8", "js")
+    static_asset(
+        &headers,
+        WEBPGF_JS,
+        "text/javascript; charset=utf-8",
+        &format!("{}-js", webpgf_build_id()),
+    )
 }
 
 /// `GET /webpgf.wasm` — the decoder module. Served as `application/wasm` so the
 /// browser can stream-compile it.
 pub async fn webpgf_wasm(headers: HeaderMap) -> Response {
-    static_asset(&headers, WEBPGF_WASM, "application/wasm", "wasm")
+    static_asset(
+        &headers,
+        WEBPGF_WASM,
+        "application/wasm",
+        &format!("{}-wasm", webpgf_build_id()),
+    )
 }
 
-/// Serve an embedded, immutable static asset with a content-addressed `ETag`
-/// (the webpgf nix store hash + asset name) honoring `If-None-Match` → `304`,
-/// plus a long `Cache-Control`. The store hash changes whenever webpgf is
-/// rebuilt, so the ETag busts the cache exactly when the bytes change.
+/// `GET /favicon.ico` — the embedded site icon.
+pub async fn favicon(headers: HeaderMap) -> Response {
+    static_asset(
+        &headers,
+        FAVICON,
+        "image/x-icon",
+        &format!("favicon-{:x}", fnv1a(FAVICON)),
+    )
+}
+
+/// FNV-1a hash — a tiny content hash for `ETag`s, no extra dependency.
+const fn fnv1a(bytes: &[u8]) -> u64 {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    let mut i = 0;
+    while i < bytes.len() {
+        hash ^= bytes[i] as u64;
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+        i += 1;
+    }
+    hash
+}
+
+/// Serve an embedded, immutable static asset with a strong content-addressed
+/// `ETag` (`etag_id`) honoring `If-None-Match` → `304`, plus a long
+/// `Cache-Control`. The id changes whenever the bytes change, so the ETag busts
+/// the cache exactly then.
 fn static_asset(
     headers: &HeaderMap,
     bytes: &'static [u8],
     content_type: &'static str,
-    tag: &str,
+    etag_id: &str,
 ) -> Response {
-    let etag = HeaderValue::from_str(&format!("\"{}-{tag}\"", webpgf_build_id()));
+    let etag = HeaderValue::from_str(&format!("\"{etag_id}\""));
     let cache_control = HeaderValue::from_static(IMMUTABLE_CACHE_CONTROL);
     if let Ok(etag) = &etag {
         if if_none_match_matches(headers, etag) {
@@ -198,6 +234,7 @@ fn page_html(title: &str, crumb: Markup, controls: Markup, body: Markup) -> Mark
             head {
                 meta charset="utf-8";
                 meta name="viewport" content="width=device-width, initial-scale=1";
+                link rel="icon" href="/favicon.ico" type="image/x-icon";
                 title { (title) }
                 style { (PreEscaped(STYLE)) }
             }
