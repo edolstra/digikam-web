@@ -5,7 +5,7 @@ use rusqlite::Connection;
 
 use crate::db::{album_display_path, AlbumRoot};
 use crate::error::{AppError, AppResult};
-use crate::models::{Page, PhotoSummary};
+use crate::models::{Cover, Page, PhotoSummary, SubAlbum};
 
 pub const DEFAULT_LIMIT: i64 = 200;
 pub const MAX_LIMIT: i64 = 1000;
@@ -48,6 +48,28 @@ fn resolve_tag_ids(conn: &Connection, name: &str) -> AppResult<Vec<i64>> {
     Ok(ids)
 }
 
+/// Parse an album display path `/Root/rel...` into its root `label` and the
+/// album's `relativePath` (`/` for a root album, else `/seg/seg`).
+fn parse_album(album: &str) -> AppResult<(&str, String)> {
+    let trimmed = album.trim_start_matches('/');
+    if trimmed.is_empty() {
+        return Err(AppError::BadRequest(
+            "album must be of the form /Root or /Root/relative/path".into(),
+        ));
+    }
+    let (label, rest) = match trimmed.split_once('/') {
+        Some((l, r)) => (l, r),
+        None => (trimmed, ""),
+    };
+    let rel = if rest.is_empty() {
+        // Digikam stores the root album of a collection as "/".
+        "/".to_string()
+    } else {
+        format!("/{rest}")
+    };
+    Ok((label, rel))
+}
+
 /// Build the shared `FROM ... WHERE ...` fragment plus its bound parameters.
 fn build_filter(conn: &Connection, q: &PhotoQuery) -> AppResult<(String, Vec<Value>)> {
     let mut sql = String::from(
@@ -60,36 +82,20 @@ fn build_filter(conn: &Connection, q: &PhotoQuery) -> AppResult<(String, Vec<Val
     let mut params: Vec<Value> = Vec::new();
 
     if let Some(album) = &q.album {
-        let trimmed = album.trim_start_matches('/');
-        if trimmed.is_empty() {
-            return Err(AppError::BadRequest(
-                "album must be of the form /Root or /Root/relative/path".into(),
-            ));
-        }
-        let (label, rest) = match trimmed.split_once('/') {
-            Some((l, r)) => (l, r),
-            None => (trimmed, ""),
-        };
+        let (label, rel) = parse_album(album)?;
         sql.push_str(" AND r.label = ?");
         params.push(Value::Text(label.to_string()));
 
-        // Digikam stores relativePath with a leading slash and no trailing
-        // slash; the root album of a collection is "/".
-        let rel = if rest.is_empty() {
-            "/".to_string()
-        } else {
-            format!("/{rest}")
-        };
-
+        let is_root = rel == "/";
         if q.recursive {
-            if rest.is_empty() {
-                // The whole collection: every album under this root.
-            } else {
+            if !is_root {
+                // The named album plus every album beneath it.
                 let like = format!("{}/%", escape_like(&rel));
                 sql.push_str(" AND (a.relativePath = ? OR a.relativePath LIKE ? ESCAPE '\\')");
                 params.push(Value::Text(rel));
                 params.push(Value::Text(like));
             }
+            // is_root + recursive: the whole collection, so no path constraint.
         } else {
             // Only photos directly in the named album.
             sql.push_str(" AND a.relativePath = ?");
@@ -192,6 +198,89 @@ pub fn list_photos(
     })
 }
 
+/// List the direct sub-albums of `album`, each with its recursive photo count
+/// and a cover (the newest photo anywhere in that sub-album's subtree), sorted
+/// by name. Albums with no visible photos anywhere are omitted.
+///
+/// One query: every photo in the subtree is bucketed by its direct-child path
+/// segment, then a window function picks the newest photo per bucket. Filtering
+/// by `albumRoot` id (resolved from `roots`) lets the `(albumRoot, relativePath)`
+/// index serve the prefix range scan.
+pub fn list_subalbums(
+    conn: &Connection,
+    roots: &HashMap<i64, AlbumRoot>,
+    album: &str,
+) -> AppResult<Vec<SubAlbum>> {
+    let (label, rel) = parse_album(album)?;
+    let Some((&root_id, _)) = roots.iter().find(|(_, r)| r.label == label) else {
+        return Ok(Vec::new());
+    };
+
+    // Path prefix shared by every album in the subtree (the root album is "/").
+    let prefix = if rel == "/" {
+        "/".to_string()
+    } else {
+        format!("{rel}/")
+    };
+    let like = format!("{}%", escape_like(&prefix));
+    let parent = album.trim_end_matches('/');
+
+    let mut stmt = conn.prepare_cached(
+        "WITH matched AS ( \
+           SELECT i.id AS image_id, i.name AS image_name, ii.creationDate AS cdate, \
+                  substr(a.relativePath, length(:prefix) + 1) AS rest \
+           FROM Images i JOIN Albums a ON a.id = i.album \
+           LEFT JOIN ImageInformation ii ON ii.imageid = i.id \
+           WHERE i.status = 1 AND a.albumRoot = :root \
+             AND a.relativePath LIKE :like ESCAPE '\\' \
+             AND length(a.relativePath) > length(:prefix) \
+         ), \
+         bucketed AS ( \
+           SELECT image_id, image_name, cdate, \
+                  CASE WHEN instr(rest, '/') > 0 \
+                       THEN substr(rest, 1, instr(rest, '/') - 1) \
+                       ELSE rest END AS bucket \
+           FROM matched \
+         ), \
+         ranked AS ( \
+           SELECT bucket, image_id, image_name, \
+                  ROW_NUMBER() OVER (PARTITION BY bucket ORDER BY cdate DESC, image_id DESC) AS rn, \
+                  COUNT(*)     OVER (PARTITION BY bucket) AS cnt \
+           FROM bucketed \
+         ) \
+         SELECT bucket, image_id, image_name, cnt \
+         FROM ranked WHERE rn = 1 \
+         ORDER BY bucket COLLATE NOCASE",
+    )?;
+
+    let rows = stmt.query_map(
+        rusqlite::named_params! { ":prefix": prefix, ":root": root_id, ":like": like },
+        |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, i64>(3)?,
+            ))
+        },
+    )?;
+
+    let mut out = Vec::new();
+    for row in rows {
+        let (bucket, image_id, image_name, cnt) = row?;
+        out.push(SubAlbum {
+            path: format!("{parent}/{bucket}"),
+            name: bucket,
+            photo_count: cnt.max(0) as u64,
+            cover: Cover {
+                id: image_id as u64,
+                name: image_name,
+            },
+        });
+    }
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -199,5 +288,15 @@ mod tests {
     #[test]
     fn escapes_like_metacharacters() {
         assert_eq!(escape_like("/a_b%c\\d"), "/a\\_b\\%c\\\\d");
+    }
+
+    #[test]
+    fn parses_album_paths() {
+        assert_eq!(parse_album("/Photos").unwrap(), ("Photos", "/".to_string()));
+        assert_eq!(
+            parse_album("/Photos/Lego/Porsche911").unwrap(),
+            ("Photos", "/Lego/Porsche911".to_string())
+        );
+        assert!(parse_album("/").is_err());
     }
 }

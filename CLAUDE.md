@@ -35,6 +35,7 @@ All endpoints are served under the `/api` prefix.
 | `GET /api/photos/:id` | `PhotoDetail` (summary + tag names + lat/long). |
 | `GET /api/photos/:id/file` | Original bytes, range-aware (via `tower_http::services::ServeFile`). Sends a strong `ETag` from the image's `uniqueHash`; a matching `If-None-Match` (or `*`) returns `304`. |
 | `GET /api/albums` | Flat list of all albums (`{id, path, root}`). |
+| `GET /api/subalbums?album=/Root/rel` | Direct sub-albums of an album as `[{name, path, photo_count, cover: {id, name}}]`, sorted by name. Cover = newest photo in the sub-album's whole subtree; `photo_count` is the recursive count. One window-function query; albums with no photos anywhere are omitted. |
 | `GET /api/tags` | Tag **tree** (`{id, name, children}`), internal tags excluded. |
 | `GET /api/health` | Liveness. |
 
@@ -45,7 +46,7 @@ This is the seed of the browsing UI (planned to grow into Leptos later).
 
 | Route | Notes |
 |-------|-------|
-| `GET /photos/<album path>` | e.g. `/photos/Photos/Lego/Porsche911`. HTML photo grid of the photos directly in that album (non-recursive). The heading is a clickable breadcrumb (`› Photos › Lego › Porsche911`) linking each ancestor album. Photos are grouped by day (newest first), fixed-height and wrapping left-to-right. Images load from `/api/photos/:id/file` directly (no thumbnails yet) with `loading="lazy"`. Clicking a photo opens an inline lightbox (full-page over a dimmed grid) with prev/next via swipe, ←/→ keys, or on-screen ‹ › chevrons (stops at ends), Home/End jump to the first/last photo, dismissed by backdrop click / Esc / the X button. No pagination yet. |
+| `GET /photos/<album path>` | e.g. `/photos/Photos/Lego/Porsche911`. HTML photo grid of the photos directly in that album (non-recursive). The heading is a clickable breadcrumb (`› Photos › Lego › Porsche911`) linking each ancestor album. A grid of direct sub-albums (cover + name + photo count, name-sorted, from `/api/subalbums`) is shown below the breadcrumb, each tile linking to that sub-album. Photos are grouped by day (newest first), fixed-height and wrapping left-to-right. Images load from `/api/photos/:id/file` directly (no thumbnails yet) with `loading="lazy"`. Clicking a photo opens an inline lightbox (full-page over a dimmed grid) with prev/next via swipe, ←/→ keys, or on-screen ‹ › chevrons (stops at ends), Home/End jump to the first/last photo, dismissed by backdrop click / Esc / the X button. No pagination yet. |
 
 ### Query semantics
 - **`album=/Root/rel`** — the first path segment is the `AlbumRoots.label`; the
@@ -107,8 +108,8 @@ src/
   main.rs      router, startup, graceful shutdown
   config.rs    clap config (database path, listen addr)
   db.rs        read-only pool, album-root loading, path resolution  (+ unit tests)
-  models.rs    serde response types (PhotoSummary, PhotoDetail, AlbumNode, TagNode, Page<T>)
-  query.rs     /photos SQL + param building                          (+ unit tests)
+  models.rs    serde response types (PhotoSummary, PhotoDetail, AlbumNode, SubAlbum, TagNode, Page<T>)
+  query.rs     /photos + /subalbums SQL + param building              (+ unit tests)
   handlers.rs  axum JSON API handlers, run_blocking DB helper
   web.rs       server-rendered HTML frontend pages           (+ unit tests)
   error.rs     AppError -> JSON HTTP responses

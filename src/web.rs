@@ -22,6 +22,14 @@ h1 .sep { color: #666; margin: 0 0.2rem; }
 h2 { font-size: 1rem; margin: 1.5rem 0 0.5rem; padding-bottom: 0.25rem;
      border-bottom: 1px solid #333; color: #aaa; }
 .count { color: #888; font-size: 0.85rem; }
+.albums { display: flex; flex-wrap: wrap; gap: 10px; margin: 0.5rem 0 1.5rem; }
+.album { width: 200px; text-decoration: none; color: #ccc; }
+.album img { width: 200px; height: 150px; object-fit: cover; display: block;
+             background: #222; border-radius: 4px; }
+.album .name { display: block; font-size: 0.8rem; margin-top: 0.25rem;
+               white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.album .cnt { color: #888; }
+.album:hover .name { color: #fff; }
 .grid { display: flex; flex-wrap: wrap; gap: 4px; align-items: flex-end; }
 .grid img { height: 200px; width: auto; display: block; background: #222; cursor: pointer; }
 body.modal-open { overflow: hidden; }
@@ -115,18 +123,28 @@ fn photo_day(creation_date: Option<&str>) -> Option<&str> {
     creation_date.filter(|d| d.len() >= 10).map(|d| &d[..10])
 }
 
+/// The frontend URL for an album display path, e.g. `/Photos/Lego` ->
+/// `/photos/Photos/Lego`, percent-encoding each path segment.
+fn album_href(album: &str) -> String {
+    let mut href = String::from("/photos");
+    for segment in album.split('/').filter(|s| !s.is_empty()) {
+        href.push('/');
+        href.push_str(&urlencoding::encode(segment));
+    }
+    href
+}
+
 /// Render an album path like `/Photos/Lego/Porsche911` as a clickable breadcrumb
 /// `› Photos › Lego › Porsche911`, where each segment links to that album page.
 fn breadcrumb(album: &str) -> String {
     let mut html = String::new();
-    let mut href = String::from("/photos");
+    let mut prefix = String::new();
     for segment in album.split('/').filter(|s| !s.is_empty()) {
-        // Build the cumulative `/photos/...` URL, percent-encoding each segment.
-        href.push('/');
-        href.push_str(&urlencoding::encode(segment));
+        prefix.push('/');
+        prefix.push_str(segment);
         html.push_str(&format!(
             "<span class=\"sep\">\u{203a}</span><a href=\"{href}\">{label}</a>",
-            href = escape_html(&href),
+            href = escape_html(&album_href(&prefix)),
             label = escape_html(segment),
         ));
     }
@@ -155,10 +173,34 @@ pub async fn album_page(
         offset: 0,
     };
 
-    let page = run_blocking(&state, move |conn, state| {
-        query::list_photos(conn, &state.roots, &q)
+    // Fetch the album's photos and its direct sub-albums on one connection.
+    let album_for_subs = album.clone();
+    let (page, subalbums) = run_blocking(&state, move |conn, state| {
+        let page = query::list_photos(conn, &state.roots, &q)?;
+        let subalbums = query::list_subalbums(conn, &state.roots, &album_for_subs)?;
+        Ok((page, subalbums))
     })
     .await?;
+
+    // Grid of sub-albums (cover + name + count), shown above the photos.
+    let mut albums_html = String::new();
+    if !subalbums.is_empty() {
+        albums_html.push_str("<div class=\"albums\">\n");
+        for sub in &subalbums {
+            albums_html.push_str(&format!(
+                "<a class=\"album\" href=\"{href}\">\
+                 <img src=\"/api/photos/{cover_id}/file\" alt=\"{alt}\" loading=\"lazy\">\
+                 <span class=\"name\">{name} <span class=\"cnt\">({count})</span></span>\
+                 </a>\n",
+                href = escape_html(&album_href(&sub.path)),
+                cover_id = sub.cover.id,
+                alt = escape_html(&sub.cover.name),
+                name = escape_html(&sub.name),
+                count = sub.photo_count,
+            ));
+        }
+        albums_html.push_str("</div>\n");
+    }
 
     // `list_photos` already orders newest-first, so photos of the same day are
     // contiguous: we can group them by walking the list once.
@@ -204,6 +246,7 @@ pub async fn album_page(
          </head>\n\
          <body>\n\
          <h1>{crumb}</h1>\n\
+         {albums_html}\
          <p class=\"count\">{count} photo(s)</p>\n\
          {content}\
          <div id=\"lightbox\" class=\"lightbox\">\n\

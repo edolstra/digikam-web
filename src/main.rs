@@ -48,6 +48,7 @@ async fn main() -> Result<()> {
         .route("/photos/:id", get(handlers::get_photo))
         .route("/photos/:id/file", get(handlers::get_photo_file))
         .route("/albums", get(handlers::list_albums))
+        .route("/subalbums", get(handlers::list_subalbums))
         .route("/tags", get(handlers::list_tags));
 
     let app = Router::new()

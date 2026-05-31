@@ -53,3 +53,23 @@ pub struct TagNode {
     pub name: String,
     pub children: Vec<TagNode>,
 }
+
+/// The cover image used to represent a sub-album.
+#[derive(Debug, Serialize)]
+pub struct Cover {
+    pub id: u64,
+    pub name: String,
+}
+
+/// A direct sub-album of some album, with its cover and recursive photo count.
+#[derive(Debug, Serialize)]
+pub struct SubAlbum {
+    /// The sub-album's own name (the last path segment), e.g. `Porsche911`.
+    pub name: String,
+    /// Display path, e.g. `/Photos/Lego/Porsche911`.
+    pub path: String,
+    /// Number of visible photos in the sub-album's whole subtree.
+    pub photo_count: u64,
+    /// Most recent photo anywhere in the subtree.
+    pub cover: Cover,
+}

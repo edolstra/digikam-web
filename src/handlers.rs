@@ -11,7 +11,7 @@ use tower_http::services::ServeFile;
 
 use crate::db::{album_display_path, image_abs_path, AppState, PooledConn};
 use crate::error::{AppError, AppResult};
-use crate::models::{AlbumNode, Page, PhotoDetail, PhotoSummary, TagNode};
+use crate::models::{AlbumNode, Page, PhotoDetail, PhotoSummary, SubAlbum, TagNode};
 use crate::query::{self, PhotoQuery, DEFAULT_LIMIT, MAX_LIMIT};
 
 /// `GET /health`
@@ -221,6 +221,31 @@ fn if_none_match_matches(headers: &HeaderMap, etag: &HeaderValue) -> bool {
 /// Strip a weak-validator `W/` prefix for comparison purposes.
 fn strip_weak(tag: &str) -> &str {
     tag.strip_prefix("W/").unwrap_or(tag)
+}
+
+/// Query parameters for `GET /subalbums`.
+#[derive(Debug, Deserialize)]
+pub struct SubalbumParams {
+    album: Option<String>,
+}
+
+/// `GET /subalbums?album=/Root/rel` — direct sub-albums of an album, each with a
+/// cover (newest photo in its subtree) and recursive photo count, sorted by name.
+pub async fn list_subalbums(
+    State(state): State<AppState>,
+    Query(params): Query<SubalbumParams>,
+) -> AppResult<Json<Vec<SubAlbum>>> {
+    let album = params
+        .album
+        .filter(|a| !a.is_empty())
+        .ok_or_else(|| AppError::BadRequest("the `album` query parameter is required".into()))?;
+
+    let subalbums = run_blocking(&state, move |conn, state| {
+        query::list_subalbums(conn, &state.roots, &album)
+    })
+    .await?;
+
+    Ok(Json(subalbums))
 }
 
 /// `GET /albums`
