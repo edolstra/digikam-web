@@ -73,6 +73,8 @@ async fn main() -> Result<()> {
         .route("/", get(web::album_page))
         .route("/photos", get(web::album_page))
         .route("/photos/*path", get(web::album_page))
+        .route("/webpgf.js", get(web::webpgf_js))
+        .route("/webpgf.wasm", get(web::webpgf_wasm))
         // Log each request (method + URI) and its response (status + latency) at
         // INFO; the span carries the URI so it shows on the response line too.
         .layer(

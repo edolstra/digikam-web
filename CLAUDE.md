@@ -146,8 +146,16 @@ decode natively) and its `FilePaths` are stale (`/mm/Images/…` vs the real
 in wasm** via [`webpgf`](https://github.com/haplo/webpgf) (built by [nix/webpgf.nix](nix/webpgf.nix),
 `nix build .#webpgf`). webpgf already maps libpgf's BGRA → RGBA and yields an `ImageData`;
 it does **not** apply orientation, so the client must rotate per the `X-Orientation`
-header. Thumbnails are ≤256 px, ~19 KB avg, with near-full coverage. *(Frontend wiring —
-IntersectionObserver → fetch → wasm-decode in a worker → canvas — is still pending.)*
+header. Thumbnails are ≤256 px, ~19 KB avg, with near-full coverage.
+
+The webpgf module is **embedded into the binary** (`include_bytes!`, like the CSS/JS) and
+served at `GET /webpgf.js` (`text/javascript`) and `GET /webpgf.wasm` (`application/wasm`,
+so the browser can stream-compile). Both carry a content-addressed `ETag` (the webpgf nix
+store hash) honoring `If-None-Match`→`304`, plus `Cache-Control: public, max-age=604800`.
+The embed path comes from the `WEBPGF_PATH` env var, which the flake sets to the `webpgf`
+derivation output for **both** `nix build` (`commonArgs`) and the dev shell — so plain
+`cargo build` inside `nix develop` embeds them too. *(Frontend wiring — IntersectionObserver
+→ fetch → wasm-decode in a worker → canvas — is still pending.)*
 
 ### Deliberately out of scope (this milestone)
 - Auth, any write operations, and search by date/rating/geo.

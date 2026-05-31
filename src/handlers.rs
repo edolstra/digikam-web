@@ -206,7 +206,7 @@ pub async fn get_photo_file(
 }
 
 /// Does the request's `If-None-Match` header match `etag` (or `*`)?
-fn if_none_match_matches(headers: &HeaderMap, etag: &HeaderValue) -> bool {
+pub(crate) fn if_none_match_matches(headers: &HeaderMap, etag: &HeaderValue) -> bool {
     let Some(value) = headers
         .get(header::IF_NONE_MATCH)
         .and_then(|v| v.to_str().ok())

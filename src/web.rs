@@ -1,15 +1,73 @@
 //! Server-rendered HTML frontend, built with [`maud`] (compile-time templates
 //! with automatic escaping). This is the seed of the browsing UI.
 
+use axum::body::{Body, Bytes};
 use axum::extract::{Path, Query, State};
+use axum::http::{header, HeaderMap, HeaderValue, StatusCode};
+use axum::response::Response;
 use maud::{html, Markup, PreEscaped, DOCTYPE};
 use serde::Deserialize;
 
 use crate::db::AppState;
 use crate::error::AppResult;
-use crate::handlers::run_blocking;
+use crate::handlers::{if_none_match_matches, run_blocking};
 use crate::models::{PhotoSummary, SubAlbum};
 use crate::query::{self, Filters, PhotoQuery, Rating};
+
+/// The webpgf wasm PGF decoder, embedded at build time. `WEBPGF_PATH` is set by
+/// the flake (and the dev shell) to the `nix build .#webpgf` output directory.
+const WEBPGF_PATH: &str = env!("WEBPGF_PATH");
+const WEBPGF_JS: &[u8] = include_bytes!(concat!(env!("WEBPGF_PATH"), "/webpgf.js"));
+const WEBPGF_WASM: &[u8] = include_bytes!(concat!(env!("WEBPGF_PATH"), "/webpgf.wasm"));
+
+/// `GET /webpgf.js` — the Emscripten loader for the PGF decoder.
+pub async fn webpgf_js(headers: HeaderMap) -> Response {
+    static_asset(&headers, WEBPGF_JS, "text/javascript; charset=utf-8", "js")
+}
+
+/// `GET /webpgf.wasm` — the decoder module. Served as `application/wasm` so the
+/// browser can stream-compile it.
+pub async fn webpgf_wasm(headers: HeaderMap) -> Response {
+    static_asset(&headers, WEBPGF_WASM, "application/wasm", "wasm")
+}
+
+/// Serve an embedded, immutable static asset with a content-addressed `ETag`
+/// (the webpgf nix store hash + asset name) honoring `If-None-Match` → `304`,
+/// plus a long `Cache-Control`. The store hash changes whenever webpgf is
+/// rebuilt, so the ETag busts the cache exactly when the bytes change.
+fn static_asset(
+    headers: &HeaderMap,
+    bytes: &'static [u8],
+    content_type: &'static str,
+    tag: &str,
+) -> Response {
+    let etag = HeaderValue::from_str(&format!("\"{}-{tag}\"", webpgf_build_id()));
+    if let Ok(etag) = &etag {
+        if if_none_match_matches(headers, etag) {
+            let mut not_modified = Response::new(Body::empty());
+            *not_modified.status_mut() = StatusCode::NOT_MODIFIED;
+            not_modified.headers_mut().insert(header::ETAG, etag.clone());
+            return not_modified;
+        }
+    }
+    let mut response = Response::new(Body::from(Bytes::from_static(bytes)));
+    let h = response.headers_mut();
+    h.insert(header::CONTENT_TYPE, HeaderValue::from_static(content_type));
+    h.insert(
+        header::CACHE_CONTROL,
+        HeaderValue::from_static("public, max-age=604800"),
+    );
+    if let Ok(etag) = etag {
+        h.insert(header::ETAG, etag);
+    }
+    response
+}
+
+/// A stable id for the embedded webpgf build: the basename of its nix store path
+/// (`<hash>-webpgf`), which changes only when the bytes do.
+fn webpgf_build_id() -> &'static str {
+    WEBPGF_PATH.rsplit('/').next().unwrap_or("webpgf")
+}
 
 /// Stylesheet for the frontend pages (inlined into each page's `<style>`).
 const STYLE: &str = include_str!("web.css");

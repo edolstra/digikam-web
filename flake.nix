@@ -34,6 +34,12 @@
             || (craneLib.filterCargoSources path type);
         };
 
+        # WebAssembly PGF thumbnail decoder (built from haplo/webpgf). Its
+        # `webpgf.{js,wasm}` are embedded into the binary via `include_bytes!`,
+        # so WEBPGF_PATH must point at this output at compile time — set it both
+        # for the crane build (commonArgs) and in the dev shell below.
+        webpgf = pkgs.callPackage ./nix/webpgf.nix { };
+
         commonArgs = {
           inherit src;
           strictDeps = true;
@@ -41,6 +47,7 @@
           # or pkg-config is required.
           nativeBuildInputs = [ ];
           buildInputs = [ ];
+          WEBPGF_PATH = webpgf;
         };
 
         cargoArtifacts = craneLib.buildDepsOnly commonArgs;
@@ -52,8 +59,7 @@
       {
         packages.default = digikam-browse;
         packages.digikam-browse = digikam-browse;
-        # WebAssembly PGF thumbnail decoder (built from haplo/webpgf).
-        packages.webpgf = pkgs.callPackage ./nix/webpgf.nix { };
+        packages.webpgf = webpgf;
 
         apps.default = flake-utils.lib.mkApp {
           drv = digikam-browse;
@@ -77,6 +83,9 @@
             pkgs.curl
             pkgs.jq
           ];
+          # `cargo build` in the dev shell embeds these the same way `nix build`
+          # does (commonArgs.WEBPGF_PATH), so iterating here picks up the assets.
+          WEBPGF_PATH = webpgf;
         };
       });
 }
