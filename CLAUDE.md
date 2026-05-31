@@ -27,14 +27,16 @@ Config (CLI flags or env vars):
 
 ## API
 
+All endpoints are served under the `/api` prefix.
+
 | Route | Notes |
 |-------|-------|
-| `GET /photos?album=&tags=&recursive&limit=&offset=` | Filtered, paginated list. `Page<PhotoSummary>` = `{total, limit, offset, items}`. |
-| `GET /photos/:id` | `PhotoDetail` (summary + tag names + lat/long). |
-| `GET /photos/:id/file` | Original bytes, range-aware (via `tower_http::services::ServeFile`). |
-| `GET /albums` | Flat list of all albums (`{id, path, root}`). |
-| `GET /tags` | Tag **tree** (`{id, name, children}`), internal tags excluded. |
-| `GET /health` | Liveness. |
+| `GET /api/photos?album=&tags=&recursive&limit=&offset=` | Filtered, paginated list. `Page<PhotoSummary>` = `{total, limit, offset, items}`. |
+| `GET /api/photos/:id` | `PhotoDetail` (summary + tag names + lat/long). |
+| `GET /api/photos/:id/file` | Original bytes, range-aware (via `tower_http::services::ServeFile`). |
+| `GET /api/albums` | Flat list of all albums (`{id, path, root}`). |
+| `GET /api/tags` | Tag **tree** (`{id, name, children}`), internal tags excluded. |
+| `GET /api/health` | Liveness. |
 
 ### Query semantics
 - **`album=/Root/rel`** — the first path segment is the `AlbumRoots.label`; the

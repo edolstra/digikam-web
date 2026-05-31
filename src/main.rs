@@ -41,13 +41,16 @@ async fn main() -> Result<()> {
         roots: Arc::new(roots),
     };
 
-    let app = Router::new()
+    let api = Router::new()
         .route("/health", get(handlers::health))
         .route("/photos", get(handlers::list_photos))
         .route("/photos/:id", get(handlers::get_photo))
         .route("/photos/:id/file", get(handlers::get_photo_file))
         .route("/albums", get(handlers::list_albums))
-        .route("/tags", get(handlers::list_tags))
+        .route("/tags", get(handlers::list_tags));
+
+    let app = Router::new()
+        .nest("/api", api)
         .layer(TraceLayer::new_for_http())
         .layer(CorsLayer::permissive())
         .with_state(state);
