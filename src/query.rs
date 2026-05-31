@@ -387,10 +387,7 @@ pub fn list_subalbums(
 /// List the album roots as if they were sub-albums of a virtual top-level album,
 /// each with a cover (newest non-video image in the whole root) and total photo
 /// count, sorted by label. Mirrors [`list_subalbums`] but groups by `albumRoot`.
-pub fn list_roots(
-    conn: &Connection,
-    roots: &HashMap<i64, AlbumRoot>,
-) -> AppResult<Vec<SubAlbum>> {
+pub fn list_roots(conn: &Connection, roots: &HashMap<i64, AlbumRoot>) -> AppResult<Vec<SubAlbum>> {
     let mut stmt = conn.prepare_cached(
         "WITH matched AS ( \
            SELECT i.id AS image_id, i.name AS image_name, i.category AS category, \

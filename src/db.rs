@@ -60,8 +60,7 @@ pub fn build_pool(database: &Path, trace_sql: bool) -> Result<Pool> {
 /// `volumeid:?path=/home/eelco/Images/Photos&fileuuid=...`; we extract the
 /// `path=` query parameter and join it with `specificPath`.
 pub fn load_roots(conn: &PooledConn) -> Result<HashMap<i64, AlbumRoot>> {
-    let mut stmt =
-        conn.prepare("SELECT id, label, identifier, specificPath FROM AlbumRoots")?;
+    let mut stmt = conn.prepare("SELECT id, label, identifier, specificPath FROM AlbumRoots")?;
     let rows = stmt.query_map([], |row| {
         let id: i64 = row.get(0)?;
         let label: Option<String> = row.get(1)?;

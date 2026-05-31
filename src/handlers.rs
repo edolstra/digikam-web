@@ -24,22 +24,13 @@ pub async fn health() -> impl IntoResponse {
 pub struct PhotoParams {
     album: Option<String>,
     tags: Option<String>,
-    /// Present (e.g. `?recursive` or `?recursive=true`) to include sub-albums.
-    recursive: Option<String>,
+    #[serde(default)]
+    recursive: bool,
     #[serde(default)]
     min_rating: Rating,
     limit: Option<i64>,
     offset: Option<i64>,
 }
-
-/// Interpret a query-string flag: present means true unless it's a falsey value.
-fn flag(value: Option<&str>) -> bool {
-    match value {
-        Some(v) => !matches!(v.trim(), "false" | "0" | "no"),
-        None => false,
-    }
-}
-
 
 /// `GET /photos?album=/Root/path&tags=a,b&recursive&limit=&offset=`
 pub async fn list_photos(
@@ -60,7 +51,7 @@ pub async fn list_photos(
 
     let q = PhotoQuery {
         album: params.album.filter(|a| !a.is_empty()),
-        recursive: flag(params.recursive.as_deref()),
+        recursive: params.recursive,
         tags,
         min_rating: params.min_rating,
         limit: params.limit.unwrap_or(DEFAULT_LIMIT).clamp(1, MAX_LIMIT),
@@ -192,7 +183,9 @@ pub async fn get_photo_file(
         if if_none_match_matches(request.headers(), etag) {
             let mut not_modified = Response::new(axum::body::Body::empty());
             *not_modified.status_mut() = StatusCode::NOT_MODIFIED;
-            not_modified.headers_mut().insert(header::ETAG, etag.clone());
+            not_modified
+                .headers_mut()
+                .insert(header::ETAG, etag.clone());
             return Ok(not_modified);
         }
     }
@@ -212,7 +205,10 @@ pub async fn get_photo_file(
 
 /// Does the request's `If-None-Match` header match `etag` (or `*`)?
 fn if_none_match_matches(headers: &HeaderMap, etag: &HeaderValue) -> bool {
-    let Some(value) = headers.get(header::IF_NONE_MATCH).and_then(|v| v.to_str().ok()) else {
+    let Some(value) = headers
+        .get(header::IF_NONE_MATCH)
+        .and_then(|v| v.to_str().ok())
+    else {
         return false;
     };
     let want = strip_weak(etag.to_str().unwrap_or_default());
@@ -262,8 +258,9 @@ pub async fn list_subalbums(
 /// `GET /albums`
 pub async fn list_albums(State(state): State<AppState>) -> AppResult<Json<Vec<AlbumNode>>> {
     let albums = run_blocking(&state, |conn, state| {
-        let mut stmt =
-            conn.prepare("SELECT id, albumRoot, relativePath FROM Albums ORDER BY albumRoot, relativePath")?;
+        let mut stmt = conn.prepare(
+            "SELECT id, albumRoot, relativePath FROM Albums ORDER BY albumRoot, relativePath",
+        )?;
         let albums = stmt
             .query_map([], |row| {
                 Ok((

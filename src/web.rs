@@ -183,7 +183,8 @@ fn rating_selector(album: &str, filters: &Filters) -> String {
     let mut html = String::from("<span class=\"rating\">");
     for k in 1..=5 {
         // Toggle off (back to Rating(0)) when clicking the active threshold.
-        let target = filters.with_min_rating(Rating::new(if cur == k { 0 } else { k }).unwrap_or_default());
+        let target =
+            filters.with_min_rating(Rating::new(if cur == k { 0 } else { k }).unwrap_or_default());
         let (class, star) = if k <= cur {
             (" class=\"on\"", '\u{2605}')
         } else {
@@ -344,7 +345,10 @@ async fn render(
                     content.push_str("</div>\n");
                 }
                 let heading = day.unwrap_or("Unknown date");
-                content.push_str(&format!("<h2>{}</h2>\n<div class=\"grid\">\n", escape_html(heading)));
+                content.push_str(&format!(
+                    "<h2>{}</h2>\n<div class=\"grid\">\n",
+                    escape_html(heading)
+                ));
                 grid_open = true;
                 current_day = day;
             }
@@ -392,7 +396,10 @@ mod tests {
 
     #[test]
     fn escapes_html() {
-        assert_eq!(escape_html("a & b <c> \"d\""), "a &amp; b &lt;c&gt; &quot;d&quot;");
+        assert_eq!(
+            escape_html("a & b <c> \"d\""),
+            "a &amp; b &lt;c&gt; &quot;d&quot;"
+        );
     }
 
     #[test]
