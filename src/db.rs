@@ -21,6 +21,8 @@ pub struct AlbumRoot {
 #[derive(Clone)]
 pub struct AppState {
     pub pool: Pool,
+    /// Read-only pool for Digikam's `thumbnails-digikam.db`, if it was found.
+    pub thumbs: Option<Pool>,
     pub roots: Arc<HashMap<i64, AlbumRoot>>,
 }
 

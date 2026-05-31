@@ -4,6 +4,7 @@ use axum::extract::{Path, Query, State};
 use axum::http::{header, HeaderMap, HeaderValue, Request, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
+use rusqlite::OptionalExtension;
 use serde::Deserialize;
 use serde_json::json;
 use tower::ServiceExt;
@@ -222,6 +223,81 @@ fn if_none_match_matches(headers: &HeaderMap, etag: &HeaderValue) -> bool {
 /// Strip a weak-validator `W/` prefix for comparison purposes.
 fn strip_weak(tag: &str) -> &str {
     tag.strip_prefix("W/").unwrap_or(tag)
+}
+
+/// `GET /photos/:id/thumbnail` — serve Digikam's stored thumbnail **as-is**: the
+/// raw PGF blob from `thumbnails-digikam.db`, looked up by the image's
+/// `uniqueHash` + `fileSize`. The client decodes the PGF (wasm). Sends a strong
+/// `ETag` (content hash) honoring `If-None-Match`, and an `X-Orientation` header
+/// with Digikam's `orientationHint` (EXIF orientation) for client-side rotation.
+///
+/// `404` when the thumbnails DB is absent, the image is unknown, or it has no
+/// cached thumbnail — the client then falls back to `/file`.
+pub async fn get_photo_thumbnail(
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+    headers: HeaderMap,
+) -> AppResult<Response> {
+    let (hash, data, orientation) = run_blocking(&state, move |conn, state| {
+        // The image's content key (uniqueHash + fileSize) from the main DB.
+        let row: Option<(Option<String>, Option<i64>)> = conn
+            .query_row(
+                "SELECT uniqueHash, fileSize FROM Images WHERE id = ?1 AND status = 1",
+                [id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()?;
+        let (hash, size) = match row {
+            Some((Some(hash), Some(size))) => (hash, size),
+            _ => return Err(AppError::NotFound(format!("photo {id} not found"))),
+        };
+
+        let Some(thumbs) = state.thumbs.as_ref() else {
+            return Err(AppError::NotFound("thumbnails database not available".into()));
+        };
+        let tconn = thumbs.get()?;
+        let thumb: Option<(Vec<u8>, Option<i64>)> = tconn
+            .query_row(
+                "SELECT t.data, t.orientationHint FROM UniqueHashes u \
+                 JOIN Thumbnails t ON t.id = u.thumbId \
+                 WHERE u.uniqueHash = ?1 AND u.fileSize = ?2",
+                rusqlite::params![hash, size],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()?;
+        match thumb {
+            Some((data, orientation)) => Ok((hash, data, orientation)),
+            None => Err(AppError::NotFound(format!("no thumbnail for photo {id}"))),
+        }
+    })
+    .await?;
+
+    // Content-based ETag (distinct from the /file ETag via the suffix).
+    let etag = HeaderValue::from_str(&format!("\"{hash}-thumb\"")).ok();
+    if let Some(etag) = &etag {
+        if if_none_match_matches(&headers, etag) {
+            let mut not_modified = Response::new(axum::body::Body::empty());
+            *not_modified.status_mut() = StatusCode::NOT_MODIFIED;
+            not_modified.headers_mut().insert(header::ETAG, etag.clone());
+            return Ok(not_modified);
+        }
+    }
+
+    let mut response = Response::new(axum::body::Body::from(data));
+    let h = response.headers_mut();
+    h.insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("application/octet-stream"),
+    );
+    if let Some(etag) = etag {
+        h.insert(header::ETAG, etag);
+    }
+    if let Some(orientation) = orientation {
+        if let Ok(v) = HeaderValue::from_str(&orientation.to_string()) {
+            h.insert("x-orientation", v);
+        }
+    }
+    Ok(response)
 }
 
 /// Query parameters for `GET /subalbums`.

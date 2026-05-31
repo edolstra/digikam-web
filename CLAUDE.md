@@ -19,6 +19,8 @@ nix flake check                      # build + clippy (-D warnings)
 Config (CLI flags or env vars):
 - `--database` / `DIGIKAM_DB` — path to `digikam4.db` (default `~/.local/share/digikam/db/digikam4.db`).
 - `--listen` / `LISTEN_ADDR` — bind address (default `127.0.0.1:8080`).
+- `--thumbnail-database` / `THUMBNAIL_DB` — path to `thumbnails-digikam.db` (default:
+  alongside `--database`). Optional; if missing, `/thumbnail` returns `404`.
 - `--trace-sql` / `TRACE_SQL` — log every executed SQL statement (with bound values
   inlined) at `info` under the `digikam_browse::sql` target. Off by default.
 
@@ -34,6 +36,7 @@ All endpoints are served under the `/api` prefix.
 | `GET /api/photos?album=&tags=&recursive=&min_rating=&limit=&offset=` | Filtered, paginated list. `Page<PhotoSummary>` = `{total, limit, offset, items}`. `PhotoSummary.is_video` is true for videos (Digikam `category=2`). |
 | `GET /api/photos/:id` | `PhotoDetail` (summary + tag names + lat/long). |
 | `GET /api/photos/:id/file` | Original bytes, range-aware (via `tower_http::services::ServeFile`). Sends a strong `ETag` from the image's `uniqueHash`; a matching `If-None-Match` (or `*`) returns `304`. |
+| `GET /api/photos/:id/thumbnail` | Digikam's stored thumbnail as-is: the **raw PGF blob** from `thumbnails-digikam.db` (looked up by `uniqueHash`+`fileSize`), for the client to decode in wasm (see [nix/webpgf.nix](nix/webpgf.nix)). Strong `ETag` (+ `If-None-Match`→`304`); `X-Orientation` header carries Digikam's `orientationHint` (EXIF orientation) for client-side rotation. `404` when the thumbnails DB is absent / the image has no cached thumbnail → client falls back to `/file`. |
 | `GET /api/albums` | Flat list of all albums (`{id, path, root}`). |
 | `GET /api/subalbums?album=/Root/rel&min_rating=` | Direct sub-albums of an album as `[{name, path, photo_count, cover: {id, name} \| null}]`, sorted by most recent photo (newest first). An absent/empty `album` lists the album roots. Cover = newest **image** in the sub-album's whole subtree (videos, `category=2`, are never covers; a video-only sub-album has `cover: null`); `photo_count` is the recursive count incl. videos. `min_rating` (0..=5) filters the cover, count, and which sub-albums appear alike. One query; albums with no matching photos anywhere are omitted. |
 | `GET /api/tags` | Tag **tree** (`{id, name, children}`), internal tags excluded. |
@@ -135,10 +138,18 @@ This is the seed of the browsing UI (planned to grow into Leptos later).
   because tag matching is exact).
 - `ImageTags(imageid, tagid)`, `ImagePositions(imageid, latitudeNumber, longitudeNumber)`.
 
+### Thumbnails
+Digikam's `thumbnails-digikam.db` blobs are **PGF** (a wavelet format browsers can't
+decode natively) and its `FilePaths` are stale (`/mm/Images/…` vs the real
+`/home/eelco/Images/…`) — so we key on `uniqueHash`+`fileSize`, not paths. Approach:
+`/api/photos/:id/thumbnail` streams the raw PGF blob untouched; the **client decodes it
+in wasm** via [`webpgf`](https://github.com/haplo/webpgf) (built by [nix/webpgf.nix](nix/webpgf.nix),
+`nix build .#webpgf`). webpgf already maps libpgf's BGRA → RGBA and yields an `ImageData`;
+it does **not** apply orientation, so the client must rotate per the `X-Orientation`
+header. Thumbnails are ≤256 px, ~19 KB avg, with near-full coverage. *(Frontend wiring —
+IntersectionObserver → fetch → wasm-decode in a worker → canvas — is still pending.)*
+
 ### Deliberately out of scope (this milestone)
-- **Thumbnails** — Digikam's `thumbnails-digikam.db` is *not* reused: its blobs are
-  PGF-encoded and its `FilePaths` are stale (`/mm/Images/…` vs the real
-  `/home/eelco/Images/…`). On-the-fly generation is the planned approach later.
 - Auth, any write operations, and search by date/rating/geo.
 
 ## Source layout

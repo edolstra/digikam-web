@@ -38,8 +38,23 @@ async fn main() -> Result<()> {
     };
     tracing::info!(roots = roots.len(), "loaded album roots");
 
+    // The thumbnails DB is optional: without it, /thumbnail just 404s.
+    let thumb_db = config.thumbnail_db_path();
+    let thumbs = match db::build_pool(&thumb_db, config.trace_sql) {
+        Ok(p) => {
+            tracing::info!(path = %thumb_db.display(), "opened thumbnails database (read-only)");
+            Some(p)
+        }
+        Err(e) => {
+            tracing::warn!(path = %thumb_db.display(), error = %e,
+                "thumbnails database unavailable; /thumbnail will return 404");
+            None
+        }
+    };
+
     let state = AppState {
         pool,
+        thumbs,
         roots: Arc::new(roots),
     };
 
@@ -48,6 +63,7 @@ async fn main() -> Result<()> {
         .route("/photos", get(handlers::list_photos))
         .route("/photos/:id", get(handlers::get_photo))
         .route("/photos/:id/file", get(handlers::get_photo_file))
+        .route("/photos/:id/thumbnail", get(handlers::get_photo_thumbnail))
         .route("/albums", get(handlers::list_albums))
         .route("/subalbums", get(handlers::list_subalbums))
         .route("/tags", get(handlers::list_tags));
