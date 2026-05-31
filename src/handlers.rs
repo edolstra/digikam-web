@@ -1,0 +1,276 @@
+use std::collections::HashMap;
+
+use axum::extract::{Path, Query, State};
+use axum::http::Request;
+use axum::response::{IntoResponse, Response};
+use axum::Json;
+use serde::Deserialize;
+use serde_json::json;
+use tower::ServiceExt;
+use tower_http::services::ServeFile;
+
+use crate::db::{album_display_path, image_abs_path, AppState, PooledConn};
+use crate::error::{AppError, AppResult};
+use crate::models::{AlbumNode, Page, PhotoDetail, PhotoSummary, TagNode};
+use crate::query::{self, PhotoQuery, DEFAULT_LIMIT, MAX_LIMIT};
+
+/// `GET /health`
+pub async fn health() -> impl IntoResponse {
+    Json(json!({ "status": "ok" }))
+}
+
+/// Raw query parameters for `GET /photos`.
+#[derive(Debug, Deserialize)]
+pub struct PhotoParams {
+    album: Option<String>,
+    tags: Option<String>,
+    limit: Option<i64>,
+    offset: Option<i64>,
+}
+
+/// `GET /photos?album=/Root/path&tags=a,b&limit=&offset=`
+pub async fn list_photos(
+    State(state): State<AppState>,
+    Query(params): Query<PhotoParams>,
+) -> AppResult<Json<Page<PhotoSummary>>> {
+    let tags = params
+        .tags
+        .as_deref()
+        .map(|s| {
+            s.split(',')
+                .map(str::trim)
+                .filter(|t| !t.is_empty())
+                .map(str::to_string)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+
+    let q = PhotoQuery {
+        album: params.album.filter(|a| !a.is_empty()),
+        tags,
+        limit: params.limit.unwrap_or(DEFAULT_LIMIT).clamp(1, MAX_LIMIT),
+        offset: params.offset.unwrap_or(0).max(0),
+    };
+
+    let page = run_blocking(&state, move |conn, state| {
+        query::list_photos(conn, &state.roots, &q)
+    })
+    .await?;
+
+    Ok(Json(page))
+}
+
+/// `GET /photos/:id`
+pub async fn get_photo(
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+) -> AppResult<Json<PhotoDetail>> {
+    let detail = run_blocking(&state, move |conn, state| {
+        let mut stmt = conn.prepare(
+            "SELECT i.id, i.name, a.albumRoot, a.relativePath, i.fileSize, \
+                    ii.format, ii.width, ii.height, ii.rating, ii.creationDate, \
+                    p.latitudeNumber, p.longitudeNumber \
+             FROM Images i \
+             JOIN Albums a ON a.id = i.album \
+             JOIN AlbumRoots r ON r.id = a.albumRoot \
+             LEFT JOIN ImageInformation ii ON ii.imageid = i.id \
+             LEFT JOIN ImagePositions p ON p.imageid = i.id \
+             WHERE i.id = ?1 AND i.status = 1",
+        )?;
+
+        let row = stmt
+            .query_row([id], |row| {
+                let album_root: i64 = row.get(2)?;
+                let relative_path: String = row.get(3)?;
+                let album_path = state
+                    .roots
+                    .get(&album_root)
+                    .map(|r| album_display_path(r, &relative_path))
+                    .unwrap_or_else(|| relative_path.clone());
+                let name: String = row.get(1)?;
+                let mime = mime_guess::from_path(&name)
+                    .first()
+                    .map(|m| m.essence_str().to_string());
+                Ok(PhotoDetail {
+                    summary: PhotoSummary {
+                        id: row.get::<_, i64>(0)? as u64,
+                        name,
+                        album_path,
+                        file_size: opt_u64(row.get(4)?),
+                        format: row.get(5)?,
+                        width: opt_u64(row.get(6)?),
+                        height: opt_u64(row.get(7)?),
+                        rating: opt_u64(row.get(8)?),
+                        creation_date: row.get(9)?,
+                        mime,
+                    },
+                    tags: Vec::new(),
+                    latitude: row.get(10)?,
+                    longitude: row.get(11)?,
+                })
+            })
+            .map_err(|e| match e {
+                rusqlite::Error::QueryReturnedNoRows => {
+                    AppError::NotFound(format!("photo {id} not found"))
+                }
+                other => AppError::from(other),
+            })?;
+
+        // Attach tag names.
+        let mut tag_stmt = conn.prepare_cached(
+            "SELECT t.name FROM ImageTags it JOIN Tags t ON t.id = it.tagid \
+             WHERE it.imageid = ?1 ORDER BY t.name",
+        )?;
+        let tags = tag_stmt
+            .query_map([id], |r| r.get::<_, String>(0))?
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(PhotoDetail { tags, ..row })
+    })
+    .await?;
+
+    Ok(Json(detail))
+}
+
+/// `GET /photos/:id/file` — serve the original image bytes (range-aware).
+pub async fn get_photo_file(
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+    request: Request<axum::body::Body>,
+) -> AppResult<Response> {
+    let path = run_blocking(&state, move |conn, state| {
+        let (album_root, relative_path, name): (i64, String, String) = conn
+            .query_row(
+                "SELECT a.albumRoot, a.relativePath, i.name FROM Images i \
+                 JOIN Albums a ON a.id = i.album \
+                 WHERE i.id = ?1 AND i.status = 1",
+                [id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .map_err(|e| match e {
+                rusqlite::Error::QueryReturnedNoRows => {
+                    AppError::NotFound(format!("photo {id} not found"))
+                }
+                other => AppError::from(other),
+            })?;
+
+        let root = state
+            .roots
+            .get(&album_root)
+            .ok_or_else(|| AppError::NotFound(format!("album root {album_root} unknown")))?;
+        Ok(image_abs_path(root, &relative_path, &name))
+    })
+    .await?;
+
+    let response = ServeFile::new(&path)
+        .oneshot(request)
+        .await
+        .map_err(|e| AppError::Internal(anyhow::anyhow!("file service error: {e}")))?;
+
+    Ok(response.map(axum::body::Body::new))
+}
+
+/// `GET /albums`
+pub async fn list_albums(State(state): State<AppState>) -> AppResult<Json<Vec<AlbumNode>>> {
+    let albums = run_blocking(&state, |conn, state| {
+        let mut stmt =
+            conn.prepare("SELECT id, albumRoot, relativePath FROM Albums ORDER BY albumRoot, relativePath")?;
+        let albums = stmt
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            })?
+            .collect::<Result<Vec<_>, _>>()?
+            .into_iter()
+            .filter_map(|(id, album_root, relative_path)| {
+                let root = state.roots.get(&album_root)?;
+                Some(AlbumNode {
+                    id: id as u64,
+                    path: album_display_path(root, &relative_path),
+                    root: root.label.clone(),
+                })
+            })
+            .collect::<Vec<_>>();
+        Ok(albums)
+    })
+    .await?;
+
+    Ok(Json(albums))
+}
+
+/// `GET /tags` — the tag hierarchy as a tree, excluding Digikam's internal tags.
+pub async fn list_tags(State(state): State<AppState>) -> AppResult<Json<Vec<TagNode>>> {
+    /// Digikam's internal tag root (`_Digikam_Internal_Tags_`); excluded from output.
+    const INTERNAL_TAG_ROOT: i64 = 1;
+
+    let tree = run_blocking(&state, |conn, _state| {
+        let mut stmt = conn.prepare("SELECT id, pid, name FROM Tags ORDER BY name")?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let mut children: HashMap<i64, Vec<(i64, String)>> = HashMap::new();
+        for (id, pid, name) in rows {
+            children.entry(pid).or_default().push((id, name));
+        }
+
+        fn build(id: i64, name: String, children: &HashMap<i64, Vec<(i64, String)>>) -> TagNode {
+            let kids = children
+                .get(&id)
+                .map(|cs| {
+                    cs.iter()
+                        .map(|(cid, cname)| build(*cid, cname.clone(), children))
+                        .collect()
+                })
+                .unwrap_or_default();
+            TagNode {
+                id: id as u64,
+                name,
+                children: kids,
+            }
+        }
+
+        let tree = children
+            .get(&0)
+            .map(|tops| {
+                tops.iter()
+                    .filter(|(id, _)| *id != INTERNAL_TAG_ROOT)
+                    .map(|(id, name)| build(*id, name.clone(), &children))
+                    .collect()
+            })
+            .unwrap_or_default();
+        Ok(tree)
+    })
+    .await?;
+
+    Ok(Json(tree))
+}
+
+/// Map a non-negative integer column to `Option<u64>`, treating negatives as absent.
+fn opt_u64(v: Option<i64>) -> Option<u64> {
+    v.and_then(|n| u64::try_from(n).ok())
+}
+
+/// Run a blocking database closure on the blocking thread pool.
+async fn run_blocking<F, T>(state: &AppState, f: F) -> AppResult<T>
+where
+    F: FnOnce(&PooledConn, &AppState) -> AppResult<T> + Send + 'static,
+    T: Send + 'static,
+{
+    let state = state.clone();
+    tokio::task::spawn_blocking(move || {
+        let conn = state.pool.get()?;
+        f(&conn, &state)
+    })
+    .await
+    .map_err(|e| AppError::Internal(anyhow::anyhow!("task join error: {e}")))?
+}
