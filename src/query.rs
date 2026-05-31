@@ -390,8 +390,10 @@ pub fn list_subalbums(
          ORDER BY c.recent DESC, c.bucket COLLATE NOCASE"
     );
 
-    let bound: Vec<(&str, &dyn rusqlite::ToSql)> =
-        params.iter().map(|(n, v)| (*n, v as &dyn rusqlite::ToSql)).collect();
+    let bound: Vec<(&str, &dyn rusqlite::ToSql)> = params
+        .iter()
+        .map(|(n, v)| (*n, v as &dyn rusqlite::ToSql))
+        .collect();
     let mut stmt = conn.prepare_cached(&sql)?;
     let rows = stmt.query_map(&bound[..], |row| {
         Ok((

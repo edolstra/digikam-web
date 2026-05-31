@@ -378,8 +378,11 @@ mod tests {
 
     #[test]
     fn builds_breadcrumb() {
-        let html = breadcrumb(&segs(&["Photos", "Lego", "Porsche911"]), &Filters::default())
-            .into_string();
+        let html = breadcrumb(
+            &segs(&["Photos", "Lego", "Porsche911"]),
+            &Filters::default(),
+        )
+        .into_string();
         assert!(html.contains("<a href=\"/photos/Photos\">Photos</a>"));
         assert!(html.contains("<a href=\"/photos/Photos/Lego\">Lego</a>"));
         assert!(html.contains("<a href=\"/photos/Photos/Lego/Porsche911\">Porsche911</a>"));

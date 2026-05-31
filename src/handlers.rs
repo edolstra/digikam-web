@@ -261,7 +261,9 @@ pub async fn get_photo_thumbnail(
         };
 
         let Some(thumbs) = state.thumbs.as_ref() else {
-            return Err(AppError::NotFound("thumbnails database not available".into()));
+            return Err(AppError::NotFound(
+                "thumbnails database not available".into(),
+            ));
         };
         let tconn = thumbs.get()?;
         let thumb: Option<(Vec<u8>, Option<i64>)> = tconn
