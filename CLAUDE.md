@@ -45,7 +45,7 @@ This is the seed of the browsing UI (planned to grow into Leptos later).
 
 | Route | Notes |
 |-------|-------|
-| `GET /photos/<album path>` | e.g. `/photos/Photos/Lego/Porsche911`. Plain HTML page listing the file names of the photos directly in that album (non-recursive). |
+| `GET /photos/<album path>` | e.g. `/photos/Photos/Lego/Porsche911`. HTML photo grid of the photos directly in that album (non-recursive), grouped by day (newest first), fixed-height and wrapping left-to-right. Images load from `/api/photos/:id/file` directly (no thumbnails yet) with `loading="lazy"`. No pagination yet. |
 
 ### Query semantics
 - **`album=/Root/rel`** — the first path segment is the `AlbumRoots.label`; the

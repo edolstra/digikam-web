@@ -11,9 +11,28 @@ use crate::error::AppResult;
 use crate::handlers::run_blocking;
 use crate::query::{self, PhotoQuery};
 
+/// Inline stylesheet for the album grid. Photos are fixed-height and wrap
+/// left-to-right, top-to-bottom; each day forms its own grid under a heading.
+const STYLE: &str = "\
+body { font-family: sans-serif; margin: 1rem; background: #111; color: #eee; }
+h1 { font-size: 1.2rem; font-weight: 600; }
+h2 { font-size: 1rem; margin: 1.5rem 0 0.5rem; padding-bottom: 0.25rem;
+     border-bottom: 1px solid #333; color: #aaa; }
+.count { color: #888; font-size: 0.85rem; }
+.grid { display: flex; flex-wrap: wrap; gap: 4px; align-items: flex-end; }
+.grid img { height: 200px; width: auto; display: block; background: #222; }
+";
+
+/// The day a photo belongs to (`YYYY-MM-DD`), or `None` if it has no date.
+fn photo_day(creation_date: Option<&str>) -> Option<&str> {
+    creation_date.filter(|d| d.len() >= 10).map(|d| &d[..10])
+}
+
 /// `GET /photos/<album path>` — e.g. `/photos/Photos/Lego/Porsche911`.
 ///
-/// Lists the photos directly in that album (non-recursive) as a plain HTML page.
+/// Renders the photos directly in that album (non-recursive) as a grid,
+/// grouped by day (newest first). Uses the original-file endpoint directly;
+/// no thumbnails or pagination yet.
 pub async fn album_page(
     State(state): State<AppState>,
     Path(path): Path<String>,
@@ -36,17 +55,35 @@ pub async fn album_page(
     })
     .await?;
 
-    let mut list = String::new();
+    // `list_photos` already orders newest-first, so photos of the same day are
+    // contiguous: we can group them by walking the list once.
+    let mut content = String::new();
     if page.items.is_empty() {
-        list.push_str("<p>No photos in this album.</p>");
+        content.push_str("<p>No photos in this album.</p>");
     } else {
-        list.push_str("<ul>");
+        let mut current_day: Option<&str> = None;
+        let mut grid_open = false;
         for photo in &page.items {
-            list.push_str("<li>");
-            list.push_str(&escape_html(&photo.name));
-            list.push_str("</li>");
+            let day = photo_day(photo.creation_date.as_deref());
+            if day != current_day {
+                if grid_open {
+                    content.push_str("</div>\n");
+                }
+                let heading = day.unwrap_or("Unknown date");
+                content.push_str(&format!("<h2>{}</h2>\n<div class=\"grid\">\n", escape_html(heading)));
+                grid_open = true;
+                current_day = day;
+            }
+            // Originals are full-size, so let the browser load lazily.
+            content.push_str(&format!(
+                "<img src=\"/api/photos/{id}/file\" alt=\"{alt}\" loading=\"lazy\">\n",
+                id = photo.id,
+                alt = escape_html(&photo.name),
+            ));
         }
-        list.push_str("</ul>");
+        if grid_open {
+            content.push_str("</div>\n");
+        }
     }
 
     let title = escape_html(&album);
@@ -57,11 +94,12 @@ pub async fn album_page(
          <meta charset=\"utf-8\">\n\
          <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n\
          <title>{title}</title>\n\
+         <style>\n{STYLE}</style>\n\
          </head>\n\
          <body>\n\
          <h1>{title}</h1>\n\
-         <p>{count} photo(s)</p>\n\
-         {list}\n\
+         <p class=\"count\">{count} photo(s)</p>\n\
+         {content}\
          </body>\n\
          </html>\n",
         count = page.total,
@@ -93,5 +131,13 @@ mod tests {
     #[test]
     fn escapes_html() {
         assert_eq!(escape_html("a & b <c> \"d\""), "a &amp; b &lt;c&gt; &quot;d&quot;");
+    }
+
+    #[test]
+    fn extracts_day() {
+        assert_eq!(photo_day(Some("2011-11-06T07:40:07")), Some("2011-11-06"));
+        assert_eq!(photo_day(Some("2026-05-31")), Some("2026-05-31"));
+        assert_eq!(photo_day(Some("bad")), None);
+        assert_eq!(photo_day(None), None);
     }
 }
