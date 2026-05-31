@@ -12,7 +12,6 @@ use anyhow::{Context, Result};
 use axum::routing::get;
 use axum::Router;
 use clap::Parser;
-use tower_http::cors::CorsLayer;
 use tower_http::trace::{DefaultMakeSpan, DefaultOnResponse, TraceLayer};
 use tracing::Level;
 
@@ -82,7 +81,6 @@ async fn main() -> Result<()> {
                 .make_span_with(DefaultMakeSpan::new().level(Level::INFO))
                 .on_response(DefaultOnResponse::new().level(Level::INFO)),
         )
-        .layer(CorsLayer::permissive())
         .with_state(state);
 
     let listener = tokio::net::TcpListener::bind(config.listen)

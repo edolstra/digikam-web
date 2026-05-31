@@ -10,7 +10,7 @@ use serde::Deserialize;
 
 use crate::db::AppState;
 use crate::error::AppResult;
-use crate::handlers::{if_none_match_matches, run_blocking};
+use crate::handlers::{if_none_match_matches, run_blocking, IMMUTABLE_CACHE_CONTROL};
 use crate::models::{PhotoSummary, SubAlbum};
 use crate::query::{self, Filters, PhotoQuery, Rating};
 
@@ -42,21 +42,21 @@ fn static_asset(
     tag: &str,
 ) -> Response {
     let etag = HeaderValue::from_str(&format!("\"{}-{tag}\"", webpgf_build_id()));
+    let cache_control = HeaderValue::from_static(IMMUTABLE_CACHE_CONTROL);
     if let Ok(etag) = &etag {
         if if_none_match_matches(headers, etag) {
             let mut not_modified = Response::new(Body::empty());
             *not_modified.status_mut() = StatusCode::NOT_MODIFIED;
-            not_modified.headers_mut().insert(header::ETAG, etag.clone());
+            let h = not_modified.headers_mut();
+            h.insert(header::ETAG, etag.clone());
+            h.insert(header::CACHE_CONTROL, cache_control);
             return not_modified;
         }
     }
     let mut response = Response::new(Body::from(Bytes::from_static(bytes)));
     let h = response.headers_mut();
     h.insert(header::CONTENT_TYPE, HeaderValue::from_static(content_type));
-    h.insert(
-        header::CACHE_CONTROL,
-        HeaderValue::from_static("public, max-age=604800"),
-    );
+    h.insert(header::CACHE_CONTROL, cache_control);
     if let Ok(etag) = etag {
         h.insert(header::ETAG, etag);
     }

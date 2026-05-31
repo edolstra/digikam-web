@@ -36,7 +36,7 @@ All endpoints are served under the `/api` prefix.
 | `GET /api/photos?album=&tags=&recursive=&min_rating=&limit=&offset=` | Filtered, paginated list. `Page<PhotoSummary>` = `{total, limit, offset, items}`. `PhotoSummary.is_video` is true for videos (Digikam `category=2`). |
 | `GET /api/photos/:id` | `PhotoDetail` (summary + tag names + lat/long). |
 | `GET /api/photos/:id/file` | Original bytes, range-aware (via `tower_http::services::ServeFile`). Sends a strong `ETag` from the image's `uniqueHash`; a matching `If-None-Match` (or `*`) returns `304`. |
-| `GET /api/photos/:id/thumbnail` | Digikam's stored thumbnail as-is: the **raw PGF blob** from `thumbnails-digikam.db` (looked up by `uniqueHash`+`fileSize`), for the client to decode in wasm (see [nix/webpgf.nix](nix/webpgf.nix)). Strong `ETag` (+ `If-None-Match`→`304`); `X-Orientation` header carries Digikam's `orientationHint` (EXIF orientation) for client-side rotation. `404` when the thumbnails DB is absent / the image has no cached thumbnail → client falls back to `/file`. |
+| `GET /api/photos/:id/thumbnail` | Digikam's stored thumbnail as-is: the **raw PGF blob** from `thumbnails-digikam.db` (looked up by `uniqueHash`+`fileSize`), for the client to decode in wasm (see [nix/webpgf.nix](nix/webpgf.nix)). Strong `ETag` (+ `If-None-Match`→`304`) and a 1-year `immutable` `Cache-Control`; `X-Orientation` header carries Digikam's `orientationHint` (EXIF orientation) for client-side rotation. `404` when the thumbnails DB is absent / the image has no cached thumbnail → client falls back to `/file`. |
 | `GET /api/albums` | Flat list of all albums (`{id, path, root}`). |
 | `GET /api/subalbums?album=/Root/rel&min_rating=` | Direct sub-albums of an album as `[{name, path, photo_count, cover: {id, name} \| null}]`, sorted by most recent photo (newest first). An absent/empty `album` lists the album roots. Cover = newest **image** in the sub-album's whole subtree (videos, `category=2`, are never covers; a video-only sub-album has `cover: null`); `photo_count` is the recursive count incl. videos. `min_rating` (0..=5) filters the cover, count, and which sub-albums appear alike. One query; albums with no matching photos anywhere are omitted. |
 | `GET /api/tags` | Tag **tree** (`{id, name, children}`), internal tags excluded. |
@@ -132,7 +132,11 @@ This is the seed of the browsing UI (planned to grow into Leptos later).
 - **Request logging**: a `tower_http` `TraceLayer` logs every HTTP request
   (method + URI) and its response (status + latency) at `info`. `--trace-sql`
   additionally logs the SQL each request runs.
-- **CORS**: permissive (dev convenience) for the future browser frontend.
+- **No CORS layer**: the frontend is served same-origin by this server, so CORS is
+  unneeded. It was removed because `CorsLayer::permissive()` emits
+  `Vary: origin, …`, which made the browser refuse to reuse the cached (immutable)
+  thumbnails and webpgf assets — it re-`GET`s them every page load. (Re-add a
+  scoped CORS layer only if a *separate-origin* frontend ever consumes `/api`.)
 
 ### Relevant Digikam schema
 - `AlbumRoots(id, label, identifier, specificPath)` — collection roots.
@@ -157,7 +161,9 @@ header. Thumbnails are ≤256 px, ~19 KB avg, with near-full coverage.
 The webpgf module is **embedded into the binary** (`include_bytes!`, like the CSS/JS) and
 served at `GET /webpgf.js` (`text/javascript`) and `GET /webpgf.wasm` (`application/wasm`,
 so the browser can stream-compile). Both carry a content-addressed `ETag` (the webpgf nix
-store hash) honoring `If-None-Match`→`304`, plus `Cache-Control: public, max-age=604800`.
+store hash) honoring `If-None-Match`→`304`, plus a 1-year `immutable` `Cache-Control`
+(`public, max-age=31536000, immutable`, shared with the thumbnails — `IMMUTABLE_CACHE_CONTROL`)
+so the browser stops re-requesting them every page load.
 The embed path comes from the `WEBPGF_PATH` env var, which the flake sets to the `webpgf`
 derivation output for **both** `nix build` (`commonArgs`) and the dev shell — so plain
 `cargo build` inside `nix develop` embeds them too.

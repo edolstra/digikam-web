@@ -205,6 +205,14 @@ pub async fn get_photo_file(
     Ok(response)
 }
 
+/// `Cache-Control` for content-addressed, effectively-immutable assets (the PGF
+/// thumbnails — keyed by `uniqueHash` — and the embedded webpgf module): cache
+/// hard for a year and don't revalidate, so the browser stops re-requesting them
+/// on every page load. The strong `ETag` still backs a forced reload / expired
+/// entry with a cheap `304`. (A re-edited image keeps its id but gets a new
+/// `uniqueHash`/ETag; an `immutable` cache won't notice until a hard refresh.)
+pub(crate) const IMMUTABLE_CACHE_CONTROL: &str = "public, max-age=31536000, immutable";
+
 /// Does the request's `If-None-Match` header match `etag` (or `*`)?
 pub(crate) fn if_none_match_matches(headers: &HeaderMap, etag: &HeaderValue) -> bool {
     let Some(value) = headers
@@ -278,7 +286,12 @@ pub async fn get_photo_thumbnail(
         if if_none_match_matches(&headers, etag) {
             let mut not_modified = Response::new(axum::body::Body::empty());
             *not_modified.status_mut() = StatusCode::NOT_MODIFIED;
-            not_modified.headers_mut().insert(header::ETAG, etag.clone());
+            let h = not_modified.headers_mut();
+            h.insert(header::ETAG, etag.clone());
+            h.insert(
+                header::CACHE_CONTROL,
+                HeaderValue::from_static(IMMUTABLE_CACHE_CONTROL),
+            );
             return Ok(not_modified);
         }
     }
@@ -288,6 +301,10 @@ pub async fn get_photo_thumbnail(
     h.insert(
         header::CONTENT_TYPE,
         HeaderValue::from_static("application/octet-stream"),
+    );
+    h.insert(
+        header::CACHE_CONTROL,
+        HeaderValue::from_static(IMMUTABLE_CACHE_CONTROL),
     );
     if let Some(etag) = etag {
         h.insert(header::ETAG, etag);
