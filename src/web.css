@@ -39,6 +39,8 @@ h2 { font-size: 1rem; margin: 1.5rem 0 0.5rem; padding-bottom: 0.25rem;
 .grid img.thumb { min-width: 60px; }
 .grid .vtile { height: 200px; width: 300px; background: #222; border: 0; padding: 0;
                position: relative; cursor: pointer; touch-action: manipulation; }
+/* Video poster: the decoded thumbnail fills the tile beneath the ▶ badge. */
+.grid .vtile img.thumb { width: 100%; height: 100%; object-fit: cover; display: block; }
 .grid .vtile::after { content: '▶'; position: absolute; inset: 0; display: flex;
                       align-items: center; justify-content: center; font-size: 3rem;
                       color: rgba(255, 255, 255, 0.85); text-shadow: 0 0 8px rgba(0, 0, 0, 0.8); }

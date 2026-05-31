@@ -1,5 +1,6 @@
 (function () {
-  var tiles = Array.prototype.slice.call(document.querySelectorAll('.grid img, .grid .vtile'));
+  // Direct children only: a video tile's inner poster <img> is not its own item.
+  var tiles = Array.prototype.slice.call(document.querySelectorAll('.grid > img, .grid > .vtile'));
   var items = tiles.map(function (el) {
     var video = el.classList.contains('vtile');
     // Photos display a decoded thumbnail in the grid; the lightbox always shows
@@ -227,8 +228,12 @@
   };
 
   function fallback(img) {
+    // Video posters carry no `data-full`: a missing/failed thumbnail just leaves
+    // the empty tile showing the ▶ placeholder, rather than loading the video.
+    var full = img.dataset.full;
+    if (!full) return;
     img.addEventListener('load', function () { img.style.width = ''; }, { once: true });
-    img.src = img.dataset.full;
+    img.src = full;
   }
 
   function paint(img, w, h, buf, o) {

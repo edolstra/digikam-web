@@ -74,8 +74,11 @@ This is the seed of the browsing UI (planned to grow into Leptos later).
   `/api/photos/:id/thumbnail` (raw PGF), decodes it in a webpgf **wasm Web Worker**,
   and paints it — rotated per `X-Orientation` — via a canvas→blob URL. A `404` or any
   decode failure falls back to the full-size `/file` (`data-full`); that URL is also
-  what the lightbox opens. Videos (`is_video`) render as a placeholder tile with a ▶
-  badge (nothing fetched until opened). See [Thumbnails](#thumbnails).
+  what the lightbox opens. Videos (`is_video`) are a `<button class="vtile">` with a ▶
+  badge and an **inner poster** `<img class="thumb">` fed by the same pipeline (no
+  `data-full`, so a missing thumbnail just leaves the ▶ placeholder; the video itself
+  isn't fetched until opened). The lightbox enumerates only *direct* grid children
+  (`.grid > img, .grid > .vtile`), so a poster isn't its own item. See [Thumbnails](#thumbnails).
 - **Lightbox** (click a photo/video): full-page over a dimmed grid, requesting
   **fullscreen** (Fullscreen API; guarded/no-op where unsupported, e.g. iPhone Safari).
   The media is scaled to fill the viewport (up or down, preserving aspect). Videos

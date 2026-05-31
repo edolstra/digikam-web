@@ -289,9 +289,17 @@ async fn render(state: AppState, album: &[String], filters: Filters) -> AppResul
                             @for photo in photos {
                                 @let full = format!("/api/photos/{}/file", photo.id);
                                 @if photo.is_video {
-                                    // Placeholder tile (▶ badge via CSS); nothing
-                                    // is fetched until it's opened in the lightbox.
-                                    button.vtile data-src=(full) title=(photo.name) {}
+                                    // Video tile: a poster from the same lazy
+                                    // thumbnail pipeline (the inner `img.thumb` has
+                                    // no `data-full`, so a missing thumbnail just
+                                    // leaves the ▶ placeholder), under the ▶ badge
+                                    // (CSS). The button carries the media URL for
+                                    // the lightbox; the poster is not a lightbox tile
+                                    // (it's not a *direct* child of `.grid`).
+                                    button.vtile data-src=(full) title=(photo.name)
+                                        style=[thumb_reserve(photo.width, photo.height)] {
+                                        img.thumb data-id=(photo.id) alt="";
+                                    }
                                 } @else {
                                     // The thumbnail (raw PGF) is fetched + wasm-decoded
                                     // lazily by web.js; `data-full` is the original,
