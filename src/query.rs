@@ -4,6 +4,7 @@ use std::fmt;
 use rusqlite::types::Value;
 use rusqlite::Connection;
 use serde::de::{self, Deserialize, Deserializer};
+use serde::{Serialize, Serializer};
 
 use crate::db::{album_display_path, AlbumRoot};
 use crate::error::{AppError, AppResult};
@@ -30,11 +31,23 @@ impl Rating {
     pub fn get(self) -> i64 {
         self.0
     }
+
+    /// Whether this is the default `0` (i.e. no rating filter). Used to omit it
+    /// from serialized query strings.
+    pub fn is_unfiltered(&self) -> bool {
+        self.0 == 0
+    }
 }
 
 impl fmt::Display for Rating {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.0)
+    }
+}
+
+impl Serialize for Rating {
+    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_i64(self.0)
     }
 }
 
@@ -68,24 +81,23 @@ pub struct PhotoQuery {
 /// [`Filters::query_string`]); consumed by [`list_subalbums`] and applied to the
 /// photo grid. Designed to grow (tags, date range, …) — add a field, serialize it
 /// in `query_string`, and apply it where the queries filter.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize)]
 pub struct Filters {
-    /// Minimum rating; the default `Rating(0)` means no rating filter.
+    /// Minimum rating; the default `Rating(0)` means no rating filter and is
+    /// omitted from the serialized query string.
+    #[serde(skip_serializing_if = "Rating::is_unfiltered")]
     pub min_rating: Rating,
 }
 
 impl Filters {
     /// The query-string suffix encoding the active filters, e.g. `?min_rating=3`
-    /// (empty when nothing is active).
+    /// (empty when nothing is active). The field set is serialized by
+    /// `serde_urlencoded` — the same encoder axum's `Query`/`Form` use — so the
+    /// typed `Filters` struct *is* the source of truth for the parameters.
     pub fn query_string(&self) -> String {
-        let mut params: Vec<String> = Vec::new();
-        if self.min_rating.get() > 0 {
-            params.push(format!("min_rating={}", self.min_rating));
-        }
-        if params.is_empty() {
-            String::new()
-        } else {
-            format!("?{}", params.join("&"))
+        match serde_urlencoded::to_string(self) {
+            Ok(qs) if !qs.is_empty() => format!("?{qs}"),
+            _ => String::new(),
         }
     }
 
