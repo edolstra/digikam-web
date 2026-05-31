@@ -176,9 +176,13 @@ viewport-relative `rootMargin` (≈1 screen above, ≈2.5 below) triggers a `/th
 per `img.thumb` tile **well before** it scrolls in, so paging down lands on already-decoded
 images. Fetch (network) and decode (CPU) are **separate stages**: fetches run concurrently
 (browser-capped), and each finished PGF blob queues for the next idle worker in a small
-**Blob Web Worker pool** (`min(hardwareConcurrency, 6)`; each loads `/webpgf.js` and
-instantiates with the `/webpgf.wasm` bytes once, returns an `ImageData` whose buffer is
-transferred back). The main thread draws each result — applying the EXIF `X-Orientation`
+**Blob Web Worker pool** (`min(hardwareConcurrency, 6)`). To make the *first* paint snappy,
+the decoder assets are fetched **once** (not once per worker): `/webpgf.js` is inlined into
+the worker body and `/webpgf.wasm` is fetched once, then the pool is **pre-warmed** — each
+worker instantiates the module at page load (via an init message carrying the shared wasm
+bytes), overlapping with the thumbnail fetches, so blobs decode the instant they arrive
+rather than waiting on a cold module. Each worker returns an `ImageData` whose buffer is
+transferred back. The main thread draws each result — applying the EXIF `X-Orientation`
 (2..8; 0/1/junk = no rotation) — to a canvas, then sets the `<img>` to the canvas's blob URL.
 The worker URLs are made **absolute** (`location.origin` baked in) because a `blob:` worker
 resolves relative paths against its opaque blob base, not the page origin. A worker that dies

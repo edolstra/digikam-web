@@ -192,35 +192,55 @@
     return;
   }
 
-  // The decoders run in Blob workers (no extra endpoint): each loads webpgf.js,
-  // instantiates the module once with the wasm bytes, and decodes each blob to an
-  // ImageData, transferring the pixel buffer back. The webpgf URLs are made
-  // absolute (origin baked in): inside a blob: worker, importScripts/fetch resolve
-  // relative paths against the opaque blob base, not the page origin.
+  // Decoding happens in a Blob-worker pool. To make the FIRST paint snappy, the
+  // decoder assets are fetched once here (not once per worker) and the pool is
+  // pre-warmed: webpgf.js is inlined into the worker body (so workers don't each
+  // re-fetch it), and the wasm module is instantiated right away via an init
+  // message — overlapping with the thumbnail fetches — so blobs decode the instant
+  // they arrive instead of waiting on a cold module. Fetch (network) and decode
+  // (CPU) stay separate stages so the wide prefetch window keeps up.
   var base = location.origin;
-  var workerSrc =
-    "importScripts('" + base + "/webpgf.js');" +
-    "var mp;" +
-    "function gm(){if(!mp){mp=fetch('" + base + "/webpgf.wasm').then(function(r){return r.arrayBuffer();})" +
-    ".then(function(b){return WebPGF({wasmBinary:b});});}return mp;}" +
-    "onmessage=function(e){var id=e.data.id,buf=e.data.buf;" +
-    "gm().then(function(m){var im=m.decode(new Uint8Array(buf));var o=im.data;" +
-    "postMessage({id:id,w:im.width,h:im.height,buf:o.buffer},[o.buffer]);})" +
-    ".catch(function(err){postMessage({id:id,error:String((err&&err.message)||err)});});};";
-  var workerUrl = URL.createObjectURL(new Blob([workerSrc], { type: 'application/javascript' }));
-
-  // Fetch (network) and decode (CPU) are separate stages so the wide prefetch
-  // window below is ready by the time you page down. Fetches run concurrently
-  // (browser-capped); each finished blob queues for the next idle worker in a
-  // small pool that decodes in parallel.
   var POOL = Math.min(navigator.hardwareConcurrency || 4, 6);
   var idleWorkers = [];
-  var live = 0;       // workers still alive
-  var queue = [];     // {img, buf, o}: fetched blobs waiting for a free worker
-  var pending = {};   // id -> {img, o}: currently decoding
+  var live = 0;        // workers still alive
+  var queue = [];      // {img, buf, o}: fetched blobs waiting for a free worker
+  var pending = {};    // id -> {img, o}: currently decoding
+  var ditched = false; // pool unavailable -> tiles fall back to /file
 
-  function buildWorker() {
-    var w = new Worker(workerUrl);
+  // Worker body, appended after webpgf.js (which defines `WebPGF`): the init
+  // message (`wasm`) instantiates the module from the shared bytes; each later
+  // message decodes a blob and transfers the pixel buffer back.
+  var glue =
+    "var mod;onmessage=function(e){var d=e.data;" +
+    "if(d.wasm){mod=WebPGF({wasmBinary:d.wasm});return;}" +
+    "mod.then(function(m){var im=m.decode(new Uint8Array(d.buf));var o=im.data;" +
+    "postMessage({id:d.id,w:im.width,h:im.height,buf:o.buffer},[o.buffer]);})" +
+    ".catch(function(err){postMessage({id:d.id,error:String((err&&err.message)||err)});});};";
+
+  Promise.all([
+    fetch(base + '/webpgf.js').then(function (r) { return r.text(); }),
+    fetch(base + '/webpgf.wasm').then(function (r) { return r.arrayBuffer(); })
+  ]).then(function (parts) {
+    var url = URL.createObjectURL(new Blob([parts[0] + '\n;' + glue], { type: 'application/javascript' }));
+    for (var i = 0; i < POOL; i++) {
+      var w = buildWorker(url);
+      w.postMessage({ wasm: parts[1] }); // pre-warm now; bytes are copied per worker
+      idleWorkers.push(w);
+    }
+    drain();
+  }).catch(ditch);
+
+  // Pool gone (assets failed to load, or every worker died): everything queued,
+  // decoding, or arriving later falls back to its original.
+  function ditch() {
+    ditched = true;
+    queue.forEach(function (j) { fallback(j.img); }); queue = [];
+    for (var id in pending) fallback(pending[id].img);
+    pending = {};
+  }
+
+  function buildWorker(url) {
+    var w = new Worker(url);
     w.onmessage = function (e) {
       var d = e.data, job = pending[d.id];
       if (job) {
@@ -232,18 +252,17 @@
       idleWorkers.push(w);
       drain();
     };
-    // A worker that dies (e.g. webpgf failed to load) falls back its in-flight
-    // tile; once the whole pool is gone, queued/new tiles load their original.
+    // A worker that dies (e.g. webpgf failed to instantiate) falls back its
+    // in-flight tile; once the whole pool is gone, ditch the rest.
     w.onerror = function () {
       live--;
       idleWorkers = idleWorkers.filter(function (x) { return x !== w; }); // never dispatch to it
       if (w.job && pending[w.job]) { fallback(pending[w.job].img); delete pending[w.job]; }
-      if (live <= 0) { queue.forEach(function (j) { fallback(j.img); }); queue = []; }
+      if (live <= 0) ditch();
     };
     live++;
     return w;
   }
-  for (var wi = 0; wi < POOL; wi++) idleWorkers.push(buildWorker());
 
   function drain() {
     while (idleWorkers.length && queue.length) {
@@ -310,7 +329,7 @@
       if (!res.ok) { fallback(img); return; }
       var o = parseInt(res.headers.get('X-Orientation'), 10) || 1;
       return res.arrayBuffer().then(function (buf) {
-        if (live <= 0) { fallback(img); return; } // no decoders left
+        if (ditched) { fallback(img); return; } // no decoders left
         queue.push({ img: img, buf: buf, o: o });
         drain();
       });
