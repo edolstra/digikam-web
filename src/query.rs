@@ -293,7 +293,8 @@ pub fn list_photos(
 
 /// List the direct sub-albums of `album`, each with its recursive photo count
 /// and a cover (the newest **image** anywhere in that sub-album's subtree), sorted
-/// by name. Albums with no matching photos anywhere are omitted.
+/// by most recent photo (newest first; ties broken by name). Albums with no
+/// matching photos anywhere are omitted.
 ///
 /// `filters` applies the same filtering as the photo grid to the whole subtree,
 /// so the count, the cover, and which sub-albums appear all respect it.
@@ -349,7 +350,7 @@ pub fn list_subalbums(
            FROM matched \
          ), \
          counts AS ( \
-           SELECT bucket, COUNT(*) AS cnt FROM bucketed GROUP BY bucket \
+           SELECT bucket, COUNT(*) AS cnt, max(cdate) AS recent FROM bucketed GROUP BY bucket \
          ), \
          covers AS ( \
            SELECT bucket, image_id, image_name, \
@@ -360,7 +361,7 @@ pub fn list_subalbums(
          SELECT c.bucket, cv.image_id, cv.image_name, c.cnt \
          FROM counts c \
          LEFT JOIN covers cv ON cv.bucket = c.bucket AND cv.rn = 1 \
-         ORDER BY c.bucket COLLATE NOCASE",
+         ORDER BY c.recent DESC, c.bucket COLLATE NOCASE",
     )?;
 
     let rows = stmt.query_map(
