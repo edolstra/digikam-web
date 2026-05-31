@@ -52,11 +52,15 @@ h2 { font-size: 1rem; margin: 1.5rem 0 0.5rem; padding-bottom: 0.25rem;
 .grid { display: flex; flex-wrap: wrap; gap: 4px; align-items: flex-end; }
 .grid img { height: 200px; width: auto; display: block; background: #222; cursor: pointer; }
 body.modal-open { overflow: hidden; }
-.lightbox { position: fixed; inset: 0; z-index: 1000; display: none;
+/* Sized in dynamic viewport units (dvw/dvh) so it tracks the *visible* viewport
+   on mobile as the toolbars show/hide — plain vh/vw refer to the large viewport
+   and would let portrait photos overflow (and get clipped) in landscape. */
+.lightbox { position: fixed; inset: 0; width: 100dvw; height: 100dvh;
+            z-index: 1000; display: none;
             align-items: center; justify-content: center;
             background: rgba(0, 0, 0, 0.9); }
 .lightbox.open { display: flex; }
-.lightbox img.full { width: 100vw; height: 100vh; object-fit: contain; }
+.lightbox img.full { width: 100%; height: 100%; object-fit: contain; }
 .lightbox .close { position: absolute; top: 0.25rem; right: 0.75rem;
                    font-size: 2.5rem; line-height: 1; }
 .lightbox .nav { position: absolute; top: 50%; transform: translateY(-50%);
