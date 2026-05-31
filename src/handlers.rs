@@ -234,15 +234,13 @@ pub struct SubalbumParams {
 
 /// `GET /subalbums?album=/Root/rel&min_rating=` — direct sub-albums of an album,
 /// each with a cover (newest photo in its subtree) and recursive photo count,
-/// sorted by name. `min_rating` filters the cover and count alike.
+/// sorted by most recent photo. `min_rating` filters the cover and count alike.
+/// An absent/empty `album` lists the album roots.
 pub async fn list_subalbums(
     State(state): State<AppState>,
     Query(params): Query<SubalbumParams>,
 ) -> AppResult<Json<Vec<SubAlbum>>> {
-    let album = params
-        .album
-        .filter(|a| !a.is_empty())
-        .ok_or_else(|| AppError::BadRequest("the `album` query parameter is required".into()))?;
+    let album = params.album.unwrap_or_default();
 
     let filters = Filters {
         min_rating: params.min_rating,

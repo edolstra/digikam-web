@@ -138,8 +138,9 @@ fn resolve_tag_ids(conn: &Connection, name: &str) -> AppResult<Vec<i64>> {
 }
 
 /// Parse an album display path `/Root/rel...` into its root `label` and the
-/// album's `relativePath` (`/` for a root album, else `/seg/seg`).
-fn parse_album(album: &str) -> AppResult<(&str, String)> {
+/// album's `relativePath`: `None` for a collection's root album, else
+/// `Some("/seg/seg")`.
+fn parse_album(album: &str) -> AppResult<(&str, Option<String>)> {
     let trimmed = album.trim_start_matches('/');
     if trimmed.is_empty() {
         return Err(AppError::BadRequest(
@@ -150,12 +151,7 @@ fn parse_album(album: &str) -> AppResult<(&str, String)> {
         Some((l, r)) => (l, r),
         None => (trimmed, ""),
     };
-    let rel = if rest.is_empty() {
-        // Digikam stores the root album of a collection as "/".
-        "/".to_string()
-    } else {
-        format!("/{rest}")
-    };
+    let rel = (!rest.is_empty()).then(|| format!("/{rest}"));
     Ok((label, rel))
 }
 
@@ -175,20 +171,19 @@ fn build_filter(conn: &Connection, q: &PhotoQuery) -> AppResult<(String, Vec<Val
         sql.push_str(" AND r.label = ?");
         params.push(Value::Text(label.to_string()));
 
-        let is_root = rel == "/";
         if q.recursive {
-            if !is_root {
-                // The named album plus every album beneath it.
+            // The named album plus every album beneath it. (A root album — `rel`
+            // is `None` — recursively is the whole collection, so no constraint.)
+            if let Some(rel) = rel {
                 let like = format!("{}/%", escape_like(&rel));
                 sql.push_str(" AND (a.relativePath = ? OR a.relativePath LIKE ? ESCAPE '\\')");
                 params.push(Value::Text(rel));
                 params.push(Value::Text(like));
             }
-            // is_root + recursive: the whole collection, so no path constraint.
         } else {
-            // Only photos directly in the named album.
+            // Only photos directly in the named album (the root album is "/").
             sql.push_str(" AND a.relativePath = ?");
-            params.push(Value::Text(rel));
+            params.push(Value::Text(rel.unwrap_or_else(|| "/".to_string())));
         }
     }
 
@@ -294,8 +289,12 @@ pub fn list_photos(
 
 /// List the direct sub-albums of `album`, each with its recursive photo count
 /// and a cover (the newest **image** anywhere in that sub-album's subtree), sorted
-/// by most recent photo (newest first; ties broken by name). Albums with no
+/// by most recent photo (newest first; ties broken by name). Sub-albums with no
 /// matching photos anywhere are omitted.
+///
+/// An **empty** `album` lists the album roots themselves (as if they were
+/// sub-albums of a virtual top level), bucketed by root label rather than by
+/// child path segment.
 ///
 /// `filters` applies the same filtering as the photo grid to the whole subtree,
 /// so the count, the cover, and which sub-albums appear all respect it.
@@ -304,78 +303,100 @@ pub fn list_photos(
 /// contains only (matching) videos is still listed but with no cover (`cover` is
 /// `None`). The photo count includes videos.
 ///
-/// One query: every photo in the subtree is bucketed by its direct-child path
-/// segment; the count is taken over all photos in the bucket, while the cover is
-/// the newest non-video photo (left-joined, so it may be absent). Filtering by
-/// `albumRoot` id (resolved from `roots`) lets the `(albumRoot, relativePath)`
-/// index serve the prefix range scan.
+/// One query: every matching photo is tagged with a `bucket` (the child path
+/// segment, or the root label at the top level); the count is taken over all
+/// photos in the bucket, while the cover is the newest non-video photo
+/// (left-joined, so it may be absent).
 pub fn list_subalbums(
     conn: &Connection,
     roots: &HashMap<i64, AlbumRoot>,
     album: &str,
     filters: &Filters,
 ) -> AppResult<Vec<SubAlbum>> {
-    let (label, rel) = parse_album(album)?;
-    let Some((&root_id, _)) = roots.iter().find(|(_, r)| r.label == label) else {
-        return Ok(Vec::new());
-    };
-
-    // Path prefix shared by every album in the subtree (the root album is "/").
-    let prefix = if rel == "/" {
-        "/".to_string()
-    } else {
-        format!("{rel}/")
-    };
-    let like = format!("{}%", escape_like(&prefix));
-    let parent = album.trim_end_matches('/');
     // 0 makes the rating clause `max(...,0) >= 0` always true (i.e. no filter).
     let min = filters.min_rating.get();
 
-    let mut stmt = conn.prepare_cached(
-        "WITH matched AS ( \
-           SELECT i.id AS image_id, i.name AS image_name, i.category AS category, \
-                  ii.creationDate AS cdate, \
-                  substr(a.relativePath, length(:prefix) + 1) AS rest \
-           FROM Images i JOIN Albums a ON a.id = i.album \
-           LEFT JOIN ImageInformation ii ON ii.imageid = i.id \
-           WHERE i.status = 1 AND a.albumRoot = :root \
-             AND a.relativePath LIKE :like ESCAPE '\\' \
-             AND length(a.relativePath) > length(:prefix) \
-             AND max(ifnull(ii.rating, 0), 0) >= :min \
-         ), \
-         bucketed AS ( \
-           SELECT image_id, image_name, category, cdate, \
-                  CASE WHEN instr(rest, '/') > 0 \
-                       THEN substr(rest, 1, instr(rest, '/') - 1) \
-                       ELSE rest END AS bucket \
-           FROM matched \
-         ), \
+    // Each mode produces the `matched` rows (image_id, image_name, category,
+    // cdate, bucket); only the bucketing/scope and the parent path differ.
+    let (matched, params, parent): (&str, Vec<(&str, Value)>, &str) = if album.is_empty() {
+        // Virtual top level: one bucket per album root (its label).
+        (
+            "SELECT i.id AS image_id, i.name AS image_name, i.category AS category, \
+                    ii.creationDate AS cdate, r.label AS bucket \
+             FROM Images i JOIN Albums a ON a.id = i.album \
+             JOIN AlbumRoots r ON r.id = a.albumRoot \
+             LEFT JOIN ImageInformation ii ON ii.imageid = i.id \
+             WHERE i.status = 1 AND max(ifnull(ii.rating, 0), 0) >= :min",
+            vec![(":min", Value::Integer(min))],
+            "",
+        )
+    } else {
+        let (label, rel) = parse_album(album)?;
+        let Some((&root_id, _)) = roots.iter().find(|(_, r)| r.label == label) else {
+            return Ok(Vec::new());
+        };
+        // Path prefix shared by every album in the subtree (the root album is "/").
+        let prefix = match rel {
+            None => "/".to_string(),
+            Some(rel) => format!("{rel}/"),
+        };
+        let like = format!("{}%", escape_like(&prefix));
+        // Bucket each subtree photo by its direct-child path segment (the part of
+        // the relativePath after the prefix, up to the next '/'). Filtering by
+        // `albumRoot` id lets the `(albumRoot, relativePath)` index serve the scan.
+        (
+            "SELECT image_id, image_name, category, cdate, \
+                    CASE WHEN instr(rest, '/') > 0 \
+                         THEN substr(rest, 1, instr(rest, '/') - 1) ELSE rest END AS bucket \
+             FROM ( \
+               SELECT i.id AS image_id, i.name AS image_name, i.category AS category, \
+                      ii.creationDate AS cdate, \
+                      substr(a.relativePath, length(:prefix) + 1) AS rest \
+               FROM Images i JOIN Albums a ON a.id = i.album \
+               LEFT JOIN ImageInformation ii ON ii.imageid = i.id \
+               WHERE i.status = 1 AND a.albumRoot = :root \
+                 AND a.relativePath LIKE :like ESCAPE '\\' \
+                 AND length(a.relativePath) > length(:prefix) \
+                 AND max(ifnull(ii.rating, 0), 0) >= :min \
+             )",
+            vec![
+                (":prefix", Value::Text(prefix)),
+                (":root", Value::Integer(root_id)),
+                (":like", Value::Text(like)),
+                (":min", Value::Integer(min)),
+            ],
+            album.trim_end_matches('/'),
+        )
+    };
+
+    // Shared: group the matched rows into one tile per bucket (count + newest
+    // non-video cover), newest bucket first.
+    let sql = format!(
+        "WITH matched AS ( {matched} ), \
          counts AS ( \
-           SELECT bucket, COUNT(*) AS cnt, max(cdate) AS recent FROM bucketed GROUP BY bucket \
+           SELECT bucket, COUNT(*) AS cnt, max(cdate) AS recent FROM matched GROUP BY bucket \
          ), \
          covers AS ( \
            SELECT bucket, image_id, image_name, \
                   ROW_NUMBER() OVER (PARTITION BY bucket ORDER BY cdate DESC, image_id DESC) AS rn \
-           FROM bucketed \
-           WHERE category <> 2 \
+           FROM matched WHERE category <> 2 \
          ) \
          SELECT c.bucket, cv.image_id, cv.image_name, c.cnt \
-         FROM counts c \
-         LEFT JOIN covers cv ON cv.bucket = c.bucket AND cv.rn = 1 \
-         ORDER BY c.recent DESC, c.bucket COLLATE NOCASE",
-    )?;
+         FROM counts c LEFT JOIN covers cv ON cv.bucket = c.bucket AND cv.rn = 1 \
+         ORDER BY c.recent DESC, c.bucket COLLATE NOCASE"
+    );
 
-    let rows = stmt.query_map(
-        rusqlite::named_params! { ":prefix": prefix, ":root": root_id, ":like": like, ":min": min },
-        |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, Option<i64>>(1)?,
-                row.get::<_, Option<String>>(2)?,
-                row.get::<_, i64>(3)?,
-            ))
-        },
-    )?;
+    let bound: Vec<(&str, &dyn rusqlite::ToSql)> =
+        params.iter().map(|(n, v)| (*n, v as &dyn rusqlite::ToSql)).collect();
+    let mut stmt = conn.prepare_cached(&sql)?;
+    let rows = stmt.query_map(&bound[..], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, Option<i64>>(1)?,
+            row.get::<_, Option<String>>(2)?,
+            row.get::<_, i64>(3)?,
+        ))
+    })?;
 
     let mut out = Vec::new();
     for row in rows {
@@ -398,75 +419,6 @@ pub fn list_subalbums(
     Ok(out)
 }
 
-/// List the album roots as if they were sub-albums of a virtual top-level album,
-/// each with a cover (newest non-video image in the whole root) and total photo
-/// count, sorted by label. Mirrors [`list_subalbums`] but groups by `albumRoot`;
-/// `filters` applies the same rating filter to the counts and covers.
-pub fn list_roots(
-    conn: &Connection,
-    roots: &HashMap<i64, AlbumRoot>,
-    filters: &Filters,
-) -> AppResult<Vec<SubAlbum>> {
-    // 0 makes the rating clause `max(...,0) >= 0` always true (i.e. no filter).
-    let min = filters.min_rating.get();
-
-    let mut stmt = conn.prepare_cached(
-        "WITH matched AS ( \
-           SELECT i.id AS image_id, i.name AS image_name, i.category AS category, \
-                  ii.creationDate AS cdate, a.albumRoot AS root \
-           FROM Images i JOIN Albums a ON a.id = i.album \
-           LEFT JOIN ImageInformation ii ON ii.imageid = i.id \
-           WHERE i.status = 1 \
-             AND max(ifnull(ii.rating, 0), 0) >= :min \
-         ), \
-         counts AS ( \
-           SELECT root, COUNT(*) AS cnt FROM matched GROUP BY root \
-         ), \
-         covers AS ( \
-           SELECT root, image_id, image_name, \
-                  ROW_NUMBER() OVER (PARTITION BY root ORDER BY cdate DESC, image_id DESC) AS rn \
-           FROM matched \
-           WHERE category <> 2 \
-         ) \
-         SELECT c.root, cv.image_id, cv.image_name, c.cnt \
-         FROM counts c \
-         LEFT JOIN covers cv ON cv.root = c.root AND cv.rn = 1",
-    )?;
-
-    let rows = stmt.query_map(rusqlite::named_params! { ":min": min }, |row| {
-        Ok((
-            row.get::<_, i64>(0)?,
-            row.get::<_, Option<i64>>(1)?,
-            row.get::<_, Option<String>>(2)?,
-            row.get::<_, i64>(3)?,
-        ))
-    })?;
-
-    let mut out = Vec::new();
-    for row in rows {
-        let (root_id, image_id, image_name, cnt) = row?;
-        let Some(root) = roots.get(&root_id) else {
-            continue;
-        };
-        let cover = match (image_id, image_name) {
-            (Some(id), Some(name)) => Some(Cover {
-                id: id as u64,
-                name,
-            }),
-            _ => None,
-        };
-        out.push(SubAlbum {
-            path: format!("/{}", root.label),
-            name: root.label.clone(),
-            photo_count: cnt.max(0) as u64,
-            cover,
-        });
-    }
-    // SQL groups by root id, so sort by label here (case-insensitive).
-    out.sort_by_key(|a| a.name.to_lowercase());
-    Ok(out)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -478,10 +430,10 @@ mod tests {
 
     #[test]
     fn parses_album_paths() {
-        assert_eq!(parse_album("/Photos").unwrap(), ("Photos", "/".to_string()));
+        assert_eq!(parse_album("/Photos").unwrap(), ("Photos", None));
         assert_eq!(
             parse_album("/Photos/Lego/Porsche911").unwrap(),
-            ("Photos", "/Lego/Porsche911".to_string())
+            ("Photos", Some("/Lego/Porsche911".to_string()))
         );
         assert!(parse_album("/").is_err());
     }

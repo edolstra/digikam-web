@@ -193,10 +193,11 @@ async fn render(
     filters: Filters,
 ) -> AppResult<Html<String>> {
     let Some(album) = album else {
-        // Virtual root: the album roots presented as sub-album tiles.
+        // Virtual root: the album roots presented as sub-album tiles (an empty
+        // album string makes `list_subalbums` return the roots).
         let filters_for_roots = filters.clone();
         let roots = run_blocking(&state, move |conn, state| {
-            query::list_roots(conn, &state.roots, &filters_for_roots)
+            query::list_subalbums(conn, &state.roots, "", &filters_for_roots)
         })
         .await?;
         let crumb = breadcrumb("", &filters);
