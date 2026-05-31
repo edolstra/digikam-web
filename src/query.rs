@@ -1,7 +1,9 @@
 use std::collections::HashMap;
+use std::fmt;
 
 use rusqlite::types::Value;
 use rusqlite::Connection;
+use serde::de::{self, Deserialize, Deserializer};
 
 use crate::db::{album_display_path, AlbumRoot};
 use crate::error::{AppError, AppResult};
@@ -9,6 +11,39 @@ use crate::models::{Cover, Page, PhotoSummary, SubAlbum};
 
 pub const DEFAULT_LIMIT: i64 = 200;
 pub const MAX_LIMIT: i64 = 1000;
+
+/// A photo rating constrained to 0..=5. Construction — including
+/// `Deserialize` from query strings — is the single place the range is enforced,
+/// so any `Rating` in hand is already valid (an out-of-range query value is
+/// rejected as a `400` by the `Query` extractor). The default, `0`, means "no
+/// rating filter" (unrated photos count as 0, so `>= 0` matches everything).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default)]
+pub struct Rating(i64);
+
+impl Rating {
+    /// Wrap a value, returning `None` if it falls outside 0..=5.
+    pub fn new(value: i64) -> Option<Rating> {
+        (0..=5).contains(&value).then_some(Rating(value))
+    }
+
+    /// The underlying 0..=5 value.
+    pub fn get(self) -> i64 {
+        self.0
+    }
+}
+
+impl fmt::Display for Rating {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl<'de> Deserialize<'de> for Rating {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let value = i64::deserialize(d)?;
+        Rating::new(value).ok_or_else(|| de::Error::custom("min_rating must be between 0 and 5"))
+    }
+}
 
 /// Parsed query parameters for `GET /photos`.
 #[derive(Debug, Default)]
@@ -20,10 +55,10 @@ pub struct PhotoQuery {
     pub recursive: bool,
     /// Tag names; an image must carry every one of them (exact match).
     pub tags: Vec<String>,
-    /// Minimum rating (0..=5). `None` means no rating filter. Unrated images
-    /// (rating `-1`/NULL) count as 0, so `min_rating=0` includes everything and
-    /// `min_rating>=1` excludes the unrated.
-    pub min_rating: Option<i64>,
+    /// Minimum rating; the default `Rating(0)` means no rating filter. Unrated
+    /// images (rating `-1`/NULL) count as 0, so `0` includes everything and `>= 1`
+    /// excludes the unrated.
+    pub min_rating: Rating,
     pub limit: i64,
     pub offset: i64,
 }
@@ -35,8 +70,8 @@ pub struct PhotoQuery {
 /// in `query_string`, and apply it where the queries filter.
 #[derive(Debug, Clone, Default)]
 pub struct Filters {
-    /// Minimum rating, 1..=5; `None` means no rating filter.
-    pub min_rating: Option<i64>,
+    /// Minimum rating; the default `Rating(0)` means no rating filter.
+    pub min_rating: Rating,
 }
 
 impl Filters {
@@ -44,8 +79,8 @@ impl Filters {
     /// (empty when nothing is active).
     pub fn query_string(&self) -> String {
         let mut params: Vec<String> = Vec::new();
-        if let Some(r) = self.min_rating {
-            params.push(format!("min_rating={r}"));
+        if self.min_rating.get() > 0 {
+            params.push(format!("min_rating={}", self.min_rating));
         }
         if params.is_empty() {
             String::new()
@@ -55,7 +90,10 @@ impl Filters {
     }
 
     /// A copy with `min_rating` changed, preserving any other active filters.
-    pub fn with_min_rating(&self, min_rating: Option<i64>) -> Filters {
+    // `..self.clone()` is a no-op while `min_rating` is the only field, but keeps
+    // future filters (tags, …) automatically carried over.
+    #[allow(clippy::needless_update)]
+    pub fn with_min_rating(&self, min_rating: Rating) -> Filters {
         Filters {
             min_rating,
             ..self.clone()
@@ -149,21 +187,18 @@ fn build_filter(conn: &Connection, q: &PhotoQuery) -> AppResult<(String, Vec<Val
             sql.push_str(" AND 1 = 0");
             continue;
         }
-        let placeholders = std::iter::repeat("?")
-            .take(ids.len())
-            .collect::<Vec<_>>()
-            .join(",");
+        let placeholders = vec!["?"; ids.len()].join(",");
         sql.push_str(&format!(
             " AND EXISTS (SELECT 1 FROM ImageTags it WHERE it.imageid = i.id AND it.tagid IN ({placeholders}))"
         ));
         params.extend(ids.into_iter().map(Value::Integer));
     }
 
-    if let Some(min) = q.min_rating {
+    if q.min_rating.get() > 0 {
         // Treat unrated images (rating -1, or NULL when there's no
-        // ImageInformation row) as rating 0, so `min_rating=0` includes them.
+        // ImageInformation row) as rating 0, so the threshold excludes them.
         sql.push_str(" AND max(ifnull(ii.rating, 0), 0) >= ?");
-        params.push(Value::Integer(min));
+        params.push(Value::Integer(q.min_rating.get()));
     }
 
     Ok((sql, params))
@@ -280,7 +315,7 @@ pub fn list_subalbums(
     let like = format!("{}%", escape_like(&prefix));
     let parent = album.trim_end_matches('/');
     // 0 makes the rating clause `max(...,0) >= 0` always true (i.e. no filter).
-    let min = filters.min_rating.unwrap_or(0);
+    let min = filters.min_rating.get();
 
     let mut stmt = conn.prepare_cached(
         "WITH matched AS ( \
@@ -408,7 +443,7 @@ pub fn list_roots(
         });
     }
     // SQL groups by root id, so sort by label here (case-insensitive).
-    out.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    out.sort_by_key(|a| a.name.to_lowercase());
     Ok(out)
 }
 

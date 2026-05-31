@@ -11,7 +11,7 @@ use crate::db::AppState;
 use crate::error::AppResult;
 use crate::handlers::run_blocking;
 use crate::models::SubAlbum;
-use crate::query::{self, Filters, PhotoQuery};
+use crate::query::{self, Filters, PhotoQuery, Rating};
 
 /// Inline stylesheet for the album grid. Photos are fixed-height and wrap
 /// left-to-right, top-to-bottom; each day forms its own grid under a heading.
@@ -179,12 +179,11 @@ fn breadcrumb(album: &str, filters: &Filters) -> String {
 /// are gold. Clicking star K filters to `≥K`; clicking the active threshold again
 /// clears it. Links keep the other filters and the current album.
 fn rating_selector(album: &str, filters: &Filters) -> String {
-    let current = filters.min_rating;
-    let cur = current.unwrap_or(0);
+    let cur = filters.min_rating.get();
     let mut html = String::from("<span class=\"rating\">");
     for k in 1..=5 {
-        // Toggle off when clicking the currently-selected threshold.
-        let target = filters.with_min_rating(if Some(k) == current { None } else { Some(k) });
+        // Toggle off (back to Rating(0)) when clicking the active threshold.
+        let target = filters.with_min_rating(Rating::new(if cur == k { 0 } else { k }).unwrap_or_default());
         let (class, star) = if k <= cur {
             (" class=\"on\"", '\u{2605}')
         } else {
@@ -264,7 +263,7 @@ fn page_html(title: &str, crumb: &str, controls: &str, body: &str) -> String {
 /// Query parameters parsed from the album page URL into [`Filters`].
 #[derive(Debug, Deserialize)]
 pub struct AlbumViewParams {
-    min_rating: Option<i64>,
+    min_rating: Option<Rating>,
 }
 
 /// `GET /photos` — the virtual top of the database: shows the album roots as if
@@ -281,8 +280,7 @@ pub async fn album_page(
     Query(params): Query<AlbumViewParams>,
 ) -> AppResult<Html<String>> {
     let filters = Filters {
-        // Out-of-range values are ignored (no filter) rather than rejected.
-        min_rating: params.min_rating.filter(|r| (1..=5).contains(r)),
+        min_rating: params.min_rating.unwrap_or_default(),
     };
     let trimmed = path.trim_matches('/');
     if trimmed.is_empty() {
@@ -414,7 +412,9 @@ mod tests {
 
     #[test]
     fn filters_propagate_into_links() {
-        let f = Filters { min_rating: Some(3) };
+        let f = Filters {
+            min_rating: Rating::new(3).unwrap(),
+        };
         assert_eq!(f.query_string(), "?min_rating=3");
         assert_eq!(Filters::default().query_string(), "");
         // Breadcrumb links carry the active filter.
@@ -424,7 +424,12 @@ mod tests {
 
     #[test]
     fn rating_selector_toggles_and_fills() {
-        let html = rating_selector("/Photos/Lego", &Filters { min_rating: Some(2) });
+        let html = rating_selector(
+            "/Photos/Lego",
+            &Filters {
+                min_rating: Rating::new(2).unwrap(),
+            },
+        );
         // First two stars filled (on), and clicking star 2 again clears the filter.
         assert_eq!(html.matches("class=\"on\"").count(), 2);
         assert!(html.contains("href=\"/photos/Photos/Lego\" title=\"\u{2265}2 stars\""));
