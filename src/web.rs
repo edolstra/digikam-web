@@ -16,7 +16,12 @@ use crate::query::{self, PhotoQuery};
 /// left-to-right, top-to-bottom; each day forms its own grid under a heading.
 const STYLE: &str = "\
 body { font-family: sans-serif; margin: 1rem; background: #111; color: #eee; }
-h1 { font-size: 1.2rem; font-weight: 600; }
+/* Breadcrumb navbar: pinned to the top, full-width (negative margins break out
+   of the body padding), staying put while the page scrolls underneath. */
+h1 { position: sticky; top: 0; z-index: 100;
+     margin: -1rem -1rem 1rem; padding: 0.6rem 1rem;
+     font-size: 1.2rem; font-weight: 600;
+     background: #1a1a1a; border-bottom: 1px solid #333; }
 h1 a { color: #6cf; text-decoration: none; }
 h1 a:hover { text-decoration: underline; }
 h1 .home { font-size: 1.3rem; }
