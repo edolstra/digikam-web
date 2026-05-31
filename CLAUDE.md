@@ -65,11 +65,17 @@ This is the seed of the browsing UI (planned to grow into Leptos later).
   they also constrain the sub-album tile covers/counts.
 - **Sub-album grid** (below the breadcrumb): direct sub-albums (newest-first, from
   `/api/subalbums`); each tile is the cover image with the bold sub-album name and
-  `(count)` centered on top, linking to that sub-album.
+  `(count)` centered on top, linking to that sub-album. Covers use the same lazy
+  thumbnail pipeline as the grid (below).
 - **Photo grid**: grouped by day (newest first), fixed-height tiles wrapping
-  left-to-right. Images load from `/api/photos/:id/file` directly (no thumbnails yet)
-  with `loading="lazy"`. Videos (`is_video`) render as a placeholder tile with a ▶
-  badge (nothing fetched until opened).
+  left-to-right. Image tiles are `<img class="thumb">` rendered **src-less** (the
+  day's tiles reserve their width from the photo's aspect ratio so the layout
+  doesn't reflow as they decode in); an `IntersectionObserver` then loads each
+  `/api/photos/:id/thumbnail` (raw PGF), decodes it in a webpgf **wasm Web Worker**,
+  and paints it — rotated per `X-Orientation` — via a canvas→blob URL. A `404` or any
+  decode failure falls back to the full-size `/file` (`data-full`); that URL is also
+  what the lightbox opens. Videos (`is_video`) render as a placeholder tile with a ▶
+  badge (nothing fetched until opened). See [Thumbnails](#thumbnails).
 - **Lightbox** (click a photo/video): full-page over a dimmed grid, requesting
   **fullscreen** (Fullscreen API; guarded/no-op where unsupported, e.g. iPhone Safari).
   The media is scaled to fill the viewport (up or down, preserving aspect). Videos
@@ -154,8 +160,16 @@ so the browser can stream-compile). Both carry a content-addressed `ETag` (the w
 store hash) honoring `If-None-Match`→`304`, plus `Cache-Control: public, max-age=604800`.
 The embed path comes from the `WEBPGF_PATH` env var, which the flake sets to the `webpgf`
 derivation output for **both** `nix build` (`commonArgs`) and the dev shell — so plain
-`cargo build` inside `nix develop` embeds them too. *(Frontend wiring — IntersectionObserver
-→ fetch → wasm-decode in a worker → canvas — is still pending.)*
+`cargo build` inside `nix develop` embeds them too.
+
+The frontend ([web.js](src/web.js)) wires this up: an `IntersectionObserver` (300 px
+`rootMargin`) triggers a `/thumbnail` fetch per `img.thumb` tile, the PGF is decoded in a
+**Blob Web Worker** (loads `/webpgf.js`, instantiates with the `/webpgf.wasm` bytes once,
+returns an `ImageData` whose buffer is transferred back), and the main thread draws it —
+applying the EXIF `X-Orientation` (2..8; 0/1/junk = no rotation) — to a canvas, then sets
+the `<img>` to the canvas's blob URL. The worker URLs are made **absolute** (`location.origin`
+baked in) because a `blob:` worker resolves relative paths against its opaque blob base, not
+the page origin. Decode runs off the main thread to keep scrolling smooth.
 
 ### Deliberately out of scope (this milestone)
 - Auth, any write operations, and search by date/rating/geo.

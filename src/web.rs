@@ -82,6 +82,17 @@ fn photo_day(creation_date: Option<&str>) -> Option<&str> {
     creation_date.filter(|d| d.len() >= 10).map(|d| &d[..10])
 }
 
+/// Inline `width` (the grid row height is 200px) reserving a tile's space from
+/// its aspect ratio, so the layout doesn't reflow as thumbnails decode in. `None`
+/// when the dimensions are unknown; JS clears it once the real image loads (the
+/// natural aspect then takes over, which also corrects rotated images).
+fn thumb_reserve(width: Option<u64>, height: Option<u64>) -> Option<String> {
+    match (width, height) {
+        (Some(w), Some(h)) if h > 0 => Some(format!("width:{}px", (200 * w) / h)),
+        _ => None,
+    }
+}
+
 /// The frontend URL for album path segments, e.g. `["Photos", "Lego"]` ->
 /// `/photos/Photos/Lego`, percent-encoding each segment and appending the active
 /// filters so they are carried along. `[]` is the root (`/photos`).
@@ -147,8 +158,10 @@ fn render_subalbums(album: &[String], subalbums: &[SubAlbum], filters: &Filters)
                 @for sub in subalbums {
                     a.album href=(album_href(&child(album, &sub.name), filters)) {
                         @if let Some(cover) = &sub.cover {
-                            img src=(format!("/api/photos/{}/file", cover.id))
-                                alt=(cover.name) loading="lazy";
+                            // Same lazy thumbnail pipeline as the grid (web.js);
+                            // the caption already shows the name, so `alt=""`.
+                            img.thumb data-id=(cover.id)
+                                data-full=(format!("/api/photos/{}/file", cover.id)) alt="";
                         }
                         span.caption {
                             span.title { (sub.name) }
@@ -274,14 +287,18 @@ async fn render(state: AppState, album: &[String], filters: Filters) -> AppResul
                         h2 { (day) }
                         div.grid {
                             @for photo in photos {
-                                @let src = format!("/api/photos/{}/file", photo.id);
+                                @let full = format!("/api/photos/{}/file", photo.id);
                                 @if photo.is_video {
                                     // Placeholder tile (▶ badge via CSS); nothing
                                     // is fetched until it's opened in the lightbox.
-                                    button.vtile data-src=(src) title=(photo.name) {}
+                                    button.vtile data-src=(full) title=(photo.name) {}
                                 } @else {
-                                    // Originals are full-size, so load lazily.
-                                    img src=(src) alt=(photo.name) loading="lazy";
+                                    // The thumbnail (raw PGF) is fetched + wasm-decoded
+                                    // lazily by web.js; `data-full` is the original,
+                                    // used by the lightbox and as the decode fallback.
+                                    img.thumb data-id=(photo.id) data-full=(full)
+                                        alt="" title=(photo.name)
+                                        style=[thumb_reserve(photo.width, photo.height)];
                                 }
                             }
                         }

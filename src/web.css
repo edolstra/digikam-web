@@ -34,6 +34,9 @@ h2 { font-size: 1rem; margin: 1.5rem 0 0.5rem; padding-bottom: 0.25rem;
 .grid { display: flex; flex-wrap: wrap; gap: 4px; align-items: flex-end; }
 .grid img { height: 200px; width: auto; display: block; background: #222; cursor: pointer;
             touch-action: manipulation; }
+/* Thumbnails start src-less (web.js paints the decoded PGF); the #222 box and a
+   reserved width hold the tile's place. Floor the width for unknown-aspect tiles. */
+.grid img.thumb { min-width: 60px; }
 .grid .vtile { height: 200px; width: 300px; background: #222; border: 0; padding: 0;
                position: relative; cursor: pointer; touch-action: manipulation; }
 .grid .vtile::after { content: '▶'; position: absolute; inset: 0; display: flex;
