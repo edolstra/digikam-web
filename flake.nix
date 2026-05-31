@@ -23,8 +23,19 @@
 
         craneLib = (crane.mkLib pkgs).overrideToolchain rustToolchain;
 
+        # Keep Cargo sources plus the web assets that `include_str!` pulls in
+        # (cleanCargoSource alone would drop the .css/.js files).
+        src = pkgs.lib.cleanSourceWith {
+          src = ./.;
+          name = "source";
+          filter = path: type:
+            (pkgs.lib.hasSuffix ".css" path)
+            || (pkgs.lib.hasSuffix ".js" path)
+            || (craneLib.filterCargoSources path type);
+        };
+
         commonArgs = {
-          src = craneLib.cleanCargoSource ./.;
+          inherit src;
           strictDeps = true;
           # rusqlite is built with the `bundled` feature, so no system SQLite
           # or pkg-config is required.

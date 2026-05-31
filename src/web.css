@@ -1,0 +1,62 @@
+body { font-family: sans-serif; margin: 1rem; background: #111; color: #eee; }
+/* Breadcrumb navbar: pinned to the top, full-width (negative margins break out
+   of the body padding), staying put while the page scrolls underneath. The
+   breadcrumb sits on the left, the rating selector on the right. */
+.navbar { position: sticky; top: 0; z-index: 100;
+          margin: -1rem -1rem 1rem; padding: 0.6rem 1rem;
+          background: #1a1a1a; border-bottom: 1px solid #333;
+          display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+.crumb { font-size: 1.2rem; font-weight: 600; }
+.crumb a { color: #6cf; text-decoration: none; }
+.crumb a:hover { text-decoration: underline; }
+.crumb .home { font-size: 1.3rem; }
+.crumb .sep { color: #666; margin: 0 0.2rem; }
+.rating { white-space: nowrap; }
+.rating a { color: #555; text-decoration: none; font-size: 1.2rem; padding: 0 1px; }
+.rating a.on { color: #f5c518; }
+.rating a:hover { color: #f5c518; }
+h2 { font-size: 1rem; margin: 1.5rem 0 0.5rem; padding-bottom: 0.25rem;
+     border-bottom: 1px solid #333; color: #aaa; }
+.count { color: #888; font-size: 0.85rem; }
+.albums { display: flex; flex-wrap: wrap; gap: 10px; margin: 0.5rem 0 1.5rem; }
+.album { position: relative; width: 200px; height: 150px; display: block;
+         text-decoration: none; border-radius: 4px; overflow: hidden; background: #222; }
+.album img { width: 200px; height: 150px; object-fit: cover; display: block;
+             background: #222; }
+.album .caption { position: absolute; inset: 0; display: flex;
+                  flex-direction: column; align-items: center; justify-content: center;
+                  text-align: center; gap: 0.2rem; padding: 0.5rem;
+                  color: #fff; text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9);
+                  background: rgba(0, 0, 0, 0.3); }
+.album:hover .caption { background: rgba(0, 0, 0, 0.45); }
+.album .title { font-weight: bold; }
+.album .cnt { font-size: 0.8rem; }
+.grid { display: flex; flex-wrap: wrap; gap: 4px; align-items: flex-end; }
+.grid img { height: 200px; width: auto; display: block; background: #222; cursor: pointer;
+            touch-action: manipulation; }
+.grid .vtile { height: 200px; width: 300px; background: #222; border: 0; padding: 0;
+               position: relative; cursor: pointer; touch-action: manipulation; }
+.grid .vtile::after { content: '▶'; position: absolute; inset: 0; display: flex;
+                      align-items: center; justify-content: center; font-size: 3rem;
+                      color: rgba(255, 255, 255, 0.85); text-shadow: 0 0 8px rgba(0, 0, 0, 0.8); }
+body.modal-open { overflow: hidden; }
+/* Sized in dynamic viewport units (dvw/dvh) so it tracks the *visible* viewport
+   on mobile as the toolbars show/hide — plain vh/vw refer to the large viewport
+   and would let portrait photos overflow (and get clipped) in landscape. */
+.lightbox { position: fixed; inset: 0; width: 100dvw; height: 100dvh;
+            z-index: 1000; display: none;
+            align-items: center; justify-content: center;
+            background: rgba(0, 0, 0, 0.9); }
+.lightbox.open { display: flex; }
+.lightbox .full { width: 100%; height: 100%; object-fit: contain; display: none; }
+.lightbox .full.active { display: block; }
+.lightbox .close { position: absolute; top: 0.25rem; right: 0.75rem;
+                   font-size: 2.5rem; line-height: 1; }
+.lightbox .nav { position: absolute; top: 50%; transform: translateY(-50%);
+                 font-size: 3rem; padding: 0 1rem; }
+.lightbox .prev { left: 0; }
+.lightbox .next { right: 0; }
+.lightbox button { background: none; border: 0; color: #fff; cursor: pointer;
+                   user-select: none; opacity: 0.8; touch-action: manipulation; }
+.lightbox button:hover { opacity: 1; }
+.lightbox button[disabled] { opacity: 0.15; cursor: default; }

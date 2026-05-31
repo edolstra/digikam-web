@@ -119,8 +119,14 @@ src/
   query.rs     /photos + /subalbums SQL + param building              (+ unit tests)
   handlers.rs  axum JSON API handlers, run_blocking DB helper
   web.rs       server-rendered HTML frontend pages           (+ unit tests)
+  web.css      frontend stylesheet, inlined via include_str!  (STYLE)
+  web.js       lightbox behavior, inlined via include_str!    (SCRIPT)
   error.rs     AppError -> JSON HTTP responses
 ```
+
+> `web.css`/`web.js` are pulled in with `include_str!` and inlined into each page.
+> The flake's `src` filter keeps `.css`/`.js` alongside the Cargo sources (plain
+> `cleanCargoSource` would drop them and the build would fail).
 
 ## Future frontend
 Planned as full-stack Rust (**Leptos** recommended). The JSON API + `/file` endpoint
