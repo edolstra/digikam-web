@@ -29,15 +29,22 @@ pub struct AppState {
 /// Connections are opened with `SQLITE_OPEN_READ_ONLY` so we can never modify
 /// Digikam's data, and each sets a busy timeout so that reads don't fail while
 /// Digikam itself is writing.
-pub fn build_pool(database: &Path) -> Result<Pool> {
+pub fn build_pool(database: &Path, trace_sql: bool) -> Result<Pool> {
     if !database.exists() {
         anyhow::bail!("database not found: {}", database.display());
     }
     let manager = SqliteConnectionManager::file(database)
         .with_flags(OpenFlags::SQLITE_OPEN_READ_ONLY)
-        .with_init(|c| {
+        .with_init(move |c| {
             c.busy_timeout(std::time::Duration::from_secs(5))?;
             c.pragma_update(None, "query_only", true)?;
+            if trace_sql {
+                // The callback receives each statement with its bound values
+                // already expanded, logged under the `digikam_browse::sql` target.
+                c.trace(Some(|sql| {
+                    tracing::info!(target: "digikam_browse::sql", "{sql}");
+                }));
+            }
             Ok(())
         });
     let pool = r2d2::Pool::builder()

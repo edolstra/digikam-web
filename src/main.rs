@@ -29,7 +29,7 @@ async fn main() -> Result<()> {
     let config = Config::parse();
     tracing::info!(database = %config.database.display(), "opening Digikam database (read-only)");
 
-    let pool = db::build_pool(&config.database)?;
+    let pool = db::build_pool(&config.database, config.trace_sql)?;
     let roots = {
         let conn = pool.get().context("failed to get database connection")?;
         db::load_roots(&conn)?

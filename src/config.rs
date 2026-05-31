@@ -18,6 +18,10 @@ pub struct Config {
     /// Address to listen on.
     #[arg(long, env = "LISTEN_ADDR", default_value = "127.0.0.1:8080")]
     pub listen: SocketAddr,
+
+    /// Log every SQL statement (with bound values) as it executes.
+    #[arg(long, env = "TRACE_SQL")]
+    pub trace_sql: bool,
 }
 
 /// The conventional location of the Digikam database under the user's home dir.

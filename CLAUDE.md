@@ -19,6 +19,8 @@ nix flake check                      # build + clippy (-D warnings)
 Config (CLI flags or env vars):
 - `--database` / `DIGIKAM_DB` — path to `digikam4.db` (default `~/.local/share/digikam/db/digikam4.db`).
 - `--listen` / `LISTEN_ADDR` — bind address (default `127.0.0.1:8080`).
+- `--trace-sql` / `TRACE_SQL` — log every executed SQL statement (with bound values
+  inlined) at `info` under the `digikam_browse::sql` target. Off by default.
 
 > Nix flakes only see git-tracked files. After adding/renaming a file, `git add` it
 > before `nix build`/`nix develop`, or Nix won't find it (and crane needs `Cargo.lock` tracked).
