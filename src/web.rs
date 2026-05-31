@@ -313,7 +313,7 @@ async fn render(
         tags: Vec::new(),
         min_rating: filters.min_rating,
         // No real pagination in this first cut; list everything in the album.
-        limit: i64::MAX,
+        limit: u64::MAX,
         offset: 0,
     };
 

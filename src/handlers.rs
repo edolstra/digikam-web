@@ -28,8 +28,8 @@ pub struct PhotoParams {
     recursive: bool,
     #[serde(default)]
     min_rating: Rating,
-    limit: Option<i64>,
-    offset: Option<i64>,
+    limit: Option<u64>,
+    offset: Option<u64>,
 }
 
 /// `GET /photos?album=/Root/path&tags=a,b&recursive&limit=&offset=`
@@ -55,7 +55,7 @@ pub async fn list_photos(
         tags,
         min_rating: params.min_rating,
         limit: params.limit.unwrap_or(DEFAULT_LIMIT).clamp(1, MAX_LIMIT),
-        offset: params.offset.unwrap_or(0).max(0),
+        offset: params.offset.unwrap_or(0),
     };
 
     let page = run_blocking(&state, move |conn, state| {

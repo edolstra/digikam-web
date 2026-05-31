@@ -9,8 +9,8 @@ use crate::db::{album_display_path, AlbumRoot};
 use crate::error::{AppError, AppResult};
 use crate::models::{Cover, Page, PhotoSummary, SubAlbum};
 
-pub const DEFAULT_LIMIT: i64 = 200;
-pub const MAX_LIMIT: i64 = 1000;
+pub const DEFAULT_LIMIT: u64 = 200;
+pub const MAX_LIMIT: u64 = 1000;
 
 /// A photo rating constrained to 0..=5. Construction — including
 /// `Deserialize` from query strings — is the single place the range is enforced,
@@ -59,8 +59,8 @@ pub struct PhotoQuery {
     /// images (rating `-1`/NULL) count as 0, so `0` includes everything and `>= 1`
     /// excludes the unrated.
     pub min_rating: Rating,
-    pub limit: i64,
-    pub offset: i64,
+    pub limit: u64,
+    pub offset: u64,
 }
 
 /// The set of view filters active on an album page. Held separately from
@@ -219,7 +219,7 @@ pub fn list_photos(
 
     // Total count over the same filter.
     let count_sql = format!("SELECT COUNT(*){filter}");
-    let total: i64 = conn.query_row(
+    let total = conn.query_row(
         &count_sql,
         rusqlite::params_from_iter(params.iter()),
         |row| row.get(0),
@@ -233,8 +233,8 @@ pub fn list_photos(
          LIMIT ? OFFSET ?"
     );
     let mut select_params = params;
-    select_params.push(Value::Integer(q.limit));
-    select_params.push(Value::Integer(q.offset));
+    select_params.push(Value::Integer(q.limit as i64));
+    select_params.push(Value::Integer(q.offset as i64));
 
     let mut stmt = conn.prepare(&select_sql)?;
     let items = stmt

@@ -3,9 +3,9 @@ use serde::Serialize;
 /// A paginated response envelope.
 #[derive(Debug, Serialize)]
 pub struct Page<T> {
-    pub total: i64,
-    pub limit: i64,
-    pub offset: i64,
+    pub total: u64,
+    pub limit: u64,
+    pub offset: u64,
     pub items: Vec<T>,
 }
 
