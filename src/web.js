@@ -149,6 +149,18 @@
     else if (e.key === ' ') { var it = curItem(); if (it && it.video) { e.preventDefault(); togglePlay(); } }
   });
 
+  // Alt+Up navigates to the parent album (the second-to-last breadcrumb link,
+  // which already carries the active filters). Only in the album view, not the
+  // lightbox; a no-op at the root, where there's no parent.
+  document.addEventListener('keydown', function (e) {
+    if (isOpen() || !e.altKey || e.key !== 'ArrowUp') return;
+    e.preventDefault();
+    var crumbs = document.querySelectorAll('.crumb a');
+    if (crumbs.length >= 2) {
+      location.href = crumbs[crumbs.length - 2].href;
+    }
+  });
+
   // Horizontal swipe: left -> next, right -> prev.
   var sx = 0, sy = 0;
   lb.addEventListener('touchstart', function (e) {

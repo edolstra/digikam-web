@@ -53,7 +53,8 @@ This is the seed of the browsing UI (planned to grow into Leptos later).
 
 - **Navbar (sticky** — pinned to the top, the page scrolls underneath**)**: a
   breadcrumb starting with a `⌂` home icon (→ `/photos`) then `› Photos › Lego ›
-  Porsche911`, each segment linking to that ancestor album.
+  Porsche911`, each segment linking to that ancestor album. **Alt+↑** navigates to
+  the parent album (the second-to-last breadcrumb link).
 - **Rating selector** (navbar, right side): five `★` links, no JS. Clicking star K
   filters to `?min_rating=K` (≥K stars); clicking the active threshold clears it.
 - **Filters** are encoded in the URL via a `Filters` struct ([src/query.rs](src/query.rs))
