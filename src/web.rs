@@ -11,7 +11,7 @@ use crate::db::AppState;
 use crate::error::AppResult;
 use crate::handlers::run_blocking;
 use crate::models::SubAlbum;
-use crate::query::{self, PhotoQuery};
+use crate::query::{self, Filters, PhotoQuery};
 
 /// Inline stylesheet for the album grid. Photos are fixed-height and wrap
 /// left-to-right, top-to-bottom; each day forms its own grid under a heading.
@@ -140,40 +140,6 @@ const SCRIPT: &str = r#"
 /// The day a photo belongs to (`YYYY-MM-DD`), or `None` if it has no date.
 fn photo_day(creation_date: Option<&str>) -> Option<&str> {
     creation_date.filter(|d| d.len() >= 10).map(|d| &d[..10])
-}
-
-/// The view filters that are reflected in the URL and carried across navigation.
-/// Currently just a minimum rating; designed to grow (tags, date range, …) — add
-/// a field, serialize it in [`Filters::query_string`], and every album/sub-album
-/// link picks it up automatically.
-#[derive(Debug, Clone, Default)]
-struct Filters {
-    /// Minimum rating, 1..=5; `None` means no rating filter.
-    min_rating: Option<i64>,
-}
-
-impl Filters {
-    /// The query-string suffix encoding the active filters, e.g. `?min_rating=3`
-    /// (empty when nothing is active).
-    fn query_string(&self) -> String {
-        let mut params: Vec<String> = Vec::new();
-        if let Some(r) = self.min_rating {
-            params.push(format!("min_rating={r}"));
-        }
-        if params.is_empty() {
-            String::new()
-        } else {
-            format!("?{}", params.join("&"))
-        }
-    }
-
-    /// A copy with `min_rating` changed, preserving any other active filters.
-    fn with_min_rating(&self, min_rating: Option<i64>) -> Filters {
-        Filters {
-            min_rating,
-            ..self.clone()
-        }
-    }
 }
 
 /// The frontend URL for an album display path, e.g. `/Photos/Lego` ->
@@ -353,9 +319,11 @@ async fn render(
 
     // Fetch the album's photos and its direct sub-albums on one connection.
     let album_for_subs = album.clone();
+    let filters_for_subs = filters.clone();
     let (page, subalbums) = run_blocking(&state, move |conn, state| {
         let page = query::list_photos(conn, &state.roots, &q)?;
-        let subalbums = query::list_subalbums(conn, &state.roots, &album_for_subs)?;
+        let subalbums =
+            query::list_subalbums(conn, &state.roots, &album_for_subs, &filters_for_subs)?;
         Ok((page, subalbums))
     })
     .await?;

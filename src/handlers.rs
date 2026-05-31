@@ -12,7 +12,7 @@ use tower_http::services::ServeFile;
 use crate::db::{album_display_path, image_abs_path, AppState, PooledConn};
 use crate::error::{AppError, AppResult};
 use crate::models::{AlbumNode, Page, PhotoDetail, PhotoSummary, SubAlbum, TagNode};
-use crate::query::{self, PhotoQuery, DEFAULT_LIMIT, MAX_LIMIT};
+use crate::query::{self, Filters, PhotoQuery, DEFAULT_LIMIT, MAX_LIMIT};
 
 /// `GET /health`
 pub async fn health() -> impl IntoResponse {
@@ -40,6 +40,21 @@ fn flag(value: Option<&str>) -> bool {
     }
 }
 
+/// Build [`Filters`] from raw query values, validating `min_rating` to 0..=5
+/// (`400` otherwise). Shared by the endpoints that accept filter parameters.
+fn parse_filters(min_rating: Option<i64>) -> AppResult<Filters> {
+    let min_rating = match min_rating {
+        Some(r) if (0..=5).contains(&r) => Some(r),
+        Some(r) => {
+            return Err(AppError::BadRequest(format!(
+                "min_rating must be between 0 and 5, got {r}"
+            )))
+        }
+        None => None,
+    };
+    Ok(Filters { min_rating })
+}
+
 /// `GET /photos?album=/Root/path&tags=a,b&recursive&limit=&offset=`
 pub async fn list_photos(
     State(state): State<AppState>,
@@ -57,21 +72,13 @@ pub async fn list_photos(
         })
         .unwrap_or_default();
 
-    let min_rating = match params.min_rating {
-        Some(r) if (0..=5).contains(&r) => Some(r),
-        Some(r) => {
-            return Err(AppError::BadRequest(format!(
-                "min_rating must be between 0 and 5, got {r}"
-            )))
-        }
-        None => None,
-    };
+    let filters = parse_filters(params.min_rating)?;
 
     let q = PhotoQuery {
         album: params.album.filter(|a| !a.is_empty()),
         recursive: flag(params.recursive.as_deref()),
         tags,
-        min_rating,
+        min_rating: filters.min_rating,
         limit: params.limit.unwrap_or(DEFAULT_LIMIT).clamp(1, MAX_LIMIT),
         offset: params.offset.unwrap_or(0).max(0),
     };
@@ -240,10 +247,13 @@ fn strip_weak(tag: &str) -> &str {
 #[derive(Debug, Deserialize)]
 pub struct SubalbumParams {
     album: Option<String>,
+    /// Minimum rating, 0..=5; filters the cover and count alike.
+    min_rating: Option<i64>,
 }
 
-/// `GET /subalbums?album=/Root/rel` — direct sub-albums of an album, each with a
-/// cover (newest photo in its subtree) and recursive photo count, sorted by name.
+/// `GET /subalbums?album=/Root/rel&min_rating=` — direct sub-albums of an album,
+/// each with a cover (newest photo in its subtree) and recursive photo count,
+/// sorted by name. `min_rating` filters the cover and count alike.
 pub async fn list_subalbums(
     State(state): State<AppState>,
     Query(params): Query<SubalbumParams>,
@@ -253,8 +263,10 @@ pub async fn list_subalbums(
         .filter(|a| !a.is_empty())
         .ok_or_else(|| AppError::BadRequest("the `album` query parameter is required".into()))?;
 
+    let filters = parse_filters(params.min_rating)?;
+
     let subalbums = run_blocking(&state, move |conn, state| {
-        query::list_subalbums(conn, &state.roots, &album)
+        query::list_subalbums(conn, &state.roots, &album, &filters)
     })
     .await?;
 

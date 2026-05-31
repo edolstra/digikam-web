@@ -28,6 +28,41 @@ pub struct PhotoQuery {
     pub offset: i64,
 }
 
+/// The set of view filters active on an album page. Held separately from
+/// [`PhotoQuery`] so the web layer can carry them across links (see
+/// [`Filters::query_string`]); consumed by [`list_subalbums`] and applied to the
+/// photo grid. Designed to grow (tags, date range, …) — add a field, serialize it
+/// in `query_string`, and apply it where the queries filter.
+#[derive(Debug, Clone, Default)]
+pub struct Filters {
+    /// Minimum rating, 1..=5; `None` means no rating filter.
+    pub min_rating: Option<i64>,
+}
+
+impl Filters {
+    /// The query-string suffix encoding the active filters, e.g. `?min_rating=3`
+    /// (empty when nothing is active).
+    pub fn query_string(&self) -> String {
+        let mut params: Vec<String> = Vec::new();
+        if let Some(r) = self.min_rating {
+            params.push(format!("min_rating={r}"));
+        }
+        if params.is_empty() {
+            String::new()
+        } else {
+            format!("?{}", params.join("&"))
+        }
+    }
+
+    /// A copy with `min_rating` changed, preserving any other active filters.
+    pub fn with_min_rating(&self, min_rating: Option<i64>) -> Filters {
+        Filters {
+            min_rating,
+            ..self.clone()
+        }
+    }
+}
+
 /// Escape `%`, `_` and `\` for use in a `LIKE ... ESCAPE '\'` pattern.
 fn escape_like(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
@@ -211,11 +246,14 @@ pub fn list_photos(
 
 /// List the direct sub-albums of `album`, each with its recursive photo count
 /// and a cover (the newest **image** anywhere in that sub-album's subtree), sorted
-/// by name. Albums with no visible photos anywhere are omitted.
+/// by name. Albums with no matching photos anywhere are omitted.
+///
+/// `filters` applies the same filtering as the photo grid to the whole subtree,
+/// so the count, the cover, and which sub-albums appear all respect it.
 ///
 /// Videos (`category = 2`) are never used as a cover: a sub-album whose subtree
-/// contains only videos is still listed but with no cover (`cover` is `None`).
-/// The photo count includes videos.
+/// contains only (matching) videos is still listed but with no cover (`cover` is
+/// `None`). The photo count includes videos.
 ///
 /// One query: every photo in the subtree is bucketed by its direct-child path
 /// segment; the count is taken over all photos in the bucket, while the cover is
@@ -226,6 +264,7 @@ pub fn list_subalbums(
     conn: &Connection,
     roots: &HashMap<i64, AlbumRoot>,
     album: &str,
+    filters: &Filters,
 ) -> AppResult<Vec<SubAlbum>> {
     let (label, rel) = parse_album(album)?;
     let Some((&root_id, _)) = roots.iter().find(|(_, r)| r.label == label) else {
@@ -240,6 +279,8 @@ pub fn list_subalbums(
     };
     let like = format!("{}%", escape_like(&prefix));
     let parent = album.trim_end_matches('/');
+    // 0 makes the rating clause `max(...,0) >= 0` always true (i.e. no filter).
+    let min = filters.min_rating.unwrap_or(0);
 
     let mut stmt = conn.prepare_cached(
         "WITH matched AS ( \
@@ -251,6 +292,7 @@ pub fn list_subalbums(
            WHERE i.status = 1 AND a.albumRoot = :root \
              AND a.relativePath LIKE :like ESCAPE '\\' \
              AND length(a.relativePath) > length(:prefix) \
+             AND max(ifnull(ii.rating, 0), 0) >= :min \
          ), \
          bucketed AS ( \
            SELECT image_id, image_name, category, cdate, \
@@ -275,7 +317,7 @@ pub fn list_subalbums(
     )?;
 
     let rows = stmt.query_map(
-        rusqlite::named_params! { ":prefix": prefix, ":root": root_id, ":like": like },
+        rusqlite::named_params! { ":prefix": prefix, ":root": root_id, ":like": like, ":min": min },
         |row| {
             Ok((
                 row.get::<_, String>(0)?,
