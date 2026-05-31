@@ -165,7 +165,7 @@ pub async fn root_page(
     let filters = Filters {
         min_rating: params.min_rating,
     };
-    render(state, None, filters).await
+    render(state, "", filters).await
 }
 
 /// `GET /photos/<album path>` — e.g. `/photos/Photos/Lego/Porsche911`. An empty
@@ -179,25 +179,24 @@ pub async fn album_page(
         min_rating: params.min_rating,
     };
     let trimmed = path.trim_matches('/');
-    if trimmed.is_empty() {
-        return render(state, None, filters).await;
-    }
-    render(state, Some(format!("/{trimmed}")), filters).await
+    // Empty path -> "" -> the virtual root.
+    let album = if trimmed.is_empty() {
+        String::new()
+    } else {
+        format!("/{trimmed}")
+    };
+    render(state, &album, filters).await
 }
 
-/// Render the album browsing page. `album` is `None` for the virtual root (album
-/// roots shown as tiles, no photo grid), or `Some("/Root/rel")` for a real album.
-async fn render(
-    state: AppState,
-    album: Option<String>,
-    filters: Filters,
-) -> AppResult<Html<String>> {
-    // "" is the virtual root (album roots as tiles, no photo grid); a non-empty
-    // path is a real album (sub-album tiles + its own photo grid). `list_subalbums`
-    // handles both; only a real album also runs a `PhotoQuery`.
-    let album = album.unwrap_or_default();
+/// Render the album browsing page. `album` is `""` for the virtual root (album
+/// roots shown as tiles, no photo grid), or `"/Root/rel"` for a real album.
+///
+/// `""` is the virtual root; a non-empty path is a real album (sub-album tiles +
+/// its own photo grid). `list_subalbums` handles both; only a real album also
+/// runs a `PhotoQuery`.
+async fn render(state: AppState, album: &str, filters: Filters) -> AppResult<Html<String>> {
     let q = (!album.is_empty()).then(|| PhotoQuery {
-        album: Some(album.clone()),
+        album: Some(album.to_string()),
         recursive: false,
         tags: Vec::new(),
         min_rating: filters.min_rating,
@@ -207,7 +206,7 @@ async fn render(
     });
 
     // Fetch the (optional) photo page and the sub-album tiles on one connection.
-    let album_for_subs = album.clone();
+    let album_for_subs = album.to_string();
     let filters_for_subs = filters.clone();
     let (page, subalbums) = run_blocking(&state, move |conn, state| {
         let page = match &q {
@@ -276,10 +275,10 @@ async fn render(
     let title = if album.is_empty() {
         "Photos".to_string()
     } else {
-        escape_html(&album)
+        escape_html(album)
     };
-    let crumb = breadcrumb(&album, &filters);
-    let controls = rating_selector(&album, &filters);
+    let crumb = breadcrumb(album, &filters);
+    let controls = rating_selector(album, &filters);
     let body = format!("{albums_html}{grid}");
     Ok(Html(page_html(&title, &crumb, &controls, &body)))
 }
