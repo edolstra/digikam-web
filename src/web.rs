@@ -50,7 +50,8 @@ h2 { font-size: 1rem; margin: 1.5rem 0 0.5rem; padding-bottom: 0.25rem;
 .album .title { font-weight: bold; }
 .album .cnt { font-size: 0.8rem; }
 .grid { display: flex; flex-wrap: wrap; gap: 4px; align-items: flex-end; }
-.grid img { height: 200px; width: auto; display: block; background: #222; cursor: pointer; }
+.grid img { height: 200px; width: auto; display: block; background: #222; cursor: pointer;
+            touch-action: manipulation; }
 body.modal-open { overflow: hidden; }
 /* Sized in dynamic viewport units (dvw/dvh) so it tracks the *visible* viewport
    on mobile as the toolbars show/hide — plain vh/vw refer to the large viewport
@@ -68,7 +69,7 @@ body.modal-open { overflow: hidden; }
 .lightbox .prev { left: 0; }
 .lightbox .next { right: 0; }
 .lightbox button { background: none; border: 0; color: #fff; cursor: pointer;
-                   user-select: none; opacity: 0.8; }
+                   user-select: none; opacity: 0.8; touch-action: manipulation; }
 .lightbox button:hover { opacity: 1; }
 .lightbox button[disabled] { opacity: 0.15; cursor: default; }
 ";
@@ -86,6 +87,15 @@ const SCRIPT: &str = r#"
 
   function isOpen() { return lb.classList.contains('open'); }
 
+  // Decode the neighbours ahead of time so tapping prev/next paints instantly
+  // (originals are full-size, so the decode is the slow part — worst on Firefox).
+  function preload(i) {
+    if (i >= 0 && i < imgs.length) {
+      var im = new Image();
+      im.src = imgs[i].src;
+    }
+  }
+
   function show(i) {
     if (i < 0 || i >= imgs.length) return;
     idx = i;
@@ -95,6 +105,8 @@ const SCRIPT: &str = r#"
     next.disabled = (i === imgs.length - 1);
     lb.classList.add('open');
     document.body.classList.add('modal-open');
+    preload(i + 1);
+    preload(i - 1);
   }
 
   // Open via a pushed history entry so the device Back button (and gesture)
@@ -288,7 +300,7 @@ fn page_html(title: &str, crumb: &str, controls: &str, body: &str) -> String {
          <div id=\"lightbox\" class=\"lightbox\">\n\
          <button class=\"close\" aria-label=\"Close\">\u{00d7}</button>\n\
          <button class=\"nav prev\" aria-label=\"Previous\">\u{2039}</button>\n\
-         <img id=\"lb-img\" class=\"full\" alt=\"\">\n\
+         <img id=\"lb-img\" class=\"full\" alt=\"\" decoding=\"async\">\n\
          <button class=\"nav next\" aria-label=\"Next\">\u{203a}</button>\n\
          </div>\n\
          <script>{SCRIPT}</script>\n\
