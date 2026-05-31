@@ -217,9 +217,11 @@
     "postMessage({id:d.id,w:im.width,h:im.height,buf:o.buffer},[o.buffer]);})" +
     ".catch(function(err){postMessage({id:d.id,error:String((err&&err.message)||err)});});};";
 
+  // High priority: these gate the whole decode pipeline, so they shouldn't wait
+  // behind the thumbnail fetches.
   Promise.all([
-    fetch(base + '/webpgf.js').then(function (r) { return r.text(); }),
-    fetch(base + '/webpgf.wasm').then(function (r) { return r.arrayBuffer(); })
+    fetch(base + '/webpgf.js', { priority: 'high' }).then(function (r) { return r.text(); }),
+    fetch(base + '/webpgf.wasm', { priority: 'high' }).then(function (r) { return r.arrayBuffer(); })
   ]).then(function (parts) {
     var url = URL.createObjectURL(new Blob([parts[0] + '\n;' + glue], { type: 'application/javascript' }));
     for (var i = 0; i < POOL; i++) {
@@ -323,18 +325,42 @@
     return out;
   }
 
+  // Cap concurrent thumbnail fetches. Firing a whole screenful of fetches at once
+  // makes Firefox's request pacer hold the burst (~hundreds of ms before any is
+  // even dispatched); a small cap matching the ~6-connection limit keeps the pacer
+  // out of the way, and — since the observer queues tiles top-to-bottom — fetches
+  // the visible rows first.
+  var MAXFETCH = 6;
+  var inflight = 0;
+  var waiting = []; // imgs observed, awaiting a fetch slot (FIFO ~ visual order)
+
+  function schedule(img) { waiting.push(img); pumpFetch(); }
+  function pumpFetch() {
+    while (inflight < MAXFETCH && waiting.length) { inflight++; load(waiting.shift()); }
+  }
+
   function load(img) {
     var id = img.dataset.id;
-    fetch('/api/photos/' + id + '/thumbnail').then(function (res) {
-      if (!res.ok) { fallback(img); return; }
+    function done() { inflight--; pumpFetch(); } // free the fetch slot
+    // High priority: Firefox otherwise holds default-priority fetch() requests
+    // for ~150ms during/after page load before dispatching them.
+    fetch('/api/photos/' + id + '/thumbnail', { priority: 'high' }).then(function (res) {
+      if (!res.ok) { fallback(img); done(); return; }
       var o = parseInt(res.headers.get('X-Orientation'), 10) || 1;
       return res.arrayBuffer().then(function (buf) {
+        done();
         if (ditched) { fallback(img); return; } // no decoders left
         queue.push({ img: img, buf: buf, o: o });
         drain();
       });
-    }).catch(function () { fallback(img); });
+    }).catch(function () { fallback(img); done(); });
   }
+
+  // Kick off the first rows' fetches synchronously, during initial parse, when
+  // Firefox dispatches promptly — requests issued later (from the async observer
+  // callback) get held ~150ms during page load. The observer handles the rest.
+  var EAGER = 24;
+  for (var ei = 0; ei < thumbs.length && ei < EAGER; ei++) { thumbs[ei].__sched = 1; schedule(thumbs[ei]); }
 
   // Decode well ahead of the viewport so paging down lands on already-decoded
   // images: trigger ~1 screen above and ~2.5 screens below the viewport, and only
@@ -342,8 +368,11 @@
   var vh = window.innerHeight || 800;
   var io = new IntersectionObserver(function (entries) {
     entries.forEach(function (en) {
-      if (en.isIntersecting) { io.unobserve(en.target); load(en.target); }
+      if (en.isIntersecting) {
+        io.unobserve(en.target);
+        if (!en.target.__sched) { en.target.__sched = 1; schedule(en.target); }
+      }
     });
   }, { rootMargin: Math.round(vh) + 'px 0px ' + Math.round(vh * 2.5) + 'px 0px' });
-  thumbs.forEach(function (img) { io.observe(img); });
+  thumbs.forEach(function (img) { if (!img.__sched) io.observe(img); });
 })();

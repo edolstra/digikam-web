@@ -174,9 +174,17 @@ derivation output for **both** `nix build` (`commonArgs`) and the dev shell — 
 The frontend ([web.js](src/web.js)) wires this up. An `IntersectionObserver` with a wide,
 viewport-relative `rootMargin` (≈1 screen above, ≈2.5 below) triggers a `/thumbnail` fetch
 per `img.thumb` tile **well before** it scrolls in, so paging down lands on already-decoded
-images. Fetch (network) and decode (CPU) are **separate stages**: fetches run concurrently
-(browser-capped), and each finished PGF blob queues for the next idle worker in a small
-**Blob Web Worker pool** (`min(hardwareConcurrency, 6)`). To make the *first* paint snappy,
+images. Fetch (network) and decode (CPU) are **separate stages**: each finished PGF blob
+queues for the next idle worker in a small **Blob Web Worker pool** (`min(hardwareConcurrency, 6)`).
+
+First-paint latency was dominated by **Firefox network behavior**, fixed three ways
+(see [web.js](src/web.js) — verified to take first paint from ~500ms to ~120ms):
+(1) **cap concurrent fetches** at 6 — firing a screenful at once makes Firefox's request
+pacer hold the *whole burst* for hundreds of ms; (2) **`priority: 'high'`** on every fetch —
+Firefox otherwise deprioritises `fetch()` for ~150ms during page load; (3) **kick off the
+first ~24 tiles synchronously** at script start rather than from the observer callback —
+requests issued during initial parse are dispatched promptly, later ones are held. The
+observer handles the rest (skipping the eager ones). To make the *first* paint snappy,
 the decoder assets are fetched **once** (not once per worker): `/webpgf.js` is inlined into
 the worker body and `/webpgf.wasm` is fetched once, then the pool is **pre-warmed** — each
 worker instantiates the module at page load (via an init message carrying the shared wasm
