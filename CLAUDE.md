@@ -71,6 +71,11 @@ This is the seed of the browsing UI (planned to grow into Leptos later).
   in — no system lib / pkg-config) behind an `r2d2` connection pool. rusqlite is
   blocking, so every DB call runs inside `tokio::task::spawn_blocking` (see
   `run_blocking` in [src/handlers.rs](src/handlers.rs)).
+- **HTML rendering**: the frontend pages use [`maud`](https://maud.lang.rs/)
+  (compile-time `html!` templates with automatic escaping). Handlers return
+  `maud::Markup` (its axum feature makes it `IntoResponse`). The `include_str!`'d
+  `web.css`/`web.js` are emitted inside `<style>`/`<script>` via `PreEscaped`
+  (trusted, must not be escaped).
 - **Read-only & safe alongside running Digikam**: connections open with
   `SQLITE_OPEN_READ_ONLY`, set `PRAGMA query_only=ON`, and a 5s `busy_timeout` so
   reads don't fail while Digikam writes. We deliberately do **not** use `immutable=1`
@@ -118,7 +123,7 @@ src/
   models.rs    serde response types (PhotoSummary, PhotoDetail, AlbumNode, SubAlbum, TagNode, Page<T>)
   query.rs     /photos + /subalbums SQL + param building              (+ unit tests)
   handlers.rs  axum JSON API handlers, run_blocking DB helper
-  web.rs       server-rendered HTML frontend pages           (+ unit tests)
+  web.rs       server-rendered HTML frontend pages (maud)    (+ unit tests)
   web.css      frontend stylesheet, inlined via include_str!  (STYLE)
   web.js       lightbox behavior, inlined via include_str!    (SCRIPT)
   error.rs     AppError -> JSON HTTP responses

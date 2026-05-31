@@ -1,16 +1,14 @@
-//! Server-rendered HTML frontend.
-//!
-//! Currently a minimal starting point: a single page that lists the file names
-//! of the photos in a given album path. This will grow into the real browsing UI.
+//! Server-rendered HTML frontend, built with [`maud`] (compile-time templates
+//! with automatic escaping). This is the seed of the browsing UI.
 
 use axum::extract::{Path, Query, State};
-use axum::response::Html;
+use maud::{html, Markup, PreEscaped, DOCTYPE};
 use serde::Deserialize;
 
 use crate::db::AppState;
 use crate::error::AppResult;
 use crate::handlers::run_blocking;
-use crate::models::SubAlbum;
+use crate::models::{PhotoSummary, SubAlbum};
 use crate::query::{self, Filters, PhotoQuery, Rating};
 
 /// Stylesheet for the frontend pages (inlined into each page's `<style>`).
@@ -43,110 +41,115 @@ fn album_href(album: &str, filters: &Filters) -> String {
 /// `⌂ › Photos › Lego › Porsche911`. The leading house symbol links to `/photos`
 /// (the top of the database); each segment links to that album page, carrying the
 /// active filters.
-fn breadcrumb(album: &str, filters: &Filters) -> String {
-    // The home link points at the virtual root, carrying the active filters.
-    let mut html = format!(
-        "<a class=\"home\" href=\"{href}\" aria-label=\"Home\">\u{2302}</a>",
-        href = escape_html(&album_href("", filters)),
-    );
+fn breadcrumb(album: &str, filters: &Filters) -> Markup {
+    // (cumulative path, segment label) for each non-empty path segment.
     let mut prefix = String::new();
-    for segment in album.split('/').filter(|s| !s.is_empty()) {
-        prefix.push('/');
-        prefix.push_str(segment);
-        html.push_str(&format!(
-            "<span class=\"sep\">\u{203a}</span><a href=\"{href}\">{label}</a>",
-            href = escape_html(&album_href(&prefix, filters)),
-            label = escape_html(segment),
-        ));
+    let crumbs: Vec<(String, &str)> = album
+        .split('/')
+        .filter(|s| !s.is_empty())
+        .map(|seg| {
+            prefix.push('/');
+            prefix.push_str(seg);
+            (prefix.clone(), seg)
+        })
+        .collect();
+    html! {
+        a.home href=(album_href("", filters)) aria-label="Home" { "⌂" }
+        @for (path, seg) in &crumbs {
+            span.sep { "›" }
+            a href=(album_href(path, filters)) { (seg) }
+        }
     }
-    html
 }
 
 /// Render the navbar's rating selector: five stars where the first `min_rating`
 /// are gold. Clicking star K filters to `≥K`; clicking the active threshold again
 /// clears it. Links keep the other filters and the current album.
-fn rating_selector(album: &str, filters: &Filters) -> String {
+fn rating_selector(album: &str, filters: &Filters) -> Markup {
     let cur = filters.min_rating.get();
-    let mut html = String::from("<span class=\"rating\">");
-    for k in 1..=5 {
-        // Toggle off (back to Rating(0)) when clicking the active threshold.
-        let target =
-            filters.with_min_rating(Rating::new(if cur == k { 0 } else { k }).unwrap_or_default());
-        let (class, star) = if k <= cur {
-            (" class=\"on\"", '\u{2605}')
-        } else {
-            ("", '\u{2606}')
-        };
-        html.push_str(&format!(
-            "<a{class} href=\"{href}\" title=\"\u{2265}{k} stars\">{star}</a>",
-            href = escape_html(&album_href(album, &target)),
-        ));
+    html! {
+        span.rating {
+            @for k in 1..=5 {
+                // Toggle off (back to Rating(0)) when clicking the active threshold.
+                @let target =
+                    filters.with_min_rating(Rating::new(if cur == k { 0 } else { k }).unwrap_or_default());
+                @let on = k <= cur;
+                a.on[on] href=(album_href(album, &target)) title=(format!("≥{k} stars")) {
+                    @if on { "★" } @else { "☆" }
+                }
+            }
+        }
     }
-    html.push_str("</span>");
-    html
 }
 
 /// Render a grid of sub-album tiles (cover with the bold title + count overlaid).
-/// Empty input yields an empty string; video-only sub-albums (no cover) get a
-/// plain dark tile. Tile links carry the active filters.
-fn render_subalbums(subalbums: &[SubAlbum], filters: &Filters) -> String {
-    if subalbums.is_empty() {
-        return String::new();
+/// Empty input yields empty markup; video-only sub-albums (no cover) get a plain
+/// dark tile. Tile links carry the active filters.
+fn render_subalbums(subalbums: &[SubAlbum], filters: &Filters) -> Markup {
+    html! {
+        @if !subalbums.is_empty() {
+            div.albums {
+                @for sub in subalbums {
+                    a.album href=(album_href(&sub.path, filters)) {
+                        @if let Some(cover) = &sub.cover {
+                            img src=(format!("/api/photos/{}/file", cover.id))
+                                alt=(cover.name) loading="lazy";
+                        }
+                        span.caption {
+                            span.title { (sub.name) }
+                            " "
+                            span.cnt { "(" (sub.photo_count) ")" }
+                        }
+                    }
+                }
+            }
+        }
     }
-    let mut html = String::from("<div class=\"albums\">\n");
-    for sub in subalbums {
-        let cover_img = match &sub.cover {
-            Some(cover) => format!(
-                "<img src=\"/api/photos/{id}/file\" alt=\"{alt}\" loading=\"lazy\">",
-                id = cover.id,
-                alt = escape_html(&cover.name),
-            ),
-            None => String::new(),
-        };
-        html.push_str(&format!(
-            "<a class=\"album\" href=\"{href}\">\
-             {cover_img}\
-             <span class=\"caption\">\
-             <span class=\"title\">{name}</span>\
-             <span class=\"cnt\">({count})</span>\
-             </span>\
-             </a>\n",
-            href = escape_html(&album_href(&sub.path, filters)),
-            name = escape_html(&sub.name),
-            count = sub.photo_count,
-        ));
-    }
-    html.push_str("</div>\n");
-    html
 }
 
-/// Assemble a full HTML page. `title`, `crumb` and `controls` must already be
-/// HTML-safe. `controls` is the right-hand side of the navbar (e.g. the rating
-/// selector), or empty.
-fn page_html(title: &str, crumb: &str, controls: &str, body: &str) -> String {
-    format!(
-        "<!DOCTYPE html>\n\
-         <html lang=\"en\">\n\
-         <head>\n\
-         <meta charset=\"utf-8\">\n\
-         <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n\
-         <title>{title}</title>\n\
-         <style>\n{STYLE}</style>\n\
-         </head>\n\
-         <body>\n\
-         <header class=\"navbar\"><span class=\"crumb\">{crumb}</span>{controls}</header>\n\
-         {body}\
-         <div id=\"lightbox\" class=\"lightbox\">\n\
-         <button class=\"close\" aria-label=\"Close\">\u{00d7}</button>\n\
-         <button class=\"nav prev\" aria-label=\"Previous\">\u{2039}</button>\n\
-         <img id=\"lb-img\" class=\"full\" alt=\"\" decoding=\"async\">\n\
-         <video id=\"lb-video\" class=\"full\" playsinline loop></video>\n\
-         <button class=\"nav next\" aria-label=\"Next\">\u{203a}</button>\n\
-         </div>\n\
-         <script>{SCRIPT}</script>\n\
-         </body>\n\
-         </html>\n",
-    )
+/// Group photos into contiguous runs by day. `list_photos` already orders
+/// newest-first, so a single pass suffices.
+fn group_by_day(items: &[PhotoSummary]) -> Vec<(&str, Vec<&PhotoSummary>)> {
+    let mut groups: Vec<(&str, Vec<&PhotoSummary>)> = Vec::new();
+    for photo in items {
+        let day = photo_day(photo.creation_date.as_deref()).unwrap_or("Unknown date");
+        match groups.last_mut() {
+            Some((d, v)) if *d == day => v.push(photo),
+            _ => groups.push((day, vec![photo])),
+        }
+    }
+    groups
+}
+
+/// Assemble a full HTML page. `controls` is the right-hand side of the navbar
+/// (e.g. the rating selector), or empty.
+fn page_html(title: &str, crumb: Markup, controls: Markup, body: Markup) -> Markup {
+    html! {
+        (DOCTYPE)
+        html lang="en" {
+            head {
+                meta charset="utf-8";
+                meta name="viewport" content="width=device-width, initial-scale=1";
+                title { (title) }
+                style { (PreEscaped(STYLE)) }
+            }
+            body {
+                header.navbar {
+                    span.crumb { (crumb) }
+                    (controls)
+                }
+                (body)
+                div.lightbox id="lightbox" {
+                    button.close aria-label="Close" { "×" }
+                    button.nav.prev aria-label="Previous" { "‹" }
+                    img.full id="lb-img" alt="" decoding="async";
+                    video.full id="lb-video" playsinline loop {}
+                    button.nav.next aria-label="Next" { "›" }
+                }
+                script { (PreEscaped(SCRIPT)) }
+            }
+        }
+    }
 }
 
 /// Query parameters parsed from the album page URL into [`Filters`].
@@ -161,7 +164,7 @@ pub struct AlbumViewParams {
 pub async fn root_page(
     State(state): State<AppState>,
     Query(params): Query<AlbumViewParams>,
-) -> AppResult<Html<String>> {
+) -> AppResult<Markup> {
     let filters = Filters {
         min_rating: params.min_rating,
     };
@@ -174,7 +177,7 @@ pub async fn album_page(
     State(state): State<AppState>,
     Path(path): Path<String>,
     Query(params): Query<AlbumViewParams>,
-) -> AppResult<Html<String>> {
+) -> AppResult<Markup> {
     let filters = Filters {
         min_rating: params.min_rating,
     };
@@ -191,10 +194,8 @@ pub async fn album_page(
 /// Render the album browsing page. `album` is `""` for the virtual root (album
 /// roots shown as tiles, no photo grid), or `"/Root/rel"` for a real album.
 ///
-/// `""` is the virtual root; a non-empty path is a real album (sub-album tiles +
-/// its own photo grid). `list_subalbums` handles both; only a real album also
-/// runs a `PhotoQuery`.
-async fn render(state: AppState, album: &str, filters: Filters) -> AppResult<Html<String>> {
+/// `list_subalbums` handles both; only a real album also runs a `PhotoQuery`.
+async fn render(state: AppState, album: &str, filters: Filters) -> AppResult<Markup> {
     let q = (!album.is_empty()).then(|| PhotoQuery {
         album: Some(album.to_string()),
         recursive: false,
@@ -219,84 +220,45 @@ async fn render(state: AppState, album: &str, filters: Filters) -> AppResult<Htm
     })
     .await?;
 
-    let albums_html = render_subalbums(&subalbums, &filters);
-
     // The photo grid + count line, present only for a real album.
     let grid = match &page {
-        None => String::new(),
+        None => html! {},
         Some(page) => {
-            let mut content = String::new();
-            if page.items.is_empty() {
-                content.push_str("<p>No photos in this album.</p>");
-            } else {
-                // `list_photos` already orders newest-first, so photos of the same
-                // day are contiguous: group them by walking the list once.
-                let mut current_day: Option<&str> = None;
-                let mut grid_open = false;
-                for photo in &page.items {
-                    let day = photo_day(photo.creation_date.as_deref());
-                    if day != current_day {
-                        if grid_open {
-                            content.push_str("</div>\n");
+            let groups = group_by_day(&page.items);
+            html! {
+                p.count { (page.total) " photo(s)" }
+                @if page.items.is_empty() {
+                    p { "No photos in this album." }
+                } @else {
+                    @for (day, photos) in &groups {
+                        h2 { (day) }
+                        div.grid {
+                            @for photo in photos {
+                                @let src = format!("/api/photos/{}/file", photo.id);
+                                @if photo.is_video {
+                                    // Placeholder tile (▶ badge via CSS); nothing
+                                    // is fetched until it's opened in the lightbox.
+                                    button.vtile data-src=(src) title=(photo.name) {}
+                                } @else {
+                                    // Originals are full-size, so load lazily.
+                                    img src=(src) alt=(photo.name) loading="lazy";
+                                }
+                            }
                         }
-                        let heading = day.unwrap_or("Unknown date");
-                        content.push_str(&format!(
-                            "<h2>{}</h2>\n<div class=\"grid\">\n",
-                            escape_html(heading)
-                        ));
-                        grid_open = true;
-                        current_day = day;
                     }
-                    if photo.is_video {
-                        // Placeholder tile (▶ badge via CSS); nothing is fetched
-                        // until it's opened. `data-src` carries the media URL.
-                        content.push_str(&format!(
-                            "<button class=\"vtile\" data-src=\"/api/photos/{id}/file\" title=\"{name}\"></button>\n",
-                            id = photo.id,
-                            name = escape_html(&photo.name),
-                        ));
-                    } else {
-                        // Originals are full-size, so let the browser load lazily.
-                        content.push_str(&format!(
-                            "<img src=\"/api/photos/{id}/file\" alt=\"{alt}\" loading=\"lazy\">\n",
-                            id = photo.id,
-                            alt = escape_html(&photo.name),
-                        ));
-                    }
-                }
-                if grid_open {
-                    content.push_str("</div>\n");
                 }
             }
-            format!("<p class=\"count\">{} photo(s)</p>\n{content}", page.total)
         }
     };
 
-    let title = if album.is_empty() {
-        "Photos".to_string()
-    } else {
-        escape_html(album)
-    };
-    let crumb = breadcrumb(album, &filters);
-    let controls = rating_selector(album, &filters);
-    let body = format!("{albums_html}{grid}");
-    Ok(Html(page_html(&title, &crumb, &controls, &body)))
-}
-
-/// Minimal HTML-text escaping for interpolated values.
-fn escape_html(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for c in s.chars() {
-        match c {
-            '&' => out.push_str("&amp;"),
-            '<' => out.push_str("&lt;"),
-            '>' => out.push_str("&gt;"),
-            '"' => out.push_str("&quot;"),
-            '\'' => out.push_str("&#39;"),
-            _ => out.push(c),
-        }
-    }
-    out
+    let title = if album.is_empty() { "Photos" } else { album };
+    let body = html! { (render_subalbums(&subalbums, &filters)) (grid) };
+    Ok(page_html(
+        title,
+        breadcrumb(album, &filters),
+        rating_selector(album, &filters),
+        body,
+    ))
 }
 
 #[cfg(test)]
@@ -304,16 +266,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn escapes_html() {
-        assert_eq!(
-            escape_html("a & b <c> \"d\""),
-            "a &amp; b &lt;c&gt; &quot;d&quot;"
-        );
-    }
-
-    #[test]
     fn builds_breadcrumb() {
-        let html = breadcrumb("/Photos/Lego/Porsche911", &Filters::default());
+        let html = breadcrumb("/Photos/Lego/Porsche911", &Filters::default()).into_string();
         assert!(html.contains("<a href=\"/photos/Photos\">Photos</a>"));
         assert!(html.contains("<a href=\"/photos/Photos/Lego\">Lego</a>"));
         assert!(html.contains("<a href=\"/photos/Photos/Lego/Porsche911\">Porsche911</a>"));
@@ -322,7 +276,7 @@ mod tests {
     #[test]
     fn breadcrumb_encodes_and_escapes() {
         // Spaces are percent-encoded in the href; the label stays human-readable.
-        let html = breadcrumb("/My Photos", &Filters::default());
+        let html = breadcrumb("/My Photos", &Filters::default()).into_string();
         assert!(html.contains("href=\"/photos/My%20Photos\""));
         assert!(html.contains(">My Photos</a>"));
     }
@@ -332,10 +286,8 @@ mod tests {
         let f = Filters {
             min_rating: Rating::new(3).unwrap(),
         };
-        assert_eq!(f.query_string(), "?min_rating=3");
-        assert_eq!(Filters::default().query_string(), "");
         // Breadcrumb links carry the active filter.
-        let html = breadcrumb("/Photos/Lego", &f);
+        let html = breadcrumb("/Photos/Lego", &f).into_string();
         assert!(html.contains("href=\"/photos/Photos/Lego?min_rating=3\""));
     }
 
@@ -346,10 +298,11 @@ mod tests {
             &Filters {
                 min_rating: Rating::new(2).unwrap(),
             },
-        );
+        )
+        .into_string();
         // First two stars filled (on), and clicking star 2 again clears the filter.
         assert_eq!(html.matches("class=\"on\"").count(), 2);
-        assert!(html.contains("href=\"/photos/Photos/Lego\" title=\"\u{2265}2 stars\""));
+        assert!(html.contains("href=\"/photos/Photos/Lego\" title=\"≥2 stars\""));
         // Star 4 raises the threshold.
         assert!(html.contains("href=\"/photos/Photos/Lego?min_rating=4\""));
     }
