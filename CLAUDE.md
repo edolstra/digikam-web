@@ -47,7 +47,34 @@ This is the seed of the browsing UI (planned to grow into Leptos later).
 | Route | Notes |
 |-------|-------|
 | `GET /photos` | The virtual top of the database: the album roots are shown as sub-album tiles (cover + name + count, newest-first), each linking to `/photos/<Root>`. No photo grid. |
-| `GET /photos/<album path>?min_rating=` | e.g. `/photos/Photos/Lego/Porsche911`. HTML photo grid of the photos directly in that album (non-recursive). The heading is a sticky breadcrumb navbar (pinned to the top, page scrolls underneath) that starts with a `⌂` home icon (linking to `/photos`) followed by `› Photos › Lego › Porsche911`, each segment linking to that ancestor album. The navbar's right side is a 5-star **rating selector** (links, no JS): clicking star K filters the grid to `?min_rating=K` (≥K stars); clicking the active threshold clears it. Active filters are encoded in the URL via a `Filters` struct (in [src/query.rs](src/query.rs)) and propagated onto all breadcrumb/sub-album links so they persist while browsing; they also constrain the sub-album tile covers/counts. A grid of direct sub-albums (newest-first, from `/api/subalbums`) is shown below the breadcrumb: each tile is the cover image with the bold sub-album name and `(count)` centered on top, linking to that sub-album. Photos are grouped by day (newest first), fixed-height and wrapping left-to-right. Images load from `/api/photos/:id/file` directly (no thumbnails yet) with `loading="lazy"`. Videos (`is_video`) render as a placeholder tile with a ▶ badge (nothing fetched until opened); tapping one opens the lightbox and plays it (tap toggles play/pause; mp4/webm play, exotic codecs may not). Clicking a photo opens an inline lightbox (full-page over a dimmed grid; the photo is scaled to fill the viewport, up or down, preserving aspect) and requests **fullscreen** (Fullscreen API; guarded/no-op where unsupported, e.g. iPhone Safari — exiting fullscreen also closes the lightbox) with prev/next via swipe, ←/→ keys, or on-screen ‹ › chevrons (stops at ends), Home/End jump to the first/last photo, dismissed by clicking the letterbox outside the photo / Esc / the X button / the device Back button (opening pushes a history entry so Back closes the lightbox instead of leaving the page). The lightbox preloads the prev/next images and uses `decoding="async"`; tappable elements set `touch-action: manipulation` to cut mobile tap latency. No pagination yet. |
+| `GET /photos/<album path>?min_rating=` | e.g. `/photos/Photos/Lego/Porsche911`. The photos directly in that album (non-recursive) as a day-grouped grid, under a breadcrumb navbar, with a sub-album grid and a fullscreen lightbox. See [The album page](#the-album-page) below. No pagination yet. |
+
+#### The album page
+
+- **Navbar (sticky** — pinned to the top, the page scrolls underneath**)**: a
+  breadcrumb starting with a `⌂` home icon (→ `/photos`) then `› Photos › Lego ›
+  Porsche911`, each segment linking to that ancestor album.
+- **Rating selector** (navbar, right side): five `★` links, no JS. Clicking star K
+  filters to `?min_rating=K` (≥K stars); clicking the active threshold clears it.
+- **Filters** are encoded in the URL via a `Filters` struct ([src/query.rs](src/query.rs))
+  and propagated onto every breadcrumb/sub-album link so they persist while browsing;
+  they also constrain the sub-album tile covers/counts.
+- **Sub-album grid** (below the breadcrumb): direct sub-albums (newest-first, from
+  `/api/subalbums`); each tile is the cover image with the bold sub-album name and
+  `(count)` centered on top, linking to that sub-album.
+- **Photo grid**: grouped by day (newest first), fixed-height tiles wrapping
+  left-to-right. Images load from `/api/photos/:id/file` directly (no thumbnails yet)
+  with `loading="lazy"`. Videos (`is_video`) render as a placeholder tile with a ▶
+  badge (nothing fetched until opened).
+- **Lightbox** (click a photo/video): full-page over a dimmed grid, requesting
+  **fullscreen** (Fullscreen API; guarded/no-op where unsupported, e.g. iPhone Safari).
+  The media is scaled to fill the viewport (up or down, preserving aspect). Videos
+  play, looping (tap toggles play/pause; mp4/webm only). Navigate via swipe, ←/→ keys,
+  or on-screen ‹ › chevrons (stop at ends); Home/End jump to first/last. Dismiss by
+  clicking the letterbox / Esc / the X / the device Back button — opening pushes a
+  history entry so Back closes the lightbox instead of leaving the page, and exiting
+  fullscreen closes it too. Perf: preloads the prev/next images, `decoding="async"`,
+  and `touch-action: manipulation` to cut mobile tap latency.
 
 ### Query semantics
 - **`album=/Root/rel`** — the first path segment is the `AlbumRoots.label`; the
