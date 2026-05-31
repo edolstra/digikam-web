@@ -53,6 +53,7 @@ async fn main() -> Result<()> {
 
     let app = Router::new()
         .nest("/api", api)
+        .route("/photos", get(web::root_page))
         .route("/photos/*path", get(web::album_page))
         .layer(TraceLayer::new_for_http())
         .layer(CorsLayer::permissive())

@@ -9,6 +9,7 @@ use axum::response::Html;
 use crate::db::AppState;
 use crate::error::AppResult;
 use crate::handlers::run_blocking;
+use crate::models::SubAlbum;
 use crate::query::{self, PhotoQuery};
 
 /// Inline stylesheet for the album grid. Photos are fixed-height and wrap
@@ -18,6 +19,7 @@ body { font-family: sans-serif; margin: 1rem; background: #111; color: #eee; }
 h1 { font-size: 1.2rem; font-weight: 600; }
 h1 a { color: #6cf; text-decoration: none; }
 h1 a:hover { text-decoration: underline; }
+h1 .home { font-size: 1.3rem; }
 h1 .sep { color: #666; margin: 0 0.2rem; }
 h2 { font-size: 1rem; margin: 1.5rem 0 0.5rem; padding-bottom: 0.25rem;
      border-bottom: 1px solid #333; color: #aaa; }
@@ -140,9 +142,11 @@ fn album_href(album: &str) -> String {
 }
 
 /// Render an album path like `/Photos/Lego/Porsche911` as a clickable breadcrumb
-/// `› Photos › Lego › Porsche911`, where each segment links to that album page.
+/// `⌂ › Photos › Lego › Porsche911`. The leading house symbol links to `/photos`
+/// (the top of the database); each segment links to that album page.
 fn breadcrumb(album: &str) -> String {
-    let mut html = String::new();
+    let mut html =
+        String::from("<a class=\"home\" href=\"/photos\" aria-label=\"Home\">\u{2302}</a>");
     let mut prefix = String::new();
     for segment in album.split('/').filter(|s| !s.is_empty()) {
         prefix.push('/');
@@ -156,18 +160,96 @@ fn breadcrumb(album: &str) -> String {
     html
 }
 
-/// `GET /photos/<album path>` — e.g. `/photos/Photos/Lego/Porsche911`.
-///
-/// Renders the photos directly in that album (non-recursive) as a grid,
-/// grouped by day (newest first). Uses the original-file endpoint directly;
-/// no thumbnails or pagination yet.
+/// Render a grid of sub-album tiles (cover with the bold title + count overlaid).
+/// Empty input yields an empty string; video-only sub-albums (no cover) get a
+/// plain dark tile.
+fn render_subalbums(subalbums: &[SubAlbum]) -> String {
+    if subalbums.is_empty() {
+        return String::new();
+    }
+    let mut html = String::from("<div class=\"albums\">\n");
+    for sub in subalbums {
+        let cover_img = match &sub.cover {
+            Some(cover) => format!(
+                "<img src=\"/api/photos/{id}/file\" alt=\"{alt}\" loading=\"lazy\">",
+                id = cover.id,
+                alt = escape_html(&cover.name),
+            ),
+            None => String::new(),
+        };
+        html.push_str(&format!(
+            "<a class=\"album\" href=\"{href}\">\
+             {cover_img}\
+             <span class=\"caption\">\
+             <span class=\"title\">{name}</span>\
+             <span class=\"cnt\">({count})</span>\
+             </span>\
+             </a>\n",
+            href = escape_html(&album_href(&sub.path)),
+            name = escape_html(&sub.name),
+            count = sub.photo_count,
+        ));
+    }
+    html.push_str("</div>\n");
+    html
+}
+
+/// Assemble a full HTML page. `title` and `crumb` must already be HTML-safe.
+fn page_html(title: &str, crumb: &str, body: &str) -> String {
+    format!(
+        "<!DOCTYPE html>\n\
+         <html lang=\"en\">\n\
+         <head>\n\
+         <meta charset=\"utf-8\">\n\
+         <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n\
+         <title>{title}</title>\n\
+         <style>\n{STYLE}</style>\n\
+         </head>\n\
+         <body>\n\
+         <h1>{crumb}</h1>\n\
+         {body}\
+         <div id=\"lightbox\" class=\"lightbox\">\n\
+         <button class=\"close\" aria-label=\"Close\">\u{00d7}</button>\n\
+         <button class=\"nav prev\" aria-label=\"Previous\">\u{2039}</button>\n\
+         <img id=\"lb-img\" class=\"full\" alt=\"\">\n\
+         <button class=\"nav next\" aria-label=\"Next\">\u{203a}</button>\n\
+         </div>\n\
+         <script>{SCRIPT}</script>\n\
+         </body>\n\
+         </html>\n",
+    )
+}
+
+/// `GET /photos` — the virtual top of the database: shows the album roots as if
+/// they were sub-albums.
+pub async fn root_page(State(state): State<AppState>) -> AppResult<Html<String>> {
+    render(state, None).await
+}
+
+/// `GET /photos/<album path>` — e.g. `/photos/Photos/Lego/Porsche911`. An empty
+/// path (`/photos/`) is treated as the virtual root.
 pub async fn album_page(
     State(state): State<AppState>,
     Path(path): Path<String>,
 ) -> AppResult<Html<String>> {
-    // The captured path maps onto an album display path, e.g.
-    // `Photos/Lego/Porsche911` -> `/Photos/Lego/Porsche911`.
-    let album = format!("/{}", path.trim_matches('/'));
+    let trimmed = path.trim_matches('/');
+    if trimmed.is_empty() {
+        return render(state, None).await;
+    }
+    render(state, Some(format!("/{trimmed}"))).await
+}
+
+/// Render the album browsing page. `album` is `None` for the virtual root (album
+/// roots shown as tiles, no photo grid), or `Some("/Root/rel")` for a real album.
+async fn render(state: AppState, album: Option<String>) -> AppResult<Html<String>> {
+    let Some(album) = album else {
+        // Virtual root: the album roots presented as sub-album tiles.
+        let roots =
+            run_blocking(&state, |conn, state| query::list_roots(conn, &state.roots)).await?;
+        let crumb = breadcrumb("");
+        let body = render_subalbums(&roots);
+        return Ok(Html(page_html("Photos", &crumb, &body)));
+    };
 
     let q = PhotoQuery {
         album: Some(album.clone()),
@@ -187,35 +269,7 @@ pub async fn album_page(
     })
     .await?;
 
-    // Grid of sub-albums (cover + name + count), shown above the photos.
-    let mut albums_html = String::new();
-    if !subalbums.is_empty() {
-        albums_html.push_str("<div class=\"albums\">\n");
-        for sub in &subalbums {
-            // Video-only sub-albums have no cover image; show a plain dark tile.
-            let cover_img = match &sub.cover {
-                Some(cover) => format!(
-                    "<img src=\"/api/photos/{id}/file\" alt=\"{alt}\" loading=\"lazy\">",
-                    id = cover.id,
-                    alt = escape_html(&cover.name),
-                ),
-                None => String::new(),
-            };
-            albums_html.push_str(&format!(
-                "<a class=\"album\" href=\"{href}\">\
-                 {cover_img}\
-                 <span class=\"caption\">\
-                 <span class=\"title\">{name}</span>\
-                 <span class=\"cnt\">({count})</span>\
-                 </span>\
-                 </a>\n",
-                href = escape_html(&album_href(&sub.path)),
-                name = escape_html(&sub.name),
-                count = sub.photo_count,
-            ));
-        }
-        albums_html.push_str("</div>\n");
-    }
+    let albums_html = render_subalbums(&subalbums);
 
     // `list_photos` already orders newest-first, so photos of the same day are
     // contiguous: we can group them by walking the list once.
@@ -251,32 +305,10 @@ pub async fn album_page(
     let title = escape_html(&album);
     let crumb = breadcrumb(&album);
     let body = format!(
-        "<!DOCTYPE html>\n\
-         <html lang=\"en\">\n\
-         <head>\n\
-         <meta charset=\"utf-8\">\n\
-         <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n\
-         <title>{title}</title>\n\
-         <style>\n{STYLE}</style>\n\
-         </head>\n\
-         <body>\n\
-         <h1>{crumb}</h1>\n\
-         {albums_html}\
-         <p class=\"count\">{count} photo(s)</p>\n\
-         {content}\
-         <div id=\"lightbox\" class=\"lightbox\">\n\
-         <button class=\"close\" aria-label=\"Close\">\u{00d7}</button>\n\
-         <button class=\"nav prev\" aria-label=\"Previous\">\u{2039}</button>\n\
-         <img id=\"lb-img\" class=\"full\" alt=\"\">\n\
-         <button class=\"nav next\" aria-label=\"Next\">\u{203a}</button>\n\
-         </div>\n\
-         <script>{SCRIPT}</script>\n\
-         </body>\n\
-         </html>\n",
+        "{albums_html}<p class=\"count\">{count} photo(s)</p>\n{content}",
         count = page.total,
     );
-
-    Ok(Html(body))
+    Ok(Html(page_html(&title, &crumb, &body)))
 }
 
 /// Minimal HTML-text escaping for interpolated values.

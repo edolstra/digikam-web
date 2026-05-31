@@ -296,6 +296,69 @@ pub fn list_subalbums(
     Ok(out)
 }
 
+/// List the album roots as if they were sub-albums of a virtual top-level album,
+/// each with a cover (newest non-video image in the whole root) and total photo
+/// count, sorted by label. Mirrors [`list_subalbums`] but groups by `albumRoot`.
+pub fn list_roots(
+    conn: &Connection,
+    roots: &HashMap<i64, AlbumRoot>,
+) -> AppResult<Vec<SubAlbum>> {
+    let mut stmt = conn.prepare_cached(
+        "WITH matched AS ( \
+           SELECT i.id AS image_id, i.name AS image_name, i.category AS category, \
+                  ii.creationDate AS cdate, a.albumRoot AS root \
+           FROM Images i JOIN Albums a ON a.id = i.album \
+           LEFT JOIN ImageInformation ii ON ii.imageid = i.id \
+           WHERE i.status = 1 \
+         ), \
+         counts AS ( \
+           SELECT root, COUNT(*) AS cnt FROM matched GROUP BY root \
+         ), \
+         covers AS ( \
+           SELECT root, image_id, image_name, \
+                  ROW_NUMBER() OVER (PARTITION BY root ORDER BY cdate DESC, image_id DESC) AS rn \
+           FROM matched \
+           WHERE category <> 2 \
+         ) \
+         SELECT c.root, cv.image_id, cv.image_name, c.cnt \
+         FROM counts c \
+         LEFT JOIN covers cv ON cv.root = c.root AND cv.rn = 1",
+    )?;
+
+    let rows = stmt.query_map([], |row| {
+        Ok((
+            row.get::<_, i64>(0)?,
+            row.get::<_, Option<i64>>(1)?,
+            row.get::<_, Option<String>>(2)?,
+            row.get::<_, i64>(3)?,
+        ))
+    })?;
+
+    let mut out = Vec::new();
+    for row in rows {
+        let (root_id, image_id, image_name, cnt) = row?;
+        let Some(root) = roots.get(&root_id) else {
+            continue;
+        };
+        let cover = match (image_id, image_name) {
+            (Some(id), Some(name)) => Some(Cover {
+                id: id as u64,
+                name,
+            }),
+            _ => None,
+        };
+        out.push(SubAlbum {
+            path: format!("/{}", root.label),
+            name: root.label.clone(),
+            photo_count: cnt.max(0) as u64,
+            cover,
+        });
+    }
+    // SQL groups by root id, so sort by label here (case-insensitive).
+    out.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
