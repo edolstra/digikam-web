@@ -87,6 +87,9 @@ This is the seed of the browsing UI (planned to grow into Leptos later).
   `Tags(id, pid, name)`; top-level nodes have `pid = 0`. The internal
   `_Digikam_Internal_Tags_` subtree (id `1`, which holds Color/Pick-label tags) is
   excluded from `/tags`.
+- **Request logging**: a `tower_http` `TraceLayer` logs every HTTP request
+  (method + URI) and its response (status + latency) at `info`. `--trace-sql`
+  additionally logs the SQL each request runs.
 - **CORS**: permissive (dev convenience) for the future browser frontend.
 
 ### Relevant Digikam schema
