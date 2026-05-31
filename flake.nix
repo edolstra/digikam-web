@@ -52,6 +52,8 @@
       {
         packages.default = digikam-browse;
         packages.digikam-browse = digikam-browse;
+        # WebAssembly PGF thumbnail decoder (built from haplo/webpgf).
+        packages.webpgf = pkgs.callPackage ./nix/webpgf.nix { };
 
         apps.default = flake-utils.lib.mkApp {
           drv = digikam-browse;
