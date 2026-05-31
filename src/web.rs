@@ -16,6 +16,9 @@ use crate::query::{self, PhotoQuery};
 const STYLE: &str = "\
 body { font-family: sans-serif; margin: 1rem; background: #111; color: #eee; }
 h1 { font-size: 1.2rem; font-weight: 600; }
+h1 a { color: #6cf; text-decoration: none; }
+h1 a:hover { text-decoration: underline; }
+h1 .sep { color: #666; margin: 0 0.2rem; }
 h2 { font-size: 1rem; margin: 1.5rem 0 0.5rem; padding-bottom: 0.25rem;
      border-bottom: 1px solid #333; color: #aaa; }
 .count { color: #888; font-size: 0.85rem; }
@@ -112,6 +115,24 @@ fn photo_day(creation_date: Option<&str>) -> Option<&str> {
     creation_date.filter(|d| d.len() >= 10).map(|d| &d[..10])
 }
 
+/// Render an album path like `/Photos/Lego/Porsche911` as a clickable breadcrumb
+/// `› Photos › Lego › Porsche911`, where each segment links to that album page.
+fn breadcrumb(album: &str) -> String {
+    let mut html = String::new();
+    let mut href = String::from("/photos");
+    for segment in album.split('/').filter(|s| !s.is_empty()) {
+        // Build the cumulative `/photos/...` URL, percent-encoding each segment.
+        href.push('/');
+        href.push_str(&urlencoding::encode(segment));
+        html.push_str(&format!(
+            "<span class=\"sep\">\u{203a}</span><a href=\"{href}\">{label}</a>",
+            href = escape_html(&href),
+            label = escape_html(segment),
+        ));
+    }
+    html
+}
+
 /// `GET /photos/<album path>` — e.g. `/photos/Photos/Lego/Porsche911`.
 ///
 /// Renders the photos directly in that album (non-recursive) as a grid,
@@ -171,6 +192,7 @@ pub async fn album_page(
     }
 
     let title = escape_html(&album);
+    let crumb = breadcrumb(&album);
     let body = format!(
         "<!DOCTYPE html>\n\
          <html lang=\"en\">\n\
@@ -181,7 +203,7 @@ pub async fn album_page(
          <style>\n{STYLE}</style>\n\
          </head>\n\
          <body>\n\
-         <h1>{title}</h1>\n\
+         <h1>{crumb}</h1>\n\
          <p class=\"count\">{count} photo(s)</p>\n\
          {content}\
          <div id=\"lightbox\" class=\"lightbox\">\n\
@@ -222,6 +244,22 @@ mod tests {
     #[test]
     fn escapes_html() {
         assert_eq!(escape_html("a & b <c> \"d\""), "a &amp; b &lt;c&gt; &quot;d&quot;");
+    }
+
+    #[test]
+    fn builds_breadcrumb() {
+        let html = breadcrumb("/Photos/Lego/Porsche911");
+        assert!(html.contains("<a href=\"/photos/Photos\">Photos</a>"));
+        assert!(html.contains("<a href=\"/photos/Photos/Lego\">Lego</a>"));
+        assert!(html.contains("<a href=\"/photos/Photos/Lego/Porsche911\">Porsche911</a>"));
+    }
+
+    #[test]
+    fn breadcrumb_encodes_and_escapes() {
+        // Spaces are percent-encoded in the href; the label stays human-readable.
+        let html = breadcrumb("/My Photos");
+        assert!(html.contains("href=\"/photos/My%20Photos\""));
+        assert!(html.contains(">My Photos</a>"));
     }
 
     #[test]
