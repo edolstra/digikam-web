@@ -27,7 +27,7 @@ Config (CLI flags or env vars):
 
 | Route | Notes |
 |-------|-------|
-| `GET /photos?album=&tags=&limit=&offset=` | Filtered, paginated list. `Page<PhotoSummary>` = `{total, limit, offset, items}`. |
+| `GET /photos?album=&tags=&recursive&limit=&offset=` | Filtered, paginated list. `Page<PhotoSummary>` = `{total, limit, offset, items}`. |
 | `GET /photos/:id` | `PhotoDetail` (summary + tag names + lat/long). |
 | `GET /photos/:id/file` | Original bytes, range-aware (via `tower_http::services::ServeFile`). |
 | `GET /albums` | Flat list of all albums (`{id, path, root}`). |
@@ -36,8 +36,11 @@ Config (CLI flags or env vars):
 
 ### Query semantics
 - **`album=/Root/rel`** — the first path segment is the `AlbumRoots.label`; the
-  remainder is a `relativePath` prefix matched **recursively** (the album and all
-  sub-albums). `/Photos` alone selects the whole root.
+  remainder is a `relativePath`. By default it matches **only that album**
+  (photos directly in it). `/Photos` alone means the root album (`relativePath = "/"`).
+- **`recursive`** — presence (`?recursive`, `?recursive=true`, `?recursive=1`) also
+  includes all sub-albums; falsey values (`false`/`0`/`no`) or absence keep the
+  default non-recursive behavior. With `recursive`, `/Photos` selects the whole collection.
 - **`tags=a,b`** — **AND** across the listed names, **exact** match (descendant tags
   do *not* count). A name shared by several tag ids is OR'd within that one name.
   An unknown tag name yields an empty result (correct AND behavior).

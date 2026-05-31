@@ -24,11 +24,21 @@ pub async fn health() -> impl IntoResponse {
 pub struct PhotoParams {
     album: Option<String>,
     tags: Option<String>,
+    /// Present (e.g. `?recursive` or `?recursive=true`) to include sub-albums.
+    recursive: Option<String>,
     limit: Option<i64>,
     offset: Option<i64>,
 }
 
-/// `GET /photos?album=/Root/path&tags=a,b&limit=&offset=`
+/// Interpret a query-string flag: present means true unless it's a falsey value.
+fn flag(value: Option<&str>) -> bool {
+    match value {
+        Some(v) => !matches!(v.trim(), "false" | "0" | "no"),
+        None => false,
+    }
+}
+
+/// `GET /photos?album=/Root/path&tags=a,b&recursive&limit=&offset=`
 pub async fn list_photos(
     State(state): State<AppState>,
     Query(params): Query<PhotoParams>,
@@ -47,6 +57,7 @@ pub async fn list_photos(
 
     let q = PhotoQuery {
         album: params.album.filter(|a| !a.is_empty()),
+        recursive: flag(params.recursive.as_deref()),
         tags,
         limit: params.limit.unwrap_or(DEFAULT_LIMIT).clamp(1, MAX_LIMIT),
         offset: params.offset.unwrap_or(0).max(0),

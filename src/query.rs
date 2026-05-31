@@ -13,8 +13,11 @@ pub const MAX_LIMIT: i64 = 1000;
 /// Parsed query parameters for `GET /photos`.
 #[derive(Debug, Default)]
 pub struct PhotoQuery {
-    /// `/Root/relative/path` (recursive). `None` means no album filter.
+    /// `/Root/relative/path`. `None` means no album filter.
     pub album: Option<String>,
+    /// When true, the album filter also matches sub-albums; otherwise only the
+    /// named album itself. Has no effect without `album`.
+    pub recursive: bool,
     /// Tag names; an image must carry every one of them (exact match).
     pub tags: Vec<String>,
     pub limit: i64,
@@ -70,13 +73,27 @@ fn build_filter(conn: &Connection, q: &PhotoQuery) -> AppResult<(String, Vec<Val
         sql.push_str(" AND r.label = ?");
         params.push(Value::Text(label.to_string()));
 
-        if !rest.is_empty() {
-            // Digikam stores relativePath with a leading slash and no trailing slash.
-            let rel = format!("/{rest}");
-            let like = format!("{}/%", escape_like(&rel));
-            sql.push_str(" AND (a.relativePath = ? OR a.relativePath LIKE ? ESCAPE '\\')");
+        // Digikam stores relativePath with a leading slash and no trailing
+        // slash; the root album of a collection is "/".
+        let rel = if rest.is_empty() {
+            "/".to_string()
+        } else {
+            format!("/{rest}")
+        };
+
+        if q.recursive {
+            if rest.is_empty() {
+                // The whole collection: every album under this root.
+            } else {
+                let like = format!("{}/%", escape_like(&rel));
+                sql.push_str(" AND (a.relativePath = ? OR a.relativePath LIKE ? ESCAPE '\\')");
+                params.push(Value::Text(rel));
+                params.push(Value::Text(like));
+            }
+        } else {
+            // Only photos directly in the named album.
+            sql.push_str(" AND a.relativePath = ?");
             params.push(Value::Text(rel));
-            params.push(Value::Text(like));
         }
     }
 
