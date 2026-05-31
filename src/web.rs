@@ -140,7 +140,7 @@ fn page_html(title: &str, crumb: &str, controls: &str, body: &str) -> String {
          <button class=\"close\" aria-label=\"Close\">\u{00d7}</button>\n\
          <button class=\"nav prev\" aria-label=\"Previous\">\u{2039}</button>\n\
          <img id=\"lb-img\" class=\"full\" alt=\"\" decoding=\"async\">\n\
-         <video id=\"lb-video\" class=\"full\" playsinline></video>\n\
+         <video id=\"lb-video\" class=\"full\" playsinline loop></video>\n\
          <button class=\"nav next\" aria-label=\"Next\">\u{203a}</button>\n\
          </div>\n\
          <script>{SCRIPT}</script>\n\
