@@ -10,6 +10,7 @@
   var prev = lb.querySelector('.prev');
   var next = lb.querySelector('.next');
   var idx = -1;
+  var closing = false; // guards against issuing history.back() twice per open
 
   function isOpen() { return lb.classList.contains('open'); }
   function curItem() { return idx >= 0 ? items[idx] : null; }
@@ -54,20 +55,31 @@
 
   // Open via a pushed history entry so the device Back button (and gesture)
   // pops it and dismisses, instead of navigating off the album page. Opening a
-  // video plays it (the tap is the user gesture, so audio is allowed).
+  // video plays it (the tap is the user gesture, so audio is allowed), and we
+  // enter fullscreen to hide the browser chrome.
   function open(i) {
     if (!isOpen()) history.pushState({ lightbox: true }, '');
     show(i, true);
+    // Must be requested inside the click gesture. Unsupported on iPhone Safari
+    // (guarded), where the full-viewport overlay alone is used.
+    if (!document.fullscreenElement && lb.requestFullscreen) {
+      lb.requestFullscreen().catch(function () {});
+    }
   }
 
   // UI dismiss (X / Esc / tapping outside): step back in history so the Back
   // button and these all funnel through popstate -> dismiss(), keeping the
-  // history stack consistent.
+  // history stack consistent. The `closing` guard keeps repeated calls (e.g. Esc
+  // firing both keydown and fullscreenchange) from popping history twice.
   function close() {
-    if (isOpen()) history.back();
+    if (isOpen() && !closing) {
+      closing = true;
+      history.back();
+    }
   }
 
   function dismiss() {
+    closing = false;
     lb.classList.remove('open');
     document.body.classList.remove('modal-open');
     vid.pause();
@@ -77,10 +89,16 @@
     img.classList.remove('active');
     vid.classList.remove('active');
     idx = -1;
+    if (document.fullscreenElement) document.exitFullscreen().catch(function () {});
   }
 
   window.addEventListener('popstate', function () {
     if (isOpen()) dismiss();
+  });
+
+  // Exiting fullscreen (Esc, or the browser's own control) closes the lightbox.
+  document.addEventListener('fullscreenchange', function () {
+    if (!document.fullscreenElement && isOpen()) close();
   });
 
   // Navigation (arrows / chevrons / swipe) auto-plays a video it lands on
