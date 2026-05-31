@@ -177,8 +177,9 @@ per `img.thumb` tile **well before** it scrolls in, so paging down lands on alre
 images. Fetch (network) and decode (CPU) are **separate stages**: each finished PGF blob
 queues for the next idle worker in a small **Blob Web Worker pool** (`min(hardwareConcurrency, 6)`).
 
-First-paint latency was dominated by **Firefox network behavior**, fixed three ways
-(see [web.js](src/web.js) — verified to take first paint from ~500ms to ~120ms):
+First-paint latency was dominated by **Firefox network behavior** (full write-up in
+[docs/thumbnail-loading-performance.md](docs/thumbnail-loading-performance.md)), fixed three
+ways (see [web.js](src/web.js) — verified to take first paint from ~500ms to ~120ms):
 (1) **cap concurrent fetches** at 6 — firing a screenful at once makes Firefox's request
 pacer hold the *whole burst* for hundreds of ms; (2) **`priority: 'high'`** on every fetch —
 Firefox otherwise deprioritises `fetch()` for ~150ms during page load; (3) **kick off the
