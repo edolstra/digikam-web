@@ -20,8 +20,90 @@ h2 { font-size: 1rem; margin: 1.5rem 0 0.5rem; padding-bottom: 0.25rem;
      border-bottom: 1px solid #333; color: #aaa; }
 .count { color: #888; font-size: 0.85rem; }
 .grid { display: flex; flex-wrap: wrap; gap: 4px; align-items: flex-end; }
-.grid img { height: 200px; width: auto; display: block; background: #222; }
+.grid img { height: 200px; width: auto; display: block; background: #222; cursor: pointer; }
+body.modal-open { overflow: hidden; }
+.lightbox { position: fixed; inset: 0; z-index: 1000; display: none;
+            align-items: center; justify-content: center;
+            background: rgba(0, 0, 0, 0.9); }
+.lightbox.open { display: flex; }
+.lightbox img.full { max-width: 100vw; max-height: 100vh; object-fit: contain; }
+.lightbox .close { position: absolute; top: 0.25rem; right: 0.75rem;
+                   font-size: 2.5rem; line-height: 1; }
+.lightbox .nav { position: absolute; top: 50%; transform: translateY(-50%);
+                 font-size: 3rem; padding: 0 1rem; }
+.lightbox .prev { left: 0; }
+.lightbox .next { right: 0; }
+.lightbox button { background: none; border: 0; color: #fff; cursor: pointer;
+                   user-select: none; opacity: 0.8; }
+.lightbox button:hover { opacity: 1; }
+.lightbox button[disabled] { opacity: 0.15; cursor: default; }
 ";
+
+/// Inline lightbox behavior. No server data is interpolated here (static string);
+/// the enlarged `src`/`alt` are read from the already-escaped grid `<img>` attributes.
+const SCRIPT: &str = r#"
+(function () {
+  var imgs = Array.prototype.slice.call(document.querySelectorAll('.grid img'));
+  var lb = document.getElementById('lightbox');
+  var full = document.getElementById('lb-img');
+  var prev = lb.querySelector('.prev');
+  var next = lb.querySelector('.next');
+  var idx = -1;
+
+  function isOpen() { return lb.classList.contains('open'); }
+
+  function show(i) {
+    if (i < 0 || i >= imgs.length) return;
+    idx = i;
+    full.src = imgs[i].src;
+    full.alt = imgs[i].alt;
+    prev.disabled = (i === 0);
+    next.disabled = (i === imgs.length - 1);
+    lb.classList.add('open');
+    document.body.classList.add('modal-open');
+  }
+
+  function close() {
+    lb.classList.remove('open');
+    document.body.classList.remove('modal-open');
+    full.removeAttribute('src');
+    idx = -1;
+  }
+
+  function go(d) {
+    var n = idx + d;
+    if (n >= 0 && n < imgs.length) show(n);
+  }
+
+  imgs.forEach(function (im, i) {
+    im.addEventListener('click', function () { show(i); });
+  });
+
+  // Clicking the dimmed backdrop (but not the image or buttons) dismisses.
+  lb.addEventListener('click', function (e) { if (e.target === lb) close(); });
+  lb.querySelector('.close').addEventListener('click', close);
+  prev.addEventListener('click', function (e) { e.stopPropagation(); go(-1); });
+  next.addEventListener('click', function (e) { e.stopPropagation(); go(1); });
+
+  document.addEventListener('keydown', function (e) {
+    if (!isOpen()) return;
+    if (e.key === 'Escape') close();
+    else if (e.key === 'ArrowLeft') go(-1);
+    else if (e.key === 'ArrowRight') go(1);
+  });
+
+  // Horizontal swipe: left -> next, right -> prev.
+  var sx = 0, sy = 0;
+  lb.addEventListener('touchstart', function (e) {
+    var t = e.changedTouches[0]; sx = t.clientX; sy = t.clientY;
+  }, { passive: true });
+  lb.addEventListener('touchend', function (e) {
+    var t = e.changedTouches[0];
+    var dx = t.clientX - sx, dy = t.clientY - sy;
+    if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy)) go(dx < 0 ? 1 : -1);
+  }, { passive: true });
+})();
+"#;
 
 /// The day a photo belongs to (`YYYY-MM-DD`), or `None` if it has no date.
 fn photo_day(creation_date: Option<&str>) -> Option<&str> {
@@ -100,6 +182,13 @@ pub async fn album_page(
          <h1>{title}</h1>\n\
          <p class=\"count\">{count} photo(s)</p>\n\
          {content}\
+         <div id=\"lightbox\" class=\"lightbox\">\n\
+         <button class=\"close\" aria-label=\"Close\">\u{00d7}</button>\n\
+         <button class=\"nav prev\" aria-label=\"Previous\">\u{2039}</button>\n\
+         <img id=\"lb-img\" class=\"full\" alt=\"\">\n\
+         <button class=\"nav next\" aria-label=\"Next\">\u{203a}</button>\n\
+         </div>\n\
+         <script>{SCRIPT}</script>\n\
          </body>\n\
          </html>\n",
         count = page.total,
