@@ -26,8 +26,8 @@ pub struct PhotoParams {
     tags: Option<String>,
     /// Present (e.g. `?recursive` or `?recursive=true`) to include sub-albums.
     recursive: Option<String>,
-    /// Minimum rating; out-of-range values are rejected as `400` by `Query`.
-    min_rating: Option<Rating>,
+    #[serde(default)]
+    min_rating: Rating,
     limit: Option<i64>,
     offset: Option<i64>,
 }
@@ -62,7 +62,7 @@ pub async fn list_photos(
         album: params.album.filter(|a| !a.is_empty()),
         recursive: flag(params.recursive.as_deref()),
         tags,
-        min_rating: params.min_rating.unwrap_or_default(),
+        min_rating: params.min_rating,
         limit: params.limit.unwrap_or(DEFAULT_LIMIT).clamp(1, MAX_LIMIT),
         offset: params.offset.unwrap_or(0).max(0),
     };
@@ -231,8 +231,8 @@ fn strip_weak(tag: &str) -> &str {
 #[derive(Debug, Deserialize)]
 pub struct SubalbumParams {
     album: Option<String>,
-    /// Minimum rating; out-of-range values are rejected as `400` by `Query`.
-    min_rating: Option<Rating>,
+    #[serde(default)]
+    min_rating: Rating,
 }
 
 /// `GET /subalbums?album=/Root/rel&min_rating=` — direct sub-albums of an album,
@@ -248,7 +248,7 @@ pub async fn list_subalbums(
         .ok_or_else(|| AppError::BadRequest("the `album` query parameter is required".into()))?;
 
     let filters = Filters {
-        min_rating: params.min_rating.unwrap_or_default(),
+        min_rating: params.min_rating,
     };
 
     let subalbums = run_blocking(&state, move |conn, state| {

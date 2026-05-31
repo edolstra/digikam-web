@@ -263,7 +263,8 @@ fn page_html(title: &str, crumb: &str, controls: &str, body: &str) -> String {
 /// Query parameters parsed from the album page URL into [`Filters`].
 #[derive(Debug, Deserialize)]
 pub struct AlbumViewParams {
-    min_rating: Option<Rating>,
+    #[serde(default)]
+    min_rating: Rating,
 }
 
 /// `GET /photos` — the virtual top of the database: shows the album roots as if
@@ -280,7 +281,7 @@ pub async fn album_page(
     Query(params): Query<AlbumViewParams>,
 ) -> AppResult<Html<String>> {
     let filters = Filters {
-        min_rating: params.min_rating.unwrap_or_default(),
+        min_rating: params.min_rating,
     };
     let trimmed = path.trim_matches('/');
     if trimmed.is_empty() {
