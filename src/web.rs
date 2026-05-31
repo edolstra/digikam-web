@@ -56,7 +56,7 @@ body.modal-open { overflow: hidden; }
             align-items: center; justify-content: center;
             background: rgba(0, 0, 0, 0.9); }
 .lightbox.open { display: flex; }
-.lightbox img.full { max-width: 100vw; max-height: 100vh; object-fit: contain; }
+.lightbox img.full { width: 100vw; height: 100vh; object-fit: contain; }
 .lightbox .close { position: absolute; top: 0.25rem; right: 0.75rem;
                    font-size: 2.5rem; line-height: 1; }
 .lightbox .nav { position: absolute; top: 50%; transform: translateY(-50%);
@@ -109,9 +109,20 @@ const SCRIPT: &str = r#"
     im.addEventListener('click', function () { show(i); });
   });
 
-  // Clicking the dimmed backdrop (but not the image or buttons) dismisses.
-  lb.addEventListener('click', function (e) { if (e.target === lb) close(); });
-  lb.querySelector('.close').addEventListener('click', close);
+  // The <img> fills the viewport (so small photos scale up too), with the
+  // bitmap letterboxed inside via object-fit: contain. Clicking that letterbox
+  // (i.e. outside the actual photo) dismisses; clicking the photo does not.
+  function onPhoto(e) {
+    var r = full.getBoundingClientRect();
+    var nw = full.naturalWidth, nh = full.naturalHeight;
+    if (!nw || !nh) return true; // not loaded yet: treat as on-photo
+    var s = Math.min(r.width / nw, r.height / nh);
+    var w = nw * s, h = nh * s;
+    var x = r.left + (r.width - w) / 2, y = r.top + (r.height - h) / 2;
+    return e.clientX >= x && e.clientX <= x + w && e.clientY >= y && e.clientY <= y + h;
+  }
+  lb.addEventListener('click', function (e) { if (!onPhoto(e)) close(); });
+  lb.querySelector('.close').addEventListener('click', function (e) { e.stopPropagation(); close(); });
   prev.addEventListener('click', function (e) { e.stopPropagation(); go(-1); });
   next.addEventListener('click', function (e) { e.stopPropagation(); go(1); });
 
