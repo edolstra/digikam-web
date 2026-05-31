@@ -54,9 +54,8 @@ async fn main() -> Result<()> {
 
     let app = Router::new()
         .nest("/api", api)
-        // `/` serves the same page as `/photos` (the virtual root).
-        .route("/", get(web::root_page))
-        .route("/photos", get(web::root_page))
+        .route("/", get(web::album_page))
+        .route("/photos", get(web::album_page))
         .route("/photos/*path", get(web::album_page))
         // Log each request (method + URI) and its response (status + latency) at
         // INFO; the span carries the URI so it shows on the response line too.

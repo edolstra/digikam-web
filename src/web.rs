@@ -156,29 +156,19 @@ pub struct AlbumViewParams {
     min_rating: Rating,
 }
 
-/// `GET /photos` — the virtual top of the database: shows the album roots as if
-/// they were sub-albums.
-pub async fn root_page(
-    State(state): State<AppState>,
-    Query(params): Query<AlbumViewParams>,
-) -> AppResult<Markup> {
-    let filters = Filters {
-        min_rating: params.min_rating,
-    };
-    render(state, &[], filters).await
-}
-
-/// `GET /photos/<album path>` — e.g. `/photos/Photos/Lego/Porsche911`. An empty
-/// path (`/photos/`) is treated as the virtual root.
+/// The album browsing page, serving `/`, `/photos`, and `/photos/<album path>`.
+/// An empty/absent path (`/`, `/photos`) is the virtual root (album roots shown
+/// as tiles); `/photos/Photos/Lego` -> `["Photos", "Lego"]`.
 pub async fn album_page(
     State(state): State<AppState>,
-    Path(path): Path<String>,
+    // `None` for the routes without a `*path` capture (`/`, `/photos`).
+    path: Option<Path<String>>,
     Query(params): Query<AlbumViewParams>,
 ) -> AppResult<Markup> {
     let filters = Filters {
         min_rating: params.min_rating,
     };
-    // `/photos/Photos/Lego` -> ["Photos", "Lego"]; `/photos/` -> [] (virtual root).
+    let path = path.map(|Path(p)| p).unwrap_or_default();
     let album = query::album_segments(&path);
     render(state, &album, filters).await
 }
