@@ -192,11 +192,11 @@
     return;
   }
 
-  // The decoder runs in a Blob worker (no extra endpoint): it loads webpgf.js,
-  // instantiates the module once with the wasm bytes, and decodes each blob to
-  // an ImageData, transferring the pixel buffer back. The webpgf URLs are made
-  // absolute (origin baked in): inside a blob: worker, importScripts/fetch
-  // resolve relative paths against the opaque blob base, not the page origin.
+  // The decoders run in Blob workers (no extra endpoint): each loads webpgf.js,
+  // instantiates the module once with the wasm bytes, and decodes each blob to an
+  // ImageData, transferring the pixel buffer back. The webpgf URLs are made
+  // absolute (origin baked in): inside a blob: worker, importScripts/fetch resolve
+  // relative paths against the opaque blob base, not the page origin.
   var base = location.origin;
   var workerSrc =
     "importScripts('" + base + "/webpgf.js');" +
@@ -207,25 +207,54 @@
     "gm().then(function(m){var im=m.decode(new Uint8Array(buf));var o=im.data;" +
     "postMessage({id:id,w:im.width,h:im.height,buf:o.buffer},[o.buffer]);})" +
     ".catch(function(err){postMessage({id:id,error:String((err&&err.message)||err)});});};";
-  var worker = new Worker(URL.createObjectURL(new Blob([workerSrc], { type: 'application/javascript' })));
+  var workerUrl = URL.createObjectURL(new Blob([workerSrc], { type: 'application/javascript' }));
 
-  var pending = {}; // id -> <img> awaiting its decode
-  var orient = {};  // id -> EXIF orientation from the response header
+  // Fetch (network) and decode (CPU) are separate stages so the wide prefetch
+  // window below is ready by the time you page down. Fetches run concurrently
+  // (browser-capped); each finished blob queues for the next idle worker in a
+  // small pool that decodes in parallel.
+  var POOL = Math.min(navigator.hardwareConcurrency || 4, 6);
+  var idleWorkers = [];
+  var live = 0;       // workers still alive
+  var queue = [];     // {img, buf, o}: fetched blobs waiting for a free worker
+  var pending = {};   // id -> {img, o}: currently decoding
 
-  worker.onmessage = function (e) {
-    var d = e.data, img = pending[d.id];
-    if (!img) return;
-    delete pending[d.id];
-    var o = orient[d.id] || 1; delete orient[d.id];
-    if (d.error) fallback(img);
-    else paint(img, d.w, d.h, d.buf, o);
-  };
-  // If the worker itself dies (e.g. the wasm fails to load), give every pending
-  // tile its original so the page still shows images.
-  worker.onerror = function () {
-    for (var id in pending) fallback(pending[id]);
-    pending = {};
-  };
+  function buildWorker() {
+    var w = new Worker(workerUrl);
+    w.onmessage = function (e) {
+      var d = e.data, job = pending[d.id];
+      if (job) {
+        delete pending[d.id];
+        if (d.error) fallback(job.img);
+        else paint(job.img, d.w, d.h, d.buf, job.o);
+      }
+      w.job = null;
+      idleWorkers.push(w);
+      drain();
+    };
+    // A worker that dies (e.g. webpgf failed to load) falls back its in-flight
+    // tile; once the whole pool is gone, queued/new tiles load their original.
+    w.onerror = function () {
+      live--;
+      idleWorkers = idleWorkers.filter(function (x) { return x !== w; }); // never dispatch to it
+      if (w.job && pending[w.job]) { fallback(pending[w.job].img); delete pending[w.job]; }
+      if (live <= 0) { queue.forEach(function (j) { fallback(j.img); }); queue = []; }
+    };
+    live++;
+    return w;
+  }
+  for (var wi = 0; wi < POOL; wi++) idleWorkers.push(buildWorker());
+
+  function drain() {
+    while (idleWorkers.length && queue.length) {
+      var w = idleWorkers.pop();
+      var job = queue.shift();
+      var id = job.img.dataset.id;
+      pending[id] = { img: job.img, o: job.o };
+      w.job = id;
+      w.postMessage({ id: id, buf: job.buf }, [job.buf]);
+    }
+  }
 
   function fallback(img) {
     // Video posters carry no `data-full`: a missing/failed thumbnail just leaves
@@ -279,19 +308,23 @@
     var id = img.dataset.id;
     fetch('/api/photos/' + id + '/thumbnail').then(function (res) {
       if (!res.ok) { fallback(img); return; }
-      orient[id] = parseInt(res.headers.get('X-Orientation'), 10) || 1;
+      var o = parseInt(res.headers.get('X-Orientation'), 10) || 1;
       return res.arrayBuffer().then(function (buf) {
-        pending[id] = img;
-        worker.postMessage({ id: id, buf: buf }, [buf]);
+        if (live <= 0) { fallback(img); return; } // no decoders left
+        queue.push({ img: img, buf: buf, o: o });
+        drain();
       });
     }).catch(function () { fallback(img); });
   }
 
-  // Start decoding a little before a tile scrolls in, and only once per tile.
+  // Decode well ahead of the viewport so paging down lands on already-decoded
+  // images: trigger ~1 screen above and ~2.5 screens below the viewport, and only
+  // once per tile.
+  var vh = window.innerHeight || 800;
   var io = new IntersectionObserver(function (entries) {
     entries.forEach(function (en) {
       if (en.isIntersecting) { io.unobserve(en.target); load(en.target); }
     });
-  }, { rootMargin: '300px' });
+  }, { rootMargin: Math.round(vh) + 'px 0px ' + Math.round(vh * 2.5) + 'px 0px' });
   thumbs.forEach(function (img) { io.observe(img); });
 })();

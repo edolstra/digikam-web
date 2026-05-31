@@ -171,14 +171,19 @@ The embed path comes from the `WEBPGF_PATH` env var, which the flake sets to the
 derivation output for **both** `nix build` (`commonArgs`) and the dev shell — so plain
 `cargo build` inside `nix develop` embeds them too.
 
-The frontend ([web.js](src/web.js)) wires this up: an `IntersectionObserver` (300 px
-`rootMargin`) triggers a `/thumbnail` fetch per `img.thumb` tile, the PGF is decoded in a
-**Blob Web Worker** (loads `/webpgf.js`, instantiates with the `/webpgf.wasm` bytes once,
-returns an `ImageData` whose buffer is transferred back), and the main thread draws it —
-applying the EXIF `X-Orientation` (2..8; 0/1/junk = no rotation) — to a canvas, then sets
-the `<img>` to the canvas's blob URL. The worker URLs are made **absolute** (`location.origin`
-baked in) because a `blob:` worker resolves relative paths against its opaque blob base, not
-the page origin. Decode runs off the main thread to keep scrolling smooth.
+The frontend ([web.js](src/web.js)) wires this up. An `IntersectionObserver` with a wide,
+viewport-relative `rootMargin` (≈1 screen above, ≈2.5 below) triggers a `/thumbnail` fetch
+per `img.thumb` tile **well before** it scrolls in, so paging down lands on already-decoded
+images. Fetch (network) and decode (CPU) are **separate stages**: fetches run concurrently
+(browser-capped), and each finished PGF blob queues for the next idle worker in a small
+**Blob Web Worker pool** (`min(hardwareConcurrency, 6)`; each loads `/webpgf.js` and
+instantiates with the `/webpgf.wasm` bytes once, returns an `ImageData` whose buffer is
+transferred back). The main thread draws each result — applying the EXIF `X-Orientation`
+(2..8; 0/1/junk = no rotation) — to a canvas, then sets the `<img>` to the canvas's blob URL.
+The worker URLs are made **absolute** (`location.origin` baked in) because a `blob:` worker
+resolves relative paths against its opaque blob base, not the page origin. A worker that dies
+(e.g. webpgf failed to load) falls back its tile to `/file`; once the whole pool is gone,
+queued/new tiles do too.
 
 ### Deliberately out of scope (this milestone)
 - Auth, any write operations, and search by date/rating/geo.
