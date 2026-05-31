@@ -260,6 +260,7 @@ async fn render(state: AppState, album: Option<String>) -> AppResult<Html<String
         album: Some(album.clone()),
         recursive: false,
         tags: Vec::new(),
+        min_rating: None,
         // No real pagination in this first cut; list everything in the album.
         limit: i64::MAX,
         offset: 0,

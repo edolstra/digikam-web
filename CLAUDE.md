@@ -31,7 +31,7 @@ All endpoints are served under the `/api` prefix.
 
 | Route | Notes |
 |-------|-------|
-| `GET /api/photos?album=&tags=&recursive&limit=&offset=` | Filtered, paginated list. `Page<PhotoSummary>` = `{total, limit, offset, items}`. |
+| `GET /api/photos?album=&tags=&recursive&min_rating=&limit=&offset=` | Filtered, paginated list. `Page<PhotoSummary>` = `{total, limit, offset, items}`. |
 | `GET /api/photos/:id` | `PhotoDetail` (summary + tag names + lat/long). |
 | `GET /api/photos/:id/file` | Original bytes, range-aware (via `tower_http::services::ServeFile`). Sends a strong `ETag` from the image's `uniqueHash`; a matching `If-None-Match` (or `*`) returns `304`. |
 | `GET /api/albums` | Flat list of all albums (`{id, path, root}`). |
@@ -59,6 +59,9 @@ This is the seed of the browsing UI (planned to grow into Leptos later).
 - **`tags=a,b`** — **AND** across the listed names, **exact** match (descendant tags
   do *not* count). A name shared by several tag ids is OR'd within that one name.
   An unknown tag name yields an empty result (correct AND behavior).
+- **`min_rating=N`** — minimum rating, `0..=5` (else `400`). Unrated images
+  (Digikam stores `-1`) count as `0`, so `min_rating=0` includes everything and
+  `min_rating>=1` excludes the unrated. Implemented as `max(ifnull(ii.rating,0),0) >= N`.
 - **Ordering** — newest first (`ORDER BY ii.creationDate DESC, i.id DESC`).
 - **Paging** — `limit` defaults to 200, capped at 1000; `offset` defaults to 0.
 

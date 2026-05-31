@@ -20,6 +20,10 @@ pub struct PhotoQuery {
     pub recursive: bool,
     /// Tag names; an image must carry every one of them (exact match).
     pub tags: Vec<String>,
+    /// Minimum rating (0..=5). `None` means no rating filter. Unrated images
+    /// (rating `-1`/NULL) count as 0, so `min_rating=0` includes everything and
+    /// `min_rating>=1` excludes the unrated.
+    pub min_rating: Option<i64>,
     pub limit: i64,
     pub offset: i64,
 }
@@ -118,6 +122,13 @@ fn build_filter(conn: &Connection, q: &PhotoQuery) -> AppResult<(String, Vec<Val
             " AND EXISTS (SELECT 1 FROM ImageTags it WHERE it.imageid = i.id AND it.tagid IN ({placeholders}))"
         ));
         params.extend(ids.into_iter().map(Value::Integer));
+    }
+
+    if let Some(min) = q.min_rating {
+        // Treat unrated images (rating -1, or NULL when there's no
+        // ImageInformation row) as rating 0, so `min_rating=0` includes them.
+        sql.push_str(" AND max(ifnull(ii.rating, 0), 0) >= ?");
+        params.push(Value::Integer(min));
     }
 
     Ok((sql, params))

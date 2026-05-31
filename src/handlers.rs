@@ -26,6 +26,8 @@ pub struct PhotoParams {
     tags: Option<String>,
     /// Present (e.g. `?recursive` or `?recursive=true`) to include sub-albums.
     recursive: Option<String>,
+    /// Minimum rating, 0..=5.
+    min_rating: Option<i64>,
     limit: Option<i64>,
     offset: Option<i64>,
 }
@@ -55,10 +57,21 @@ pub async fn list_photos(
         })
         .unwrap_or_default();
 
+    let min_rating = match params.min_rating {
+        Some(r) if (0..=5).contains(&r) => Some(r),
+        Some(r) => {
+            return Err(AppError::BadRequest(format!(
+                "min_rating must be between 0 and 5, got {r}"
+            )))
+        }
+        None => None,
+    };
+
     let q = PhotoQuery {
         album: params.album.filter(|a| !a.is_empty()),
         recursive: flag(params.recursive.as_deref()),
         tags,
+        min_rating,
         limit: params.limit.unwrap_or(DEFAULT_LIMIT).clamp(1, MAX_LIMIT),
         offset: params.offset.unwrap_or(0).max(0),
     };
