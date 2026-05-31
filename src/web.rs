@@ -3,8 +3,9 @@
 //! Currently a minimal starting point: a single page that lists the file names
 //! of the photos in a given album path. This will grow into the real browsing UI.
 
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::response::Html;
+use serde::Deserialize;
 
 use crate::db::AppState;
 use crate::error::AppResult;
@@ -17,15 +18,21 @@ use crate::query::{self, PhotoQuery};
 const STYLE: &str = "\
 body { font-family: sans-serif; margin: 1rem; background: #111; color: #eee; }
 /* Breadcrumb navbar: pinned to the top, full-width (negative margins break out
-   of the body padding), staying put while the page scrolls underneath. */
-h1 { position: sticky; top: 0; z-index: 100;
-     margin: -1rem -1rem 1rem; padding: 0.6rem 1rem;
-     font-size: 1.2rem; font-weight: 600;
-     background: #1a1a1a; border-bottom: 1px solid #333; }
-h1 a { color: #6cf; text-decoration: none; }
-h1 a:hover { text-decoration: underline; }
-h1 .home { font-size: 1.3rem; }
-h1 .sep { color: #666; margin: 0 0.2rem; }
+   of the body padding), staying put while the page scrolls underneath. The
+   breadcrumb sits on the left, the rating selector on the right. */
+.navbar { position: sticky; top: 0; z-index: 100;
+          margin: -1rem -1rem 1rem; padding: 0.6rem 1rem;
+          background: #1a1a1a; border-bottom: 1px solid #333;
+          display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+.crumb { font-size: 1.2rem; font-weight: 600; }
+.crumb a { color: #6cf; text-decoration: none; }
+.crumb a:hover { text-decoration: underline; }
+.crumb .home { font-size: 1.3rem; }
+.crumb .sep { color: #666; margin: 0 0.2rem; }
+.rating { white-space: nowrap; }
+.rating a { color: #555; text-decoration: none; font-size: 1.2rem; padding: 0 1px; }
+.rating a.on { color: #f5c518; }
+.rating a:hover { color: #f5c518; }
 h2 { font-size: 1rem; margin: 1.5rem 0 0.5rem; padding-bottom: 0.25rem;
      border-bottom: 1px solid #333; color: #aaa; }
 .count { color: #888; font-size: 0.85rem; }
@@ -135,21 +142,58 @@ fn photo_day(creation_date: Option<&str>) -> Option<&str> {
     creation_date.filter(|d| d.len() >= 10).map(|d| &d[..10])
 }
 
+/// The view filters that are reflected in the URL and carried across navigation.
+/// Currently just a minimum rating; designed to grow (tags, date range, …) — add
+/// a field, serialize it in [`Filters::query_string`], and every album/sub-album
+/// link picks it up automatically.
+#[derive(Debug, Clone, Default)]
+struct Filters {
+    /// Minimum rating, 1..=5; `None` means no rating filter.
+    min_rating: Option<i64>,
+}
+
+impl Filters {
+    /// The query-string suffix encoding the active filters, e.g. `?min_rating=3`
+    /// (empty when nothing is active).
+    fn query_string(&self) -> String {
+        let mut params: Vec<String> = Vec::new();
+        if let Some(r) = self.min_rating {
+            params.push(format!("min_rating={r}"));
+        }
+        if params.is_empty() {
+            String::new()
+        } else {
+            format!("?{}", params.join("&"))
+        }
+    }
+
+    /// A copy with `min_rating` changed, preserving any other active filters.
+    fn with_min_rating(&self, min_rating: Option<i64>) -> Filters {
+        Filters {
+            min_rating,
+            ..self.clone()
+        }
+    }
+}
+
 /// The frontend URL for an album display path, e.g. `/Photos/Lego` ->
-/// `/photos/Photos/Lego`, percent-encoding each path segment.
-fn album_href(album: &str) -> String {
+/// `/photos/Photos/Lego`, percent-encoding each path segment and appending the
+/// active filters so they are carried along.
+fn album_href(album: &str, filters: &Filters) -> String {
     let mut href = String::from("/photos");
     for segment in album.split('/').filter(|s| !s.is_empty()) {
         href.push('/');
         href.push_str(&urlencoding::encode(segment));
     }
+    href.push_str(&filters.query_string());
     href
 }
 
 /// Render an album path like `/Photos/Lego/Porsche911` as a clickable breadcrumb
 /// `⌂ › Photos › Lego › Porsche911`. The leading house symbol links to `/photos`
-/// (the top of the database); each segment links to that album page.
-fn breadcrumb(album: &str) -> String {
+/// (the top of the database); each segment links to that album page, carrying the
+/// active filters.
+fn breadcrumb(album: &str, filters: &Filters) -> String {
     let mut html =
         String::from("<a class=\"home\" href=\"/photos\" aria-label=\"Home\">\u{2302}</a>");
     let mut prefix = String::new();
@@ -158,17 +202,41 @@ fn breadcrumb(album: &str) -> String {
         prefix.push_str(segment);
         html.push_str(&format!(
             "<span class=\"sep\">\u{203a}</span><a href=\"{href}\">{label}</a>",
-            href = escape_html(&album_href(&prefix)),
+            href = escape_html(&album_href(&prefix, filters)),
             label = escape_html(segment),
         ));
     }
     html
 }
 
+/// Render the navbar's rating selector: five stars where the first `min_rating`
+/// are gold. Clicking star K filters to `≥K`; clicking the active threshold again
+/// clears it. Links keep the other filters and the current album.
+fn rating_selector(album: &str, filters: &Filters) -> String {
+    let current = filters.min_rating;
+    let cur = current.unwrap_or(0);
+    let mut html = String::from("<span class=\"rating\">");
+    for k in 1..=5 {
+        // Toggle off when clicking the currently-selected threshold.
+        let target = filters.with_min_rating(if Some(k) == current { None } else { Some(k) });
+        let (class, star) = if k <= cur {
+            (" class=\"on\"", '\u{2605}')
+        } else {
+            ("", '\u{2606}')
+        };
+        html.push_str(&format!(
+            "<a{class} href=\"{href}\" title=\"\u{2265}{k} stars\">{star}</a>",
+            href = escape_html(&album_href(album, &target)),
+        ));
+    }
+    html.push_str("</span>");
+    html
+}
+
 /// Render a grid of sub-album tiles (cover with the bold title + count overlaid).
 /// Empty input yields an empty string; video-only sub-albums (no cover) get a
-/// plain dark tile.
-fn render_subalbums(subalbums: &[SubAlbum]) -> String {
+/// plain dark tile. Tile links carry the active filters.
+fn render_subalbums(subalbums: &[SubAlbum], filters: &Filters) -> String {
     if subalbums.is_empty() {
         return String::new();
     }
@@ -190,7 +258,7 @@ fn render_subalbums(subalbums: &[SubAlbum]) -> String {
              <span class=\"cnt\">({count})</span>\
              </span>\
              </a>\n",
-            href = escape_html(&album_href(&sub.path)),
+            href = escape_html(&album_href(&sub.path, filters)),
             name = escape_html(&sub.name),
             count = sub.photo_count,
         ));
@@ -199,8 +267,10 @@ fn render_subalbums(subalbums: &[SubAlbum]) -> String {
     html
 }
 
-/// Assemble a full HTML page. `title` and `crumb` must already be HTML-safe.
-fn page_html(title: &str, crumb: &str, body: &str) -> String {
+/// Assemble a full HTML page. `title`, `crumb` and `controls` must already be
+/// HTML-safe. `controls` is the right-hand side of the navbar (e.g. the rating
+/// selector), or empty.
+fn page_html(title: &str, crumb: &str, controls: &str, body: &str) -> String {
     format!(
         "<!DOCTYPE html>\n\
          <html lang=\"en\">\n\
@@ -211,7 +281,7 @@ fn page_html(title: &str, crumb: &str, body: &str) -> String {
          <style>\n{STYLE}</style>\n\
          </head>\n\
          <body>\n\
-         <h1>{crumb}</h1>\n\
+         <header class=\"navbar\"><span class=\"crumb\">{crumb}</span>{controls}</header>\n\
          {body}\
          <div id=\"lightbox\" class=\"lightbox\">\n\
          <button class=\"close\" aria-label=\"Close\">\u{00d7}</button>\n\
@@ -225,10 +295,16 @@ fn page_html(title: &str, crumb: &str, body: &str) -> String {
     )
 }
 
+/// Query parameters parsed from the album page URL into [`Filters`].
+#[derive(Debug, Deserialize)]
+pub struct AlbumViewParams {
+    min_rating: Option<i64>,
+}
+
 /// `GET /photos` — the virtual top of the database: shows the album roots as if
 /// they were sub-albums.
 pub async fn root_page(State(state): State<AppState>) -> AppResult<Html<String>> {
-    render(state, None).await
+    render(state, None, Filters::default()).await
 }
 
 /// `GET /photos/<album path>` — e.g. `/photos/Photos/Lego/Porsche911`. An empty
@@ -236,31 +312,40 @@ pub async fn root_page(State(state): State<AppState>) -> AppResult<Html<String>>
 pub async fn album_page(
     State(state): State<AppState>,
     Path(path): Path<String>,
+    Query(params): Query<AlbumViewParams>,
 ) -> AppResult<Html<String>> {
+    let filters = Filters {
+        // Out-of-range values are ignored (no filter) rather than rejected.
+        min_rating: params.min_rating.filter(|r| (1..=5).contains(r)),
+    };
     let trimmed = path.trim_matches('/');
     if trimmed.is_empty() {
-        return render(state, None).await;
+        return render(state, None, filters).await;
     }
-    render(state, Some(format!("/{trimmed}"))).await
+    render(state, Some(format!("/{trimmed}")), filters).await
 }
 
 /// Render the album browsing page. `album` is `None` for the virtual root (album
 /// roots shown as tiles, no photo grid), or `Some("/Root/rel")` for a real album.
-async fn render(state: AppState, album: Option<String>) -> AppResult<Html<String>> {
+async fn render(
+    state: AppState,
+    album: Option<String>,
+    filters: Filters,
+) -> AppResult<Html<String>> {
     let Some(album) = album else {
         // Virtual root: the album roots presented as sub-album tiles.
         let roots =
             run_blocking(&state, |conn, state| query::list_roots(conn, &state.roots)).await?;
-        let crumb = breadcrumb("");
-        let body = render_subalbums(&roots);
-        return Ok(Html(page_html("Photos", &crumb, &body)));
+        let crumb = breadcrumb("", &filters);
+        let body = render_subalbums(&roots, &filters);
+        return Ok(Html(page_html("Photos", &crumb, "", &body)));
     };
 
     let q = PhotoQuery {
         album: Some(album.clone()),
         recursive: false,
         tags: Vec::new(),
-        min_rating: None,
+        min_rating: filters.min_rating,
         // No real pagination in this first cut; list everything in the album.
         limit: i64::MAX,
         offset: 0,
@@ -275,7 +360,7 @@ async fn render(state: AppState, album: Option<String>) -> AppResult<Html<String
     })
     .await?;
 
-    let albums_html = render_subalbums(&subalbums);
+    let albums_html = render_subalbums(&subalbums, &filters);
 
     // `list_photos` already orders newest-first, so photos of the same day are
     // contiguous: we can group them by walking the list once.
@@ -309,12 +394,13 @@ async fn render(state: AppState, album: Option<String>) -> AppResult<Html<String
     }
 
     let title = escape_html(&album);
-    let crumb = breadcrumb(&album);
+    let crumb = breadcrumb(&album, &filters);
+    let controls = rating_selector(&album, &filters);
     let body = format!(
         "{albums_html}<p class=\"count\">{count} photo(s)</p>\n{content}",
         count = page.total,
     );
-    Ok(Html(page_html(&title, &crumb, &body)))
+    Ok(Html(page_html(&title, &crumb, &controls, &body)))
 }
 
 /// Minimal HTML-text escaping for interpolated values.
@@ -344,7 +430,7 @@ mod tests {
 
     #[test]
     fn builds_breadcrumb() {
-        let html = breadcrumb("/Photos/Lego/Porsche911");
+        let html = breadcrumb("/Photos/Lego/Porsche911", &Filters::default());
         assert!(html.contains("<a href=\"/photos/Photos\">Photos</a>"));
         assert!(html.contains("<a href=\"/photos/Photos/Lego\">Lego</a>"));
         assert!(html.contains("<a href=\"/photos/Photos/Lego/Porsche911\">Porsche911</a>"));
@@ -353,9 +439,29 @@ mod tests {
     #[test]
     fn breadcrumb_encodes_and_escapes() {
         // Spaces are percent-encoded in the href; the label stays human-readable.
-        let html = breadcrumb("/My Photos");
+        let html = breadcrumb("/My Photos", &Filters::default());
         assert!(html.contains("href=\"/photos/My%20Photos\""));
         assert!(html.contains(">My Photos</a>"));
+    }
+
+    #[test]
+    fn filters_propagate_into_links() {
+        let f = Filters { min_rating: Some(3) };
+        assert_eq!(f.query_string(), "?min_rating=3");
+        assert_eq!(Filters::default().query_string(), "");
+        // Breadcrumb links carry the active filter.
+        let html = breadcrumb("/Photos/Lego", &f);
+        assert!(html.contains("href=\"/photos/Photos/Lego?min_rating=3\""));
+    }
+
+    #[test]
+    fn rating_selector_toggles_and_fills() {
+        let html = rating_selector("/Photos/Lego", &Filters { min_rating: Some(2) });
+        // First two stars filled (on), and clicking star 2 again clears the filter.
+        assert_eq!(html.matches("class=\"on\"").count(), 2);
+        assert!(html.contains("href=\"/photos/Photos/Lego\" title=\"\u{2265}2 stars\""));
+        // Star 4 raises the threshold.
+        assert!(html.contains("href=\"/photos/Photos/Lego?min_rating=4\""));
     }
 
     #[test]
