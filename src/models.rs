@@ -70,6 +70,6 @@ pub struct SubAlbum {
     pub path: String,
     /// Number of visible photos in the sub-album's whole subtree.
     pub photo_count: u64,
-    /// Most recent photo anywhere in the subtree.
-    pub cover: Cover,
+    /// Most recent image in the subtree, or `None` if it contains only videos.
+    pub cover: Option<Cover>,
 }

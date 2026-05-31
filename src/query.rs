@@ -199,12 +199,17 @@ pub fn list_photos(
 }
 
 /// List the direct sub-albums of `album`, each with its recursive photo count
-/// and a cover (the newest photo anywhere in that sub-album's subtree), sorted
+/// and a cover (the newest **image** anywhere in that sub-album's subtree), sorted
 /// by name. Albums with no visible photos anywhere are omitted.
 ///
+/// Videos (`category = 2`) are never used as a cover: a sub-album whose subtree
+/// contains only videos is still listed but with no cover (`cover` is `None`).
+/// The photo count includes videos.
+///
 /// One query: every photo in the subtree is bucketed by its direct-child path
-/// segment, then a window function picks the newest photo per bucket. Filtering
-/// by `albumRoot` id (resolved from `roots`) lets the `(albumRoot, relativePath)`
+/// segment; the count is taken over all photos in the bucket, while the cover is
+/// the newest non-video photo (left-joined, so it may be absent). Filtering by
+/// `albumRoot` id (resolved from `roots`) lets the `(albumRoot, relativePath)`
 /// index serve the prefix range scan.
 pub fn list_subalbums(
     conn: &Connection,
@@ -227,7 +232,8 @@ pub fn list_subalbums(
 
     let mut stmt = conn.prepare_cached(
         "WITH matched AS ( \
-           SELECT i.id AS image_id, i.name AS image_name, ii.creationDate AS cdate, \
+           SELECT i.id AS image_id, i.name AS image_name, i.category AS category, \
+                  ii.creationDate AS cdate, \
                   substr(a.relativePath, length(:prefix) + 1) AS rest \
            FROM Images i JOIN Albums a ON a.id = i.album \
            LEFT JOIN ImageInformation ii ON ii.imageid = i.id \
@@ -236,21 +242,25 @@ pub fn list_subalbums(
              AND length(a.relativePath) > length(:prefix) \
          ), \
          bucketed AS ( \
-           SELECT image_id, image_name, cdate, \
+           SELECT image_id, image_name, category, cdate, \
                   CASE WHEN instr(rest, '/') > 0 \
                        THEN substr(rest, 1, instr(rest, '/') - 1) \
                        ELSE rest END AS bucket \
            FROM matched \
          ), \
-         ranked AS ( \
+         counts AS ( \
+           SELECT bucket, COUNT(*) AS cnt FROM bucketed GROUP BY bucket \
+         ), \
+         covers AS ( \
            SELECT bucket, image_id, image_name, \
-                  ROW_NUMBER() OVER (PARTITION BY bucket ORDER BY cdate DESC, image_id DESC) AS rn, \
-                  COUNT(*)     OVER (PARTITION BY bucket) AS cnt \
+                  ROW_NUMBER() OVER (PARTITION BY bucket ORDER BY cdate DESC, image_id DESC) AS rn \
            FROM bucketed \
+           WHERE category <> 2 \
          ) \
-         SELECT bucket, image_id, image_name, cnt \
-         FROM ranked WHERE rn = 1 \
-         ORDER BY bucket COLLATE NOCASE",
+         SELECT c.bucket, cv.image_id, cv.image_name, c.cnt \
+         FROM counts c \
+         LEFT JOIN covers cv ON cv.bucket = c.bucket AND cv.rn = 1 \
+         ORDER BY c.bucket COLLATE NOCASE",
     )?;
 
     let rows = stmt.query_map(
@@ -258,8 +268,8 @@ pub fn list_subalbums(
         |row| {
             Ok((
                 row.get::<_, String>(0)?,
-                row.get::<_, i64>(1)?,
-                row.get::<_, String>(2)?,
+                row.get::<_, Option<i64>>(1)?,
+                row.get::<_, Option<String>>(2)?,
                 row.get::<_, i64>(3)?,
             ))
         },
@@ -268,14 +278,19 @@ pub fn list_subalbums(
     let mut out = Vec::new();
     for row in rows {
         let (bucket, image_id, image_name, cnt) = row?;
+        // A bucket with only videos has no cover image.
+        let cover = match (image_id, image_name) {
+            (Some(id), Some(name)) => Some(Cover {
+                id: id as u64,
+                name,
+            }),
+            _ => None,
+        };
         out.push(SubAlbum {
             path: format!("{parent}/{bucket}"),
             name: bucket,
             photo_count: cnt.max(0) as u64,
-            cover: Cover {
-                id: image_id as u64,
-                name: image_name,
-            },
+            cover,
         });
     }
     Ok(out)

@@ -35,7 +35,7 @@ All endpoints are served under the `/api` prefix.
 | `GET /api/photos/:id` | `PhotoDetail` (summary + tag names + lat/long). |
 | `GET /api/photos/:id/file` | Original bytes, range-aware (via `tower_http::services::ServeFile`). Sends a strong `ETag` from the image's `uniqueHash`; a matching `If-None-Match` (or `*`) returns `304`. |
 | `GET /api/albums` | Flat list of all albums (`{id, path, root}`). |
-| `GET /api/subalbums?album=/Root/rel` | Direct sub-albums of an album as `[{name, path, photo_count, cover: {id, name}}]`, sorted by name. Cover = newest photo in the sub-album's whole subtree; `photo_count` is the recursive count. One window-function query; albums with no photos anywhere are omitted. |
+| `GET /api/subalbums?album=/Root/rel` | Direct sub-albums of an album as `[{name, path, photo_count, cover: {id, name} \| null}]`, sorted by name. Cover = newest **image** in the sub-album's whole subtree (videos, `category=2`, are never covers; a video-only sub-album has `cover: null`); `photo_count` is the recursive count incl. videos. One query; albums with no photos anywhere are omitted. |
 | `GET /api/tags` | Tag **tree** (`{id, name, children}`), internal tags excluded. |
 | `GET /api/health` | Liveness. |
 

@@ -24,7 +24,7 @@ h2 { font-size: 1rem; margin: 1.5rem 0 0.5rem; padding-bottom: 0.25rem;
 .count { color: #888; font-size: 0.85rem; }
 .albums { display: flex; flex-wrap: wrap; gap: 10px; margin: 0.5rem 0 1.5rem; }
 .album { position: relative; width: 200px; height: 150px; display: block;
-         text-decoration: none; border-radius: 4px; overflow: hidden; }
+         text-decoration: none; border-radius: 4px; overflow: hidden; background: #222; }
 .album img { width: 200px; height: 150px; object-fit: cover; display: block;
              background: #222; }
 .album .caption { position: absolute; inset: 0; display: flex;
@@ -192,17 +192,24 @@ pub async fn album_page(
     if !subalbums.is_empty() {
         albums_html.push_str("<div class=\"albums\">\n");
         for sub in &subalbums {
+            // Video-only sub-albums have no cover image; show a plain dark tile.
+            let cover_img = match &sub.cover {
+                Some(cover) => format!(
+                    "<img src=\"/api/photos/{id}/file\" alt=\"{alt}\" loading=\"lazy\">",
+                    id = cover.id,
+                    alt = escape_html(&cover.name),
+                ),
+                None => String::new(),
+            };
             albums_html.push_str(&format!(
                 "<a class=\"album\" href=\"{href}\">\
-                 <img src=\"/api/photos/{cover_id}/file\" alt=\"{alt}\" loading=\"lazy\">\
+                 {cover_img}\
                  <span class=\"caption\">\
                  <span class=\"title\">{name}</span>\
                  <span class=\"cnt\">({count})</span>\
                  </span>\
                  </a>\n",
                 href = escape_html(&album_href(&sub.path)),
-                cover_id = sub.cover.id,
-                alt = escape_html(&sub.cover.name),
                 name = escape_html(&sub.name),
                 count = sub.photo_count,
             ));
