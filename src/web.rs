@@ -52,6 +52,11 @@ h2 { font-size: 1rem; margin: 1.5rem 0 0.5rem; padding-bottom: 0.25rem;
 .grid { display: flex; flex-wrap: wrap; gap: 4px; align-items: flex-end; }
 .grid img { height: 200px; width: auto; display: block; background: #222; cursor: pointer;
             touch-action: manipulation; }
+.grid .vtile { height: 200px; width: 300px; background: #222; border: 0; padding: 0;
+               position: relative; cursor: pointer; touch-action: manipulation; }
+.grid .vtile::after { content: '\u{25b6}'; position: absolute; inset: 0; display: flex;
+                      align-items: center; justify-content: center; font-size: 3rem;
+                      color: rgba(255, 255, 255, 0.85); text-shadow: 0 0 8px rgba(0, 0, 0, 0.8); }
 body.modal-open { overflow: hidden; }
 /* Sized in dynamic viewport units (dvw/dvh) so it tracks the *visible* viewport
    on mobile as the toolbars show/hide — plain vh/vw refer to the large viewport
@@ -61,7 +66,8 @@ body.modal-open { overflow: hidden; }
             align-items: center; justify-content: center;
             background: rgba(0, 0, 0, 0.9); }
 .lightbox.open { display: flex; }
-.lightbox img.full { width: 100%; height: 100%; object-fit: contain; }
+.lightbox .full { width: 100%; height: 100%; object-fit: contain; display: none; }
+.lightbox .full.active { display: block; }
 .lightbox .close { position: absolute; top: 0.25rem; right: 0.75rem;
                    font-size: 2.5rem; line-height: 1; }
 .lightbox .nav { position: absolute; top: 50%; transform: translateY(-50%);
@@ -75,34 +81,57 @@ body.modal-open { overflow: hidden; }
 ";
 
 /// Inline lightbox behavior. No server data is interpolated here (static string);
-/// the enlarged `src`/`alt` are read from the already-escaped grid `<img>` attributes.
+/// media URLs are read from the already-escaped grid `<img src>` / `.vtile`
+/// `data-src` attributes. Photos use `#lb-img`, videos `#lb-video`.
 const SCRIPT: &str = r#"
 (function () {
-  var imgs = Array.prototype.slice.call(document.querySelectorAll('.grid img'));
+  var tiles = Array.prototype.slice.call(document.querySelectorAll('.grid img, .grid .vtile'));
+  var items = tiles.map(function (el) {
+    var video = el.classList.contains('vtile');
+    return { src: video ? el.dataset.src : el.src, alt: el.getAttribute('alt') || '', video: video };
+  });
   var lb = document.getElementById('lightbox');
-  var full = document.getElementById('lb-img');
+  var img = document.getElementById('lb-img');
+  var vid = document.getElementById('lb-video');
   var prev = lb.querySelector('.prev');
   var next = lb.querySelector('.next');
   var idx = -1;
 
   function isOpen() { return lb.classList.contains('open'); }
+  function curItem() { return idx >= 0 ? items[idx] : null; }
+  function activeEl() { return vid.classList.contains('active') ? vid : img; }
 
-  // Decode the neighbours ahead of time so tapping prev/next paints instantly
+  // Decode image neighbours ahead of time so tapping prev/next paints instantly
   // (originals are full-size, so the decode is the slow part — worst on Firefox).
+  // Videos are skipped: we don't want to prefetch multi-MB media.
   function preload(i) {
-    if (i >= 0 && i < imgs.length) {
+    if (i >= 0 && i < items.length && !items[i].video) {
       var im = new Image();
-      im.src = imgs[i].src;
+      im.src = items[i].src;
     }
   }
 
-  function show(i) {
-    if (i < 0 || i >= imgs.length) return;
+  function show(i, play) {
+    if (i < 0 || i >= items.length) return;
     idx = i;
-    full.src = imgs[i].src;
-    full.alt = imgs[i].alt;
+    var it = items[i];
+    vid.pause(); // stop any previously-playing video before switching
+    if (it.video) {
+      vid.src = it.src;
+      vid.classList.add('active');
+      img.classList.remove('active');
+      img.removeAttribute('src');
+      if (play) { var p = vid.play(); if (p && p.catch) p.catch(function () {}); }
+    } else {
+      img.src = it.src;
+      img.alt = it.alt;
+      img.classList.add('active');
+      vid.classList.remove('active');
+      vid.removeAttribute('src');
+      vid.load();
+    }
     prev.disabled = (i === 0);
-    next.disabled = (i === imgs.length - 1);
+    next.disabled = (i === items.length - 1);
     lb.classList.add('open');
     document.body.classList.add('modal-open');
     preload(i + 1);
@@ -110,10 +139,11 @@ const SCRIPT: &str = r#"
   }
 
   // Open via a pushed history entry so the device Back button (and gesture)
-  // pops it and dismisses the photo, instead of navigating off the album page.
+  // pops it and dismisses, instead of navigating off the album page. Opening a
+  // video plays it (the tap is the user gesture, so audio is allowed).
   function open(i) {
     if (!isOpen()) history.pushState({ lightbox: true }, '');
-    show(i);
+    show(i, true);
   }
 
   // UI dismiss (X / Esc / tapping outside): step back in history so the Back
@@ -126,7 +156,12 @@ const SCRIPT: &str = r#"
   function dismiss() {
     lb.classList.remove('open');
     document.body.classList.remove('modal-open');
-    full.removeAttribute('src');
+    vid.pause();
+    vid.removeAttribute('src');
+    vid.load();
+    img.removeAttribute('src');
+    img.classList.remove('active');
+    vid.classList.remove('active');
     idx = -1;
   }
 
@@ -134,28 +169,40 @@ const SCRIPT: &str = r#"
     if (isOpen()) dismiss();
   });
 
+  // Navigation (arrows / chevrons / swipe) auto-plays a video it lands on
+  // (the click/key/swipe is a user gesture, so playback with audio is allowed).
   function go(d) {
     var n = idx + d;
-    if (n >= 0 && n < imgs.length) show(n);
+    if (n >= 0 && n < items.length) show(n, true);
   }
 
-  imgs.forEach(function (im, i) {
-    im.addEventListener('click', function () { open(i); });
+  function togglePlay() {
+    if (vid.paused) { var p = vid.play(); if (p && p.catch) p.catch(function () {}); }
+    else vid.pause();
+  }
+
+  tiles.forEach(function (el, i) {
+    el.addEventListener('click', function () { open(i); });
   });
 
-  // The <img> fills the viewport (so small photos scale up too), with the
-  // bitmap letterboxed inside via object-fit: contain. Clicking that letterbox
-  // (i.e. outside the actual photo) dismisses; clicking the photo does not.
-  function onPhoto(e) {
-    var r = full.getBoundingClientRect();
-    var nw = full.naturalWidth, nh = full.naturalHeight;
-    if (!nw || !nh) return true; // not loaded yet: treat as on-photo
+  // The media fills the viewport (so small items scale up too), letterboxed via
+  // object-fit: contain. Clicking that letterbox (outside the media) dismisses;
+  // clicking a video toggles play/pause; clicking a photo does nothing.
+  function onMedia(e) {
+    var el = activeEl();
+    var r = el.getBoundingClientRect();
+    var nw = el.naturalWidth || el.videoWidth, nh = el.naturalHeight || el.videoHeight;
+    if (!nw || !nh) return true; // not loaded yet: treat as on-media
     var s = Math.min(r.width / nw, r.height / nh);
     var w = nw * s, h = nh * s;
     var x = r.left + (r.width - w) / 2, y = r.top + (r.height - h) / 2;
     return e.clientX >= x && e.clientX <= x + w && e.clientY >= y && e.clientY <= y + h;
   }
-  lb.addEventListener('click', function (e) { if (!onPhoto(e)) close(); });
+  lb.addEventListener('click', function (e) {
+    if (!onMedia(e)) { close(); return; }
+    var it = curItem();
+    if (it && it.video) togglePlay();
+  });
   lb.querySelector('.close').addEventListener('click', function (e) { e.stopPropagation(); close(); });
   prev.addEventListener('click', function (e) { e.stopPropagation(); go(-1); });
   next.addEventListener('click', function (e) { e.stopPropagation(); go(1); });
@@ -165,8 +212,9 @@ const SCRIPT: &str = r#"
     if (e.key === 'Escape') close();
     else if (e.key === 'ArrowLeft') go(-1);
     else if (e.key === 'ArrowRight') go(1);
-    else if (e.key === 'Home') show(0);
-    else if (e.key === 'End') show(imgs.length - 1);
+    else if (e.key === 'Home') show(0, true);
+    else if (e.key === 'End') show(items.length - 1, true);
+    else if (e.key === ' ') { var it = curItem(); if (it && it.video) { e.preventDefault(); togglePlay(); } }
   });
 
   // Horizontal swipe: left -> next, right -> prev.
@@ -301,6 +349,7 @@ fn page_html(title: &str, crumb: &str, controls: &str, body: &str) -> String {
          <button class=\"close\" aria-label=\"Close\">\u{00d7}</button>\n\
          <button class=\"nav prev\" aria-label=\"Previous\">\u{2039}</button>\n\
          <img id=\"lb-img\" class=\"full\" alt=\"\" decoding=\"async\">\n\
+         <video id=\"lb-video\" class=\"full\" playsinline></video>\n\
          <button class=\"nav next\" aria-label=\"Next\">\u{203a}</button>\n\
          </div>\n\
          <script>{SCRIPT}</script>\n\
@@ -410,12 +459,22 @@ async fn render(
                 grid_open = true;
                 current_day = day;
             }
-            // Originals are full-size, so let the browser load lazily.
-            content.push_str(&format!(
-                "<img src=\"/api/photos/{id}/file\" alt=\"{alt}\" loading=\"lazy\">\n",
-                id = photo.id,
-                alt = escape_html(&photo.name),
-            ));
+            if photo.is_video {
+                // Placeholder tile (▶ badge via CSS); nothing is fetched until
+                // it's opened in the lightbox. `data-src` carries the media URL.
+                content.push_str(&format!(
+                    "<button class=\"vtile\" data-src=\"/api/photos/{id}/file\" title=\"{name}\"></button>\n",
+                    id = photo.id,
+                    name = escape_html(&photo.name),
+                ));
+            } else {
+                // Originals are full-size, so let the browser load lazily.
+                content.push_str(&format!(
+                    "<img src=\"/api/photos/{id}/file\" alt=\"{alt}\" loading=\"lazy\">\n",
+                    id = photo.id,
+                    alt = escape_html(&photo.name),
+                ));
+            }
         }
         if grid_open {
             content.push_str("</div>\n");

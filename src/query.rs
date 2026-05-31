@@ -240,7 +240,7 @@ pub fn list_photos(
     // Page of results, newest first.
     let select_sql = format!(
         "SELECT i.id, i.name, a.albumRoot, a.relativePath, i.fileSize, \
-                ii.format, ii.width, ii.height, ii.rating, ii.creationDate{filter} \
+                ii.format, ii.width, ii.height, ii.rating, ii.creationDate, i.category{filter} \
          ORDER BY ii.creationDate DESC, i.id DESC \
          LIMIT ? OFFSET ?"
     );
@@ -268,6 +268,7 @@ pub fn list_photos(
                 rating: opt_u64(row.get(8)?),
                 creation_date: row.get(9)?,
                 mime: None,
+                is_video: row.get::<_, i64>(10)? == 2,
             })
         })?
         .collect::<Result<Vec<_>, _>>()?;

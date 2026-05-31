@@ -75,7 +75,7 @@ pub async fn get_photo(
         let mut stmt = conn.prepare(
             "SELECT i.id, i.name, a.albumRoot, a.relativePath, i.fileSize, \
                     ii.format, ii.width, ii.height, ii.rating, ii.creationDate, \
-                    p.latitudeNumber, p.longitudeNumber \
+                    p.latitudeNumber, p.longitudeNumber, i.category \
              FROM Images i \
              JOIN Albums a ON a.id = i.album \
              JOIN AlbumRoots r ON r.id = a.albumRoot \
@@ -109,6 +109,7 @@ pub async fn get_photo(
                         rating: opt_u64(row.get(8)?),
                         creation_date: row.get(9)?,
                         mime,
+                        is_video: row.get::<_, i64>(12)? == 2,
                     },
                     tags: Vec::new(),
                     latitude: row.get(10)?,

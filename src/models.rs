@@ -24,6 +24,8 @@ pub struct PhotoSummary {
     pub rating: Option<u64>,
     pub creation_date: Option<String>,
     pub mime: Option<String>,
+    /// True if this item is a video (Digikam `category = 2`).
+    pub is_video: bool,
 }
 
 /// Full detail for a single photo.

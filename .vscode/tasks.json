@@ -1,0 +1,18 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      // Assumes VS Code was launched from inside a `nix develop` shell, so
+      // cargo is on PATH. Run with the default build shortcut (Ctrl/Cmd+Shift+B).
+      "label": "cargo build --release",
+      "type": "cargo",
+      "command": "build",
+      "args": ["--release"],
+      "problemMatcher": ["$rustc"],
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      }
+    }
+  ]
+}
