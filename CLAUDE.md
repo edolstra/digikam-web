@@ -33,7 +33,7 @@ All endpoints are served under the `/api` prefix.
 |-------|-------|
 | `GET /api/photos?album=&tags=&recursive&limit=&offset=` | Filtered, paginated list. `Page<PhotoSummary>` = `{total, limit, offset, items}`. |
 | `GET /api/photos/:id` | `PhotoDetail` (summary + tag names + lat/long). |
-| `GET /api/photos/:id/file` | Original bytes, range-aware (via `tower_http::services::ServeFile`). |
+| `GET /api/photos/:id/file` | Original bytes, range-aware (via `tower_http::services::ServeFile`). Sends a strong `ETag` from the image's `uniqueHash`; a matching `If-None-Match` (or `*`) returns `304`. |
 | `GET /api/albums` | Flat list of all albums (`{id, path, root}`). |
 | `GET /api/tags` | Tag **tree** (`{id, name, children}`), internal tags excluded. |
 | `GET /api/health` | Liveness. |

@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use axum::extract::{Path, Query, State};
-use axum::http::Request;
+use axum::http::{header, HeaderMap, HeaderValue, Request, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
 use serde::Deserialize;
@@ -144,19 +144,23 @@ pub async fn get_photo(
 }
 
 /// `GET /photos/:id/file` — serve the original image bytes (range-aware).
+///
+/// Sets a strong `ETag` derived from the image's `uniqueHash` (which Digikam
+/// recomputes when a file's content changes), so clients and caches can
+/// revalidate cheaply. A matching `If-None-Match` short-circuits with `304`.
 pub async fn get_photo_file(
     State(state): State<AppState>,
     Path(id): Path<i64>,
     request: Request<axum::body::Body>,
 ) -> AppResult<Response> {
-    let path = run_blocking(&state, move |conn, state| {
-        let (album_root, relative_path, name): (i64, String, String) = conn
-            .query_row(
-                "SELECT a.albumRoot, a.relativePath, i.name FROM Images i \
+    let (path, etag) = run_blocking(&state, move |conn, state| {
+        let (album_root, relative_path, name, unique_hash): (i64, String, String, Option<String>) =
+            conn.query_row(
+                "SELECT a.albumRoot, a.relativePath, i.name, i.uniqueHash FROM Images i \
                  JOIN Albums a ON a.id = i.album \
                  WHERE i.id = ?1 AND i.status = 1",
                 [id],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
             )
             .map_err(|e| match e {
                 rusqlite::Error::QueryReturnedNoRows => {
@@ -169,16 +173,54 @@ pub async fn get_photo_file(
             .roots
             .get(&album_root)
             .ok_or_else(|| AppError::NotFound(format!("album root {album_root} unknown")))?;
-        Ok(image_abs_path(root, &relative_path, &name))
+
+        // Build a strong ETag from the content hash; skip if Digikam has none.
+        let etag = unique_hash
+            .filter(|h| !h.is_empty())
+            .and_then(|h| HeaderValue::from_str(&format!("\"{h}\"")).ok());
+
+        Ok((image_abs_path(root, &relative_path, &name), etag))
     })
     .await?;
 
-    let response = ServeFile::new(&path)
+    // If the client already holds this exact content, don't re-send it.
+    if let Some(etag) = &etag {
+        if if_none_match_matches(request.headers(), etag) {
+            let mut not_modified = Response::new(axum::body::Body::empty());
+            *not_modified.status_mut() = StatusCode::NOT_MODIFIED;
+            not_modified.headers_mut().insert(header::ETAG, etag.clone());
+            return Ok(not_modified);
+        }
+    }
+
+    let mut response = ServeFile::new(&path)
         .oneshot(request)
         .await
-        .map_err(|e| AppError::Internal(anyhow::anyhow!("file service error: {e}")))?;
+        .map_err(|e| AppError::Internal(anyhow::anyhow!("file service error: {e}")))?
+        .map(axum::body::Body::new);
 
-    Ok(response.map(axum::body::Body::new))
+    if let Some(etag) = etag {
+        response.headers_mut().insert(header::ETAG, etag);
+    }
+
+    Ok(response)
+}
+
+/// Does the request's `If-None-Match` header match `etag` (or `*`)?
+fn if_none_match_matches(headers: &HeaderMap, etag: &HeaderValue) -> bool {
+    let Some(value) = headers.get(header::IF_NONE_MATCH).and_then(|v| v.to_str().ok()) else {
+        return false;
+    };
+    let want = strip_weak(etag.to_str().unwrap_or_default());
+    value
+        .split(',')
+        .map(str::trim)
+        .any(|candidate| candidate == "*" || strip_weak(candidate) == want)
+}
+
+/// Strip a weak-validator `W/` prefix for comparison purposes.
+fn strip_weak(tag: &str) -> &str {
+    tag.strip_prefix("W/").unwrap_or(tag)
 }
 
 /// `GET /albums`
