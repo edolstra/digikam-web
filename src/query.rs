@@ -398,8 +398,16 @@ pub fn list_subalbums(
 
 /// List the album roots as if they were sub-albums of a virtual top-level album,
 /// each with a cover (newest non-video image in the whole root) and total photo
-/// count, sorted by label. Mirrors [`list_subalbums`] but groups by `albumRoot`.
-pub fn list_roots(conn: &Connection, roots: &HashMap<i64, AlbumRoot>) -> AppResult<Vec<SubAlbum>> {
+/// count, sorted by label. Mirrors [`list_subalbums`] but groups by `albumRoot`;
+/// `filters` applies the same rating filter to the counts and covers.
+pub fn list_roots(
+    conn: &Connection,
+    roots: &HashMap<i64, AlbumRoot>,
+    filters: &Filters,
+) -> AppResult<Vec<SubAlbum>> {
+    // 0 makes the rating clause `max(...,0) >= 0` always true (i.e. no filter).
+    let min = filters.min_rating.get();
+
     let mut stmt = conn.prepare_cached(
         "WITH matched AS ( \
            SELECT i.id AS image_id, i.name AS image_name, i.category AS category, \
@@ -407,6 +415,7 @@ pub fn list_roots(conn: &Connection, roots: &HashMap<i64, AlbumRoot>) -> AppResu
            FROM Images i JOIN Albums a ON a.id = i.album \
            LEFT JOIN ImageInformation ii ON ii.imageid = i.id \
            WHERE i.status = 1 \
+             AND max(ifnull(ii.rating, 0), 0) >= :min \
          ), \
          counts AS ( \
            SELECT root, COUNT(*) AS cnt FROM matched GROUP BY root \
@@ -422,7 +431,7 @@ pub fn list_roots(conn: &Connection, roots: &HashMap<i64, AlbumRoot>) -> AppResu
          LEFT JOIN covers cv ON cv.root = c.root AND cv.rn = 1",
     )?;
 
-    let rows = stmt.query_map([], |row| {
+    let rows = stmt.query_map(rusqlite::named_params! { ":min": min }, |row| {
         Ok((
             row.get::<_, i64>(0)?,
             row.get::<_, Option<i64>>(1)?,

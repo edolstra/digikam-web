@@ -160,8 +160,11 @@ fn album_href(album: &str, filters: &Filters) -> String {
 /// (the top of the database); each segment links to that album page, carrying the
 /// active filters.
 fn breadcrumb(album: &str, filters: &Filters) -> String {
-    let mut html =
-        String::from("<a class=\"home\" href=\"/photos\" aria-label=\"Home\">\u{2302}</a>");
+    // The home link points at the virtual root, carrying the active filters.
+    let mut html = format!(
+        "<a class=\"home\" href=\"{href}\" aria-label=\"Home\">\u{2302}</a>",
+        href = escape_html(&album_href("", filters)),
+    );
     let mut prefix = String::new();
     for segment in album.split('/').filter(|s| !s.is_empty()) {
         prefix.push('/');
@@ -270,8 +273,14 @@ pub struct AlbumViewParams {
 
 /// `GET /photos` — the virtual top of the database: shows the album roots as if
 /// they were sub-albums.
-pub async fn root_page(State(state): State<AppState>) -> AppResult<Html<String>> {
-    render(state, None, Filters::default()).await
+pub async fn root_page(
+    State(state): State<AppState>,
+    Query(params): Query<AlbumViewParams>,
+) -> AppResult<Html<String>> {
+    let filters = Filters {
+        min_rating: params.min_rating,
+    };
+    render(state, None, filters).await
 }
 
 /// `GET /photos/<album path>` — e.g. `/photos/Photos/Lego/Porsche911`. An empty
@@ -300,11 +309,15 @@ async fn render(
 ) -> AppResult<Html<String>> {
     let Some(album) = album else {
         // Virtual root: the album roots presented as sub-album tiles.
-        let roots =
-            run_blocking(&state, |conn, state| query::list_roots(conn, &state.roots)).await?;
+        let filters_for_roots = filters.clone();
+        let roots = run_blocking(&state, move |conn, state| {
+            query::list_roots(conn, &state.roots, &filters_for_roots)
+        })
+        .await?;
         let crumb = breadcrumb("", &filters);
+        let controls = rating_selector("", &filters);
         let body = render_subalbums(&roots, &filters);
-        return Ok(Html(page_html("Photos", &crumb, "", &body)));
+        return Ok(Html(page_html("Photos", &crumb, &controls, &body)));
     };
 
     let q = PhotoQuery {
