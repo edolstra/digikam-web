@@ -1,45 +1,24 @@
-// Service worker — required for the app to be installable as a PWA, and gives
-// the app shell a network-first offline fallback. Dynamic data (/api/...) is
-// left to the browser; only same-origin GETs for pages and static assets are
-// intercepted, so the thumbnail-loading path is untouched.
-var CACHE = 'digikam-browse-v1';
-var SHELL = [
-  '/photos', '/webpgf.js', '/webpgf.wasm', '/manifest.webmanifest',
-  '/icon-192.png', '/icon-512.png', '/favicon.ico'
-];
+// Service worker — present only so the app is installable as a PWA.
+//
+// It deliberately does NOT intercept requests. A response served from a service
+// worker bypasses the browser's HTTP cache, which would defeat the Cache-Control
+// headers we rely on (immutable static assets, and the /photos pages' one-hour
+// max-age) — exactly the "it keeps refetching" problem. Leaving every request to
+// the browser keeps that caching working. A fetch handler must exist for the app
+// to be installable, so we register an empty (pass-through) one.
 
-self.addEventListener('install', function (e) {
-  e.waitUntil(
-    caches.open(CACHE)
-      .then(function (c) { return c.addAll(SHELL); })
-      .then(function () { return self.skipWaiting(); })
-  );
+self.addEventListener('install', function () {
+  self.skipWaiting();
 });
 
 self.addEventListener('activate', function (e) {
+  // Take control and drop any caches left by older, intercepting versions.
   e.waitUntil(
     caches.keys()
-      .then(function (keys) {
-        return Promise.all(keys.map(function (k) { return k === CACHE ? null : caches.delete(k); }));
-      })
+      .then(function (keys) { return Promise.all(keys.map(function (k) { return caches.delete(k); })); })
       .then(function () { return self.clients.claim(); })
   );
 });
 
-self.addEventListener('fetch', function (e) {
-  var req = e.request;
-  if (req.method !== 'GET') return;
-  var url = new URL(req.url);
-  // Pass cross-origin and dynamic API/media requests straight through.
-  if (url.origin !== location.origin || url.pathname.indexOf('/api/') === 0) return;
-  // Network-first: stay fresh online, fall back to the cache when offline.
-  e.respondWith(
-    fetch(req).then(function (res) {
-      if (res && res.ok) {
-        var copy = res.clone();
-        caches.open(CACHE).then(function (c) { c.put(req, copy); }).catch(function () {});
-      }
-      return res;
-    }).catch(function () { return caches.match(req); })
-  );
-});
+// Required for installability; intentionally a no-op so the HTTP cache governs.
+self.addEventListener('fetch', function () {});

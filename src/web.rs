@@ -4,7 +4,7 @@
 use axum::body::{Body, Bytes};
 use axum::extract::{Path, Query, State};
 use axum::http::{header, HeaderMap, HeaderValue, StatusCode};
-use axum::response::Response;
+use axum::response::{IntoResponse, Response};
 use maud::{html, Markup, PreEscaped, DOCTYPE};
 use serde::Deserialize;
 
@@ -335,13 +335,22 @@ pub async fn album_page(
     // `None` for the routes without a `*path` capture (`/`, `/photos`).
     path: Option<Path<String>>,
     Query(params): Query<AlbumViewParams>,
-) -> AppResult<Markup> {
+) -> AppResult<impl IntoResponse> {
     let filters = Filters {
         min_rating: params.min_rating,
     };
     let path = path.map(|Path(p)| p).unwrap_or_default();
     let album = query::album_segments(&path);
-    render(state, &album, filters).await
+    let markup = render(state, &album, filters).await?;
+    // Cache the page for an hour (browser-only). Navigations / back-forward reuse
+    // it; a force-reload (Ctrl/Cmd+Shift+R) bypasses it. Errors aren't cached.
+    Ok((
+        [(
+            header::CACHE_CONTROL,
+            HeaderValue::from_static("private, max-age=3600"),
+        )],
+        markup,
+    ))
 }
 
 /// Render the album browsing page. `album` is `[]` for the virtual root (album

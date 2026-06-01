@@ -57,6 +57,10 @@ This is the seed of the browsing UI (planned to grow into Leptos later).
 | `GET /photos` | The virtual top of the database: the album roots are shown as sub-album tiles (cover + name + count, newest-first), each linking to `/photos/<Root>`. No photo grid. |
 | `GET /photos/<album path>?min_rating=` | e.g. `/photos/Photos/Lego/Porsche911`. The photos directly in that album (non-recursive) as a day-grouped grid, under a breadcrumb navbar, with a sub-album grid and a fullscreen lightbox. See [The album page](#the-album-page) below. No pagination yet. |
 
+Both HTML pages send `Cache-Control: private, max-age=3600` on success (errors aren't
+cached): cached an hour for navigations / back-forward, while a force-reload
+(Ctrl/Cmd+Shift+R) bypasses it.
+
 #### The album page
 
 - **Navbar (sticky** — pinned to the top, the page scrolls underneath**)**: a
@@ -105,10 +109,13 @@ desktop, etc.). Embedded + served like the other static assets:
 `GET /icon-512.png` (rasterized from digiKam's `digikam_oxygen.svg`), and
 `GET /sw.js` (the service worker). The `<head>` carries `<link rel="manifest">`,
 `<meta name="theme-color">`, and an `apple-touch-icon`; [web.js](src/web.js) registers the
-service worker on `load`. The SW is **network-first** with a cached app-shell fallback,
-and **passes `/api/...` through untouched** so the thumbnail-loading path is unaffected.
-The manifest and `sw.js` are served `no-cache` (revalidated via content-hash `ETag`) so
-updates propagate; icons are `immutable`.
+service worker on `load`. The SW is **deliberately a no-op for fetches** (empty `fetch`
+handler): a response served from a service worker **bypasses the browser's HTTP cache**,
+which would defeat our `Cache-Control` headers (immutable assets, the `/photos` `max-age`),
+so every request is left to the browser. It exists only to satisfy the PWA installability
+requirement (and as the place to add real offline support later, if its caching is made to
+respect those headers). The manifest and `sw.js` are served `no-cache` (revalidated via
+content-hash `ETag`) so updates propagate; icons are `immutable`.
 
 > **Installation needs a secure context.** Service workers only register over **HTTPS**
 > (or `localhost`). Reaching the server from a phone over plain `http://<lan-ip>:8080`
