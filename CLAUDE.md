@@ -19,6 +19,11 @@ nix flake check                      # build + clippy (-D warnings)
 Config (CLI flags or env vars):
 - `--database` / `DIGIKAM_DB` — path to `digikam4.db` (default `~/.local/share/digikam/db/digikam4.db`).
 - `--listen` / `LISTEN_ADDR` — bind address (default `127.0.0.1:8080`).
+- `--tls` / `TLS` — serve over **HTTPS, enabling HTTP/2** (ALPN `h2`, HTTP/1.1 fallback),
+  using a freshly **auto-generated self-signed** cert (rustls + rcgen, served via hyper's
+  auto builder). Browsers warn about the untrusted cert (accept once) and the cert changes
+  each restart. HTTPS is also what makes the app installable as a PWA. Off by default
+  (plain HTTP/1.1 via `axum::serve`).
 - `--thumbnail-database` / `THUMBNAIL_DB` — path to `thumbnails-digikam.db` (default:
   alongside `--database`). Optional; if missing, `/thumbnail` returns `404`.
 - `--trace-sql` / `TRACE_SQL` — log every executed SQL statement (with bound values
@@ -108,7 +113,8 @@ updates propagate; icons are `immutable`.
 > **Installation needs a secure context.** Service workers only register over **HTTPS**
 > (or `localhost`). Reaching the server from a phone over plain `http://<lan-ip>:8080`
 > is **not** a secure context, so the SW won't register and the browser won't offer
-> "Install". Put it behind TLS (a reverse proxy / `tailscale serve` / a tunnel) to install.
+> "Install". Run with **`--tls`** (self-signed; accept the cert warning), or put it behind
+> real TLS (a reverse proxy / `tailscale serve` / a tunnel) for a trusted cert.
 
 ### Query semantics
 - **`album=/Root/rel`** — the first path segment is the `AlbumRoots.label`; the

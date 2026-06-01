@@ -25,6 +25,12 @@ pub struct Config {
     #[arg(long, env = "LISTEN_ADDR", default_value = "127.0.0.1:8080")]
     pub listen: SocketAddr,
 
+    /// Serve over HTTPS (enabling HTTP/2) using an auto-generated self-signed
+    /// certificate. Browsers warn about the untrusted cert (accept once); HTTPS
+    /// is also what makes the app installable as a PWA. Off by default.
+    #[arg(long, env = "TLS")]
+    pub tls: bool,
+
     /// Log every SQL statement (with bound values) as it executes.
     #[arg(long, env = "TRACE_SQL")]
     pub trace_sql: bool,
