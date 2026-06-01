@@ -75,7 +75,7 @@ pub async fn get_photo(
     let detail = run_blocking(&state, move |conn, state| {
         let mut stmt = conn.prepare(
             "SELECT i.id, i.name, a.albumRoot, a.relativePath, i.fileSize, \
-                    ii.format, ii.width, ii.height, ii.rating, ii.creationDate, \
+                    ii.format, ii.width, ii.height, ii.rating, i.modificationDate, \
                     p.latitudeNumber, p.longitudeNumber, i.category \
              FROM Images i \
              JOIN Albums a ON a.id = i.album \
@@ -108,7 +108,7 @@ pub async fn get_photo(
                         width: opt_u64(row.get(6)?),
                         height: opt_u64(row.get(7)?),
                         rating: opt_u64(row.get(8)?),
-                        creation_date: row.get(9)?,
+                        modification_date: row.get(9)?,
                         mime,
                         is_video: row.get::<_, i64>(12)? == 2,
                     },

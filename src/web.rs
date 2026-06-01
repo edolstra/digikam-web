@@ -170,8 +170,8 @@ const STYLE: &str = include_str!("web.css");
 const SCRIPT: &str = include_str!("web.js");
 
 /// The day a photo belongs to (`YYYY-MM-DD`), or `None` if it has no date.
-fn photo_day(creation_date: Option<&str>) -> Option<&str> {
-    creation_date.filter(|d| d.len() >= 10).map(|d| &d[..10])
+fn photo_day(date: Option<&str>) -> Option<&str> {
+    date.filter(|d| d.len() >= 10).map(|d| &d[..10])
 }
 
 /// Inline `width` (the grid row height is 200px) reserving a tile's space from
@@ -272,7 +272,7 @@ fn render_subalbums(album: &[String], subalbums: &[SubAlbum], filters: &Filters)
 fn group_by_day(items: &[PhotoSummary]) -> Vec<(&str, Vec<&PhotoSummary>)> {
     let mut groups: Vec<(&str, Vec<&PhotoSummary>)> = Vec::new();
     for photo in items {
-        let day = photo_day(photo.creation_date.as_deref()).unwrap_or("Unknown date");
+        let day = photo_day(photo.modification_date.as_deref()).unwrap_or("Unknown date");
         match groups.last_mut() {
             Some((d, v)) if *d == day => v.push(photo),
             _ => groups.push((day, vec![photo])),

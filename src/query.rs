@@ -227,8 +227,8 @@ pub fn list_photos(
     // Page of results, newest first.
     let select_sql = format!(
         "SELECT i.id, i.name, a.albumRoot, a.relativePath, i.fileSize, \
-                ii.format, ii.width, ii.height, ii.rating, ii.creationDate, i.category{filter} \
-         ORDER BY ii.creationDate DESC, i.id DESC \
+                ii.format, ii.width, ii.height, ii.rating, i.modificationDate, i.category{filter} \
+         ORDER BY i.modificationDate DESC, i.id DESC \
          LIMIT ? OFFSET ?"
     );
     let mut select_params = params;
@@ -256,7 +256,7 @@ pub fn list_photos(
                 width: opt_u64(row.get(6)?),
                 height: opt_u64(row.get(7)?),
                 rating: opt_u64(row.get(8)?),
-                creation_date: row.get(9)?,
+                modification_date: row.get(9)?,
                 mime: None,
                 is_video: row.get::<_, i64>(10)? == 2,
             })
@@ -330,7 +330,7 @@ pub fn list_subalbums(
         // Virtual top level: one bucket per album root (its label).
         None => (
             "SELECT i.id AS image_id, i.name AS image_name, i.category AS category, \
-                    ii.creationDate AS cdate, r.label AS bucket \
+                    i.modificationDate AS cdate, r.label AS bucket \
              FROM Images i JOIN Albums a ON a.id = i.album \
              JOIN AlbumRoots r ON r.id = a.albumRoot \
              LEFT JOIN ImageInformation ii ON ii.imageid = i.id \
@@ -356,7 +356,7 @@ pub fn list_subalbums(
                              THEN substr(rest, 1, instr(rest, '/') - 1) ELSE rest END AS bucket \
                  FROM ( \
                    SELECT i.id AS image_id, i.name AS image_name, i.category AS category, \
-                          ii.creationDate AS cdate, \
+                          i.modificationDate AS cdate, \
                           substr(a.relativePath, length(:prefix) + 1) AS rest \
                    FROM Images i JOIN Albums a ON a.id = i.album \
                    LEFT JOIN ImageInformation ii ON ii.imageid = i.id \

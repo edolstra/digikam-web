@@ -22,7 +22,9 @@ pub struct PhotoSummary {
     pub height: Option<u64>,
     /// Rating 0..=5. Digikam stores -1 for "unrated", which is reported as null.
     pub rating: Option<u64>,
-    pub creation_date: Option<String>,
+    /// File modification date (`Images.modificationDate`) — used for ordering and
+    /// day-grouping. Preferred over Digikam's `creationDate` (the import time).
+    pub modification_date: Option<String>,
     pub mime: Option<String>,
     /// True if this item is a video (Digikam `category = 2`).
     pub is_video: bool,

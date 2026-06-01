@@ -147,7 +147,10 @@ content-hash `ETag`) so updates propagate; icons are `immutable`.
 - **`min_rating=N`** — minimum rating, `0..=5` (else `400`). Unrated images
   (Digikam stores `-1`) count as `0`, so `min_rating=0` includes everything and
   `min_rating>=1` excludes the unrated. Implemented as `max(ifnull(ii.rating,0),0) >= N`.
-- **Ordering** — newest first (`ORDER BY ii.creationDate DESC, i.id DESC`).
+- **Ordering / dates** — newest first by **`Images.modificationDate`** (`ORDER BY
+  i.modificationDate DESC, i.id DESC`); the same column drives the day-grouping and the
+  sub-album cover/sort. We deliberately use the file modification date, **not**
+  `ImageInformation.creationDate` (which is Digikam's import time, rarely what you want).
 - **Paging** — `limit` defaults to 200, capped at 1000; `offset` defaults to 0.
 
 ## Architecture & design choices
@@ -189,8 +192,10 @@ content-hash `ETag`) so updates propagate; icons are `immutable`.
 ### Relevant Digikam schema
 - `AlbumRoots(id, label, identifier, specificPath)` — collection roots.
 - `Albums(id, albumRoot, relativePath)` — directories; unique `(albumRoot, relativePath)`.
-- `Images(id, album, name, status, fileSize, uniqueHash)`.
-- `ImageInformation(imageid, rating, creationDate, width, height, format, …)`.
+- `Images(id, album, name, status, fileSize, uniqueHash, modificationDate)` — we order
+  and day-group by `modificationDate`.
+- `ImageInformation(imageid, rating, creationDate, width, height, format, …)` —
+  `creationDate` is the import time; unused for ordering (see above).
 - `Tags(id, pid, name)`; `TagsTree(id, pid)` is the ancestor transitive closure
   (`SELECT id FROM TagsTree WHERE pid = T` gives descendants of `T` — currently unused
   because tag matching is exact).
