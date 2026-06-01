@@ -10,8 +10,8 @@ use crate::db::{album_display_path, AlbumRoot};
 use crate::error::AppResult;
 use crate::models::{Cover, Page, PhotoSummary, SubAlbum};
 
-pub const DEFAULT_LIMIT: u64 = 200;
-pub const MAX_LIMIT: u64 = 1000;
+pub const DEFAULT_LIMIT: u64 = 10000;
+pub const MAX_LIMIT: u64 = 100000;
 
 /// A photo rating constrained to 0..=5. Construction — including
 /// `Deserialize` from query strings — is the single place the range is enforced,
@@ -224,14 +224,6 @@ pub fn list_photos(
 ) -> AppResult<Page<PhotoSummary>> {
     let (filter, params) = build_filter(conn, q)?;
 
-    // Total count over the same filter.
-    let count_sql = format!("SELECT COUNT(*){filter}");
-    let total = conn.query_row(
-        &count_sql,
-        rusqlite::params_from_iter(params.iter()),
-        |row| row.get(0),
-    )?;
-
     // Page of results, newest first.
     let select_sql = format!(
         "SELECT i.id, i.name, a.albumRoot, a.relativePath, i.fileSize, \
@@ -240,7 +232,10 @@ pub fn list_photos(
          LIMIT ? OFFSET ?"
     );
     let mut select_params = params;
-    select_params.push(Value::Integer(q.limit as i64));
+    // Fetch one row past the limit to detect whether more results exist.
+    // `saturating_add` keeps `u64::MAX` (the "list everything" sentinel) at -1,
+    // which SQLite treats as no limit (rather than overflowing to LIMIT 0).
+    select_params.push(Value::Integer(q.limit.saturating_add(1) as i64));
     select_params.push(Value::Integer(q.offset as i64));
 
     let mut stmt = conn.prepare(&select_sql)?;
@@ -269,7 +264,7 @@ pub fn list_photos(
         .collect::<Result<Vec<_>, _>>()?;
 
     // Fill in MIME types from the file name extension.
-    let items = items
+    let mut items: Vec<PhotoSummary> = items
         .into_iter()
         .map(|mut p| {
             p.mime = mime_guess::from_path(&p.name)
@@ -279,8 +274,15 @@ pub fn list_photos(
         })
         .collect();
 
+    // If the extra row came back, there are more results beyond this page: drop
+    // it and flag the page incomplete.
+    let incomplete = items.len() as u64 > q.limit;
+    if incomplete {
+        items.truncate(q.limit as usize);
+    }
+
     Ok(Page {
-        total,
+        incomplete,
         limit: q.limit,
         offset: q.offset,
         items,

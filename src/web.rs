@@ -364,7 +364,7 @@ async fn render(state: AppState, album: &[String], filters: Filters) -> AppResul
         tags: Vec::new(),
         min_rating: filters.min_rating,
         // No real pagination in this first cut; list everything in the album.
-        limit: u64::MAX,
+        limit: query::DEFAULT_LIMIT,
         offset: 0,
     });
 
@@ -388,7 +388,7 @@ async fn render(state: AppState, album: &[String], filters: Filters) -> AppResul
         Some(page) => {
             let groups = group_by_day(&page.items);
             html! {
-                p.count { (page.total) " photo(s)" }
+                p.count { (page.items.len()) @if page.incomplete { "+" } " photo(s)" }
                 @if page.items.is_empty() {
                     p { "No photos in this album." }
                 } @else {
