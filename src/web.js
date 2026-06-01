@@ -156,6 +156,14 @@
     if (n >= 0 && n < items.length) show(n, true);
   }
 
+  // Jump to a random other item (the `r` key and a swipe-up both call this).
+  function goRandom() {
+    if (items.length <= 1) return;
+    var n;
+    do { n = Math.floor(Math.random() * items.length); } while (n === idx);
+    show(n, true);
+  }
+
   tiles.forEach(function (el, i) {
     el.addEventListener('click', function () { open(i); });
   });
@@ -191,15 +199,7 @@
     else if (e.key === 'ArrowRight') { e.preventDefault(); go(1); }
     else if (e.key === 'Home') { e.preventDefault(); show(0, true); }
     else if (e.key === 'End') { e.preventDefault(); show(items.length - 1, true); }
-    else if (e.key === 'r' || e.key === 'R') {
-      // Jump to a random other item.
-      e.preventDefault();
-      if (items.length > 1) {
-        var n;
-        do { n = Math.floor(Math.random() * items.length); } while (n === idx);
-        show(n, true);
-      }
-    }
+    else if (e.key === 'r' || e.key === 'R') { e.preventDefault(); goRandom(); }
     else if (e.key === ' ' && activeEl() === vid) {
       // Toggle the video (it isn't focused, so the native space-to-play won't fire).
       e.preventDefault();
@@ -224,17 +224,23 @@
     }
   });
 
-  // Horizontal swipe: left -> next, right -> prev. Skip drags that begin on the
-  // video so dragging its seek bar (also a horizontal gesture) seeks, not navigates.
+  // Swipe: a vertical swipe up jumps to a random item; a horizontal swipe goes
+  // prev/next. The horizontal case skips drags that begin on the video (so
+  // dragging its seek bar seeks instead of navigating); the vertical case is fine
+  // there since seeking is horizontal.
   var sx = 0, sy = 0, fromVideo = false;
   lb.addEventListener('touchstart', function (e) {
     var t = e.changedTouches[0]; sx = t.clientX; sy = t.clientY;
     fromVideo = (e.target === vid);
   }, { passive: true });
   lb.addEventListener('touchend', function (e) {
-    if (fromVideo) return;
     var t = e.changedTouches[0];
     var dx = t.clientX - sx, dy = t.clientY - sy;
+    if (Math.abs(dy) > 50 && Math.abs(dy) > Math.abs(dx)) {
+      if (dy < 0) goRandom(); // swipe up -> random item
+      return;
+    }
+    if (fromVideo) return; // horizontal drag on the video = seek, not navigate
     if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy)) go(dx < 0 ? 1 : -1);
   }, { passive: true });
 })();

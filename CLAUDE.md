@@ -94,7 +94,7 @@ cached): cached an hour for navigations / back-forward, while a force-reload
   auto-play, looping, with **native `controls`** (play/pause/seek/volume; mp4/webm only);
   Space toggles play/pause and `m` toggles mute. ←/→ keys still navigate between items even on a video
   (`preventDefault` stops a focused video from also seeking); Home/End jump to first/last,
-  `r` jumps to a random item. Navigate via swipe (not over the
+  `r` (or a **swipe up**) jumps to a random item. Navigate via swipe (not over the
   video, so dragging its seek bar seeks), ←/→ keys, or on-screen ‹ › chevrons (stop at
   ends). Dismiss by
   clicking the letterbox / Esc / the X / the device Back button — opening pushes a
