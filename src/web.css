@@ -23,6 +23,9 @@ h2 { font-size: 1rem; margin: 1.5rem 0 0.5rem; padding-bottom: 0.25rem;
          text-decoration: none; border-radius: 4px; overflow: hidden; background: #222; }
 .album img { width: 200px; height: 150px; object-fit: cover; display: block;
              background: #222; }
+/* Hide the cover until web.js paints it (no empty-<img> frame); the .album tile
+   keeps its dark background + caption underneath. */
+.album img.thumb:not([src]) { visibility: hidden; }
 .album .caption { position: absolute; inset: 0; display: flex;
                   flex-direction: column; align-items: center; justify-content: center;
                   text-align: center; gap: 0.2rem; padding: 0.5rem;
@@ -34,9 +37,13 @@ h2 { font-size: 1rem; margin: 1.5rem 0 0.5rem; padding-bottom: 0.25rem;
 .grid { display: flex; flex-wrap: wrap; gap: 4px; align-items: flex-end; }
 .grid img { height: 200px; width: auto; display: block; background: #222; cursor: pointer;
             touch-action: manipulation; }
-/* Thumbnails start src-less (web.js paints the decoded PGF); the #222 box and a
-   reserved width hold the tile's place. Floor the width for unknown-aspect tiles. */
-.grid img.thumb { min-width: 60px; }
+/* Thumbnails start src-less (web.js paints the decoded PGF). Until a tile has a
+   src it's hidden entirely — invisible, with none of the placeholder box/frame a
+   browser draws for an empty <img> — while the reserved width still holds its
+   place so the layout doesn't reflow. Floor the width for unknown-aspect tiles.
+   (Video posters sit over the .vtile box, which keeps its dark bg + ▶ badge.) */
+.grid img.thumb { min-width: 60px; background: transparent; }
+.grid img.thumb:not([src]) { visibility: hidden; }
 .grid .vtile { height: 200px; width: 300px; background: #222; border: 0; padding: 0;
                position: relative; cursor: pointer; touch-action: manipulation; }
 /* Video poster: the decoded thumbnail fills the tile beneath the ▶ badge. */

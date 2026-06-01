@@ -1,1 +1,4 @@
 target/
+# Nix build symlinks
+result
+result-*
