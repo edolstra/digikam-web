@@ -222,6 +222,18 @@ pub fn list_photos(
     roots: &HashMap<i64, AlbumRoot>,
     q: &PhotoQuery,
 ) -> AppResult<Page<PhotoSummary>> {
+    // The virtual root (no album segments) has no photos of its own; an empty,
+    // non-recursive album is simply empty. (A future recursive flag would
+    // aggregate the whole collection from the root.)
+    if q.album.is_empty() && !q.recursive {
+        return Ok(Page {
+            incomplete: false,
+            limit: q.limit,
+            offset: q.offset,
+            items: Vec::new(),
+        });
+    }
+
     let (filter, params) = build_filter(conn, q)?;
 
     // Page of results, newest first.

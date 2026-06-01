@@ -530,16 +530,20 @@ function buildGrid(host) {
     .then(function (r) { return r.json(); })
     .then(function (page) {
       host.textContent = '';
+      if (!page.items.length) {
+        // A real album with no direct photos gets a note; the virtual root (no
+        // album segments) just shows its sub-albums, with no message.
+        if (album && album !== '/') {
+          var none = document.createElement('p');
+          none.textContent = 'No photos in this album.';
+          host.appendChild(none);
+        }
+        return;
+      }
       var count = document.createElement('p');
       count.className = 'count';
       count.textContent = page.items.length + (page.incomplete ? '+' : '') + ' photo(s)';
       host.appendChild(count);
-      if (!page.items.length) {
-        var none = document.createElement('p');
-        none.textContent = 'No photos in this album.';
-        host.appendChild(none);
-        return;
-      }
       // Group into contiguous runs by day (the API already orders newest-first).
       var curDay = null, grid = null;
       page.items.forEach(function (p) {

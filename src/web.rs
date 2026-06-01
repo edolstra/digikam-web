@@ -292,10 +292,10 @@ pub async fn album_page(
 /// the virtual root (no photo grid), or the album's path segments for a real album.
 fn render(album: &[String], filters: &Filters) -> Markup {
     let body = html! {
-        // Sub-album tiles (virtual root and real albums alike); the photo grid is
-        // a real album only. Both are populated by the client.
+        // Empty containers the client fills from /api/subalbums and /api/photos.
+        // The virtual root is just an album with no photos of its own.
         div id="subalbums" {}
-        @if !album.is_empty() { div id="photos" {} }
+        div id="photos" {}
     };
     let title = if album.is_empty() {
         "Photos".to_string()

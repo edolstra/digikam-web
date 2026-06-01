@@ -42,7 +42,7 @@ All endpoints are served under the `/api` prefix.
 
 | Route | Notes |
 |-------|-------|
-| `GET /api/photos?album=&tags=&recursive=&min_rating=&limit=&offset=` | Filtered, paginated list. `Page<PhotoSummary>` = `{total, limit, offset, items}`. `PhotoSummary.is_video` is true for videos (Digikam `category=2`). |
+| `GET /api/photos?album=&tags=&recursive=&min_rating=&limit=&offset=` | Filtered, paginated list. `Page<PhotoSummary>` = `{incomplete, limit, offset, items}` (`incomplete` = more rows exist beyond this page — one extra row is fetched to detect it). `PhotoSummary.is_video` is true for videos (Digikam `category=2`). An empty/absent `album` (non-recursive) returns `items: []`. |
 | `GET /api/photos/:id` | `PhotoDetail` (summary + tag names + lat/long). |
 | `GET /api/photos/:id/file` | Original bytes, range-aware (via `tower_http::services::ServeFile`). Sends a strong `ETag` from the image's `uniqueHash`; a matching `If-None-Match` (or `*`) returns `304`. |
 | `GET /api/photos/:id/thumbnail` | Digikam's stored thumbnail as-is: the **raw PGF blob** from `thumbnails-digikam.db` (looked up by `uniqueHash`+`fileSize`), for the client to decode in wasm (see [nix/webpgf.nix](nix/webpgf.nix)). Strong `ETag` (+ `If-None-Match`→`304`) and a 1-year `immutable` `Cache-Control`; `X-Orientation` header carries Digikam's `orientationHint` (EXIF orientation) for client-side rotation. `404` when the thumbnails DB is absent / the image has no cached thumbnail → client falls back to `/file`. |
@@ -53,13 +53,17 @@ All endpoints are served under the `/api` prefix.
 
 ### Frontend (HTML)
 
-Server-rendered HTML pages live at the root (outside `/api`), in [src/web.rs](src/web.rs).
-This is the seed of the browsing UI (planned to grow into Leptos later).
+The page at the root (outside `/api`) is an **essentially static shell** rendered in
+[src/web.rs](src/web.rs): the navbar (breadcrumb + rating selector) plus empty
+`#subalbums` / `#photos` containers. [web.js](src/web.js) reads the album (from the path)
+and filters (from the query string) and fills both containers by fetching `/api/subalbums`
+and `/api/photos` (see [The album page](#the-album-page)). `render` does no DB work.
+(Planned to grow into Leptos later.)
 
 | Route | Notes |
 |-------|-------|
-| `GET /photos` | The virtual top of the database: the album roots are shown as sub-album tiles (cover + name + count, newest-first), each linking to `/photos/<Root>`. No photo grid. |
-| `GET /photos/<album path>?min_rating=` | e.g. `/photos/Photos/Lego/Porsche911`. The photos directly in that album (non-recursive) as a day-grouped grid, under a breadcrumb navbar, with a sub-album grid and a fullscreen lightbox. See [The album page](#the-album-page) below. No pagination yet. |
+| `GET /photos` | The virtual top of the database: the shell whose `#subalbums` the client fills with the album-root tiles (cover + name + count, newest-first), each linking to `/photos/<Root>`. The photo grid is empty (the root has no photos of its own). |
+| `GET /photos/<album path>?min_rating=` | e.g. `/photos/Photos/Lego/Porsche911`. The shell for one album; the client fills `#subalbums` (direct sub-albums) and `#photos` (the album's own photos, non-recursive) as a day-grouped grid, under a breadcrumb navbar, with a fullscreen lightbox. See [The album page](#the-album-page) below. |
 
 Both HTML pages send `Cache-Control: private, max-age=3600` on success (errors aren't
 cached): cached an hour for navigations / back-forward, while a force-reload
@@ -139,9 +143,12 @@ content-hash `ETag`) so updates propagate; icons are `immutable`.
 - **`album=/Root/rel`** — the first path segment is the `AlbumRoots.label`; the
   remainder is a `relativePath`. By default it matches **only that album**
   (photos directly in it). `/Photos` alone means the root album (`relativePath = "/"`).
+  An **absent/empty `album`** (the virtual root) has no photos of its own, so
+  `/api/photos` returns an **empty** list — unless `recursive=true` (below).
 - **`recursive`** — a boolean: `?recursive=true` also includes all sub-albums;
   `?recursive=false` or absence keeps the default non-recursive behavior. With
-  `?recursive=true`, `/Photos` selects the whole collection.
+  `?recursive=true`, `/Photos` selects the whole collection — and an empty `album`
+  with `recursive=true` selects **all** photos (every root).
 - **`tags=a,b`** — **AND** across the listed names, **exact** match (descendant tags
   do *not* count). A name shared by several tag ids is OR'd within that one name.
   An unknown tag name yields an empty result (correct AND behavior).
@@ -262,7 +269,7 @@ src/
   models.rs    serde response types (PhotoSummary, PhotoDetail, AlbumNode, SubAlbum, TagNode, Page<T>)
   query.rs     /photos + /subalbums SQL + param building              (+ unit tests)
   handlers.rs  axum JSON API handlers, run_blocking DB helper
-  web.rs       server-rendered HTML frontend pages (maud)    (+ unit tests)
+  web.rs       HTML page shell (navbar + empty grid containers), maud  (+ unit tests)
   web.css      frontend stylesheet, inlined via include_str!  (STYLE)
   web.js       lightbox + thumbnails + SW registration, inlined via include_str! (SCRIPT)
   favicon.ico  Digikam's site icon, embedded via include_bytes!, served at /favicon.ico
