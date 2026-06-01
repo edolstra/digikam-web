@@ -16,6 +16,10 @@ nix build                            # produce ./result/bin/digikam-browse
 nix flake check                      # build + clippy (-D warnings)
 ```
 
+> **Always run `cargo fmt` and `cargo clippy` before committing** (e.g.
+> `nix develop --command cargo fmt` and `nix develop --command cargo clippy --all-targets`).
+> Keep both clean — `nix flake check` treats clippy warnings as errors (`-D warnings`).
+
 Config (CLI flags or env vars):
 - `--database` / `DIGIKAM_DB` — path to `digikam4.db` (default `~/.local/share/digikam/db/digikam4.db`).
 - `--listen` / `LISTEN_ADDR` — bind address (default `127.0.0.1:8080`).
