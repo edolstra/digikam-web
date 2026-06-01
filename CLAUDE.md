@@ -98,7 +98,8 @@ cached): cached an hour for navigations / back-forward, while a force-reload
   ends). Dismiss by
   clicking the letterbox / Esc / the X / the device Back button — opening pushes a
   history entry so Back closes the lightbox instead of leaving the page, and exiting
-  fullscreen closes it too. The close/`‹ ›` controls (and the mouse cursor) **start hidden**
+  fullscreen closes it too. On dismiss, the grid scrolls the last-viewed tile into view
+  (`scrollIntoView({block:'nearest'})`) if browsing left it off-screen. The close/`‹ ›` controls (and the mouse cursor) **start hidden**
   (web.js `.idle` class) and are revealed by a **mouse/pen move or a tap** — *not* by
   keyboard navigation or swipes — then auto-hide again after 2s of inactivity; a tap that
   only reveals them is consumed so it doesn't also dismiss/navigate. Perf: preloads the

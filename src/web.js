@@ -115,8 +115,20 @@
     img.removeAttribute('src');
     img.classList.remove('active');
     vid.classList.remove('active');
+    // Reveal the last-viewed tile in the grid (it may have scrolled out of view
+    // while browsing); `nearest` is a no-op when it's already visible. Defer past
+    // a fullscreen exit so the scroll applies to the restored page layout.
+    var tile = idx >= 0 ? tiles[idx] : null;
     idx = -1;
-    if (document.fullscreenElement) document.exitFullscreen().catch(function () {});
+    function reveal() { if (tile) tile.scrollIntoView({ block: 'nearest' }); }
+    if (document.fullscreenElement) {
+      // X / letterbox / Back: we trigger the exit, then scroll once it's done.
+      document.exitFullscreen().then(reveal, reveal);
+    } else {
+      // Escape: the browser already exited fullscreen before we got here; wait
+      // for the exit reflow to settle so our scroll isn't immediately clobbered.
+      requestAnimationFrame(function () { requestAnimationFrame(reveal); });
+    }
   }
 
   window.addEventListener('popstate', function () {
