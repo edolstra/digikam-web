@@ -151,6 +151,10 @@
       if (vid.paused) { var p = vid.play(); if (p && p.catch) p.catch(function () {}); }
       else vid.pause();
     }
+    else if ((e.key === 'm' || e.key === 'M') && activeEl() === vid) {
+      e.preventDefault();
+      vid.muted = !vid.muted;
+    }
   });
 
   // Alt+Up navigates to the parent album (the second-to-last breadcrumb link,
