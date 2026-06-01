@@ -253,6 +253,17 @@
     }
     suppressClick = true;
   }, { passive: true });
+
+  // Mouse wheel: scroll down -> next, scroll up -> previous. Throttled so one
+  // notch (or a trackpad flick of several events) advances a single item.
+  var lastWheel = 0;
+  lb.addEventListener('wheel', function (e) {
+    if (!e.deltaY) return; // ignore purely-horizontal scroll
+    e.preventDefault();
+    if (e.timeStamp - lastWheel < 50) return;
+    lastWheel = e.timeStamp;
+    go(e.deltaY > 0 ? 1 : -1);
+  }, { passive: false });
 })();
 
 // --- Lazy PGF thumbnail decoding ---------------------------------------------
