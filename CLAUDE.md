@@ -53,33 +53,43 @@ All endpoints are served under the `/api` prefix.
 
 ### Frontend (HTML)
 
-The page at the root (outside `/api`) is an **essentially static shell** rendered in
-[src/web.rs](src/web.rs): the navbar (breadcrumb + rating selector) plus empty
-`#subalbums` / `#photos` containers. [web.js](src/web.js) reads the album (from the path)
-and filters (from the query string) and fills both containers by fetching `/api/subalbums`
-and `/api/photos` (see [The album page](#the-album-page)). `render` does no DB work.
-(Planned to grow into Leptos later.)
+The `/photos` page is a **client-side SPA**. [src/web.rs](src/web.rs) serves a single
+**static shell** — byte-identical for every URL — rendered by `render` with no DB or
+album/filter logic: an empty navbar (`<span class="crumb">`/`<span class="rating">`) plus
+empty `#subalbums` / `#photos` containers, the lightbox, and the inlined CSS/JS.
+[web.js](src/web.js) drives everything from in-memory **state** (`{album: segments[],
+minRating}`), initialized from the URL by `readUrl()` and updated on each navigation. It
+builds the navbar, sub-album tiles, and photo grid by fetching `/api/subalbums` +
+`/api/photos`, and **navigates in place**: clicking a breadcrumb / sub-album tile / `⌂` /
+`★` re-fetches and rebuilds the DOM (no page load) and updates the URL via
+`history.pushState`, so bookmarking + Back/Forward work. (Planned to grow into Leptos later.)
 
 | Route | Notes |
 |-------|-------|
-| `GET /photos` | The virtual top of the database: the shell whose `#subalbums` the client fills with the album-root tiles (cover + name + count, newest-first), each linking to `/photos/<Root>`. The photo grid is empty (the root has no photos of its own). |
-| `GET /photos/<album path>?min_rating=` | e.g. `/photos/Photos/Lego/Porsche911`. The shell for one album; the client fills `#subalbums` (direct sub-albums) and `#photos` (the album's own photos, non-recursive) as a day-grouped grid, under a breadcrumb navbar, with a fullscreen lightbox. See [The album page](#the-album-page) below. |
+| `GET /photos`, `GET /photos/<album path>`, `GET /` | All serve the same static SPA shell. The client reads the album from the path (`/photos/Photos/Lego` → `["Photos","Lego"]`; `/photos` = the virtual root) and filters from the query string, then renders the navbar + sub-album tiles + (for a real album) the day-grouped photo grid. See [The album page](#the-album-page). |
 
-Both HTML pages send `Cache-Control: private, max-age=3600` on success (errors aren't
-cached): cached an hour for navigations / back-forward, while a force-reload
-(Ctrl/Cmd+Shift+R) bypasses it.
+The shell is sent with `Cache-Control: private, max-age=3600` on success: cached an hour
+for navigations / back-forward, while a force-reload (Ctrl/Cmd+Shift+R) bypasses it. (Since
+the shell is now identical for every URL, this caches the one document across all albums.)
 
 #### The album page
 
-- **Navbar (sticky** — pinned to the top, the page scrolls underneath**)**: a
-  breadcrumb starting with a `⌂` home icon (→ `/photos`) then `› Photos › Lego ›
-  Porsche911`, each segment linking to that ancestor album. **Alt+↑** navigates to
-  the parent album (the second-to-last breadcrumb link).
-- **Rating selector** (navbar, right side): five `★` links, no JS. Clicking star K
-  filters to `?min_rating=K` (≥K stars); clicking the active threshold clears it.
-- **Filters** are encoded in the URL via a `Filters` struct ([src/query.rs](src/query.rs))
-  and propagated onto every breadcrumb/sub-album link so they persist while browsing;
-  they also constrain the sub-album tile covers/counts.
+Everything below is built **client-side** by [web.js](src/web.js) from `state`; in-page
+navigation re-renders without a page load. A single persistent runtime — the thumbnail
+worker pool, the lightbox listeners, and the nav/popstate handlers — is created once and
+reused across navigations; only the DOM is rebuilt (`render()` per navigation). A
+`renderToken` guard drops a fetch that resolves after a newer navigation.
+
+- **Navbar (sticky** — pinned to the top, the page scrolls underneath**)**: a client-built
+  breadcrumb starting with a `⌂` home icon (→ the root) then `› Photos › Lego › Porsche911`,
+  each segment a link to that ancestor album. **Alt+↑** navigates to the parent album.
+- **Rating selector** (navbar, right side): five `★` links. Clicking star K filters to
+  `?min_rating=K` (≥K stars); clicking the active threshold clears it.
+- **Filters / state**: the album (path) + `min_rating` (query) are the SPA's state, read
+  from the URL on load and written back on each navigation. Every client-built breadcrumb /
+  sub-album / star link carries the current `min_rating` so it persists while browsing; it
+  also constrains the sub-album tile covers/counts. The server-side `Filters` struct
+  ([src/query.rs](src/query.rs)) is now used only by the JSON API handlers.
 - **Sub-album grid** (below the breadcrumb): direct sub-albums (newest-first, from
   `/api/subalbums`); each tile is the cover image with the bold sub-album name and
   `(count)` centered on top, linking to that sub-album. Covers use the same lazy
@@ -108,8 +118,10 @@ cached): cached an hour for navigations / back-forward, while a force-reload
   on-screen ‹ › chevrons navigate too, and the **mouse wheel** goes prev/next (scroll
   down = next; throttled to one item per notch). All navigation stops at the ends. Dismiss by
   clicking the letterbox / Esc / the X / the device Back button — opening pushes a
-  history entry so Back closes the lightbox instead of leaving the page, and exiting
-  fullscreen closes it too. On dismiss, the grid scrolls the last-viewed tile fully into
+  history entry **carrying no URL** (so the album URL is preserved); the single shared
+  `popstate` handler dismisses the lightbox when it's open (leaving the album in place)
+  and otherwise treats the pop as album Back/Forward (re-render). Exiting fullscreen
+  closes it too. On dismiss, the grid scrolls the last-viewed tile fully into
   view if browsing left it off-screen (`scrollIntoView({block:'nearest'})` with the tile's
   `scroll-margin-top` set to the sticky navbar's height so it isn't tucked underneath). The close/`‹ ›` controls (and the mouse cursor) **start hidden**
   (web.js `.idle` class) and are revealed by a **mouse/pen move or a tap** — *not* by
@@ -167,11 +179,12 @@ content-hash `ETag`) so updates propagate; icons are `immutable`.
   in — no system lib / pkg-config) behind an `r2d2` connection pool. rusqlite is
   blocking, so every DB call runs inside `tokio::task::spawn_blocking` (see
   `run_blocking` in [src/handlers.rs](src/handlers.rs)).
-- **HTML rendering**: the frontend pages use [`maud`](https://maud.lang.rs/)
-  (compile-time `html!` templates with automatic escaping). Handlers return
-  `maud::Markup` (its axum feature makes it `IntoResponse`). The `include_str!`'d
-  `web.css`/`web.js` are emitted inside `<style>`/`<script>` via `PreEscaped`
-  (trusted, must not be escaped).
+- **HTML rendering**: the page **shell** uses [`maud`](https://maud.lang.rs/)
+  (compile-time `html!` templates with automatic escaping). `album_page` returns
+  `maud::Markup` (its axum feature makes it `IntoResponse`). The shell is static — all
+  album/filter rendering moved client-side ([web.js](src/web.js)), so maud now just emits
+  the fixed navbar/container scaffolding. The `include_str!`'d `web.css`/`web.js` are
+  emitted inside `<style>`/`<script>` via `PreEscaped` (trusted, must not be escaped).
 - **Read-only & safe alongside running Digikam**: connections open with
   `SQLITE_OPEN_READ_ONLY`, set `PRAGMA query_only=ON`, and a 5s `busy_timeout` so
   reads don't fail while Digikam writes. We deliberately do **not** use `immutable=1`
@@ -269,9 +282,9 @@ src/
   models.rs    serde response types (PhotoSummary, PhotoDetail, AlbumNode, SubAlbum, TagNode, Page<T>)
   query.rs     /photos + /subalbums SQL + param building              (+ unit tests)
   handlers.rs  axum JSON API handlers, run_blocking DB helper
-  web.rs       HTML page shell (navbar + empty grid containers), maud  (+ unit tests)
+  web.rs       static SPA shell (navbar + empty containers) + static asset handlers, maud
   web.css      frontend stylesheet, inlined via include_str!  (STYLE)
-  web.js       lightbox + thumbnails + SW registration, inlined via include_str! (SCRIPT)
+  web.js       SPA: state/URL routing, navbar, grid + sub-album tiles, thumbnails, lightbox, SW (SCRIPT)
   favicon.ico  Digikam's site icon, embedded via include_bytes!, served at /favicon.ico
   manifest.webmanifest  PWA manifest (include_str!), served at /manifest.webmanifest
   sw.js        PWA service worker (include_str!), served at /sw.js

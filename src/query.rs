@@ -31,12 +31,6 @@ impl Rating {
     pub fn get(self) -> i64 {
         self.0
     }
-
-    /// Whether this is the default `0` (i.e. no rating filter). Used to omit it
-    /// from serialized query strings.
-    pub fn is_unfiltered(&self) -> bool {
-        self.0 == 0
-    }
 }
 
 impl fmt::Display for Rating {
@@ -78,40 +72,14 @@ pub struct PhotoQuery {
 }
 
 /// The set of view filters active on an album page. Held separately from
-/// [`PhotoQuery`] so the web layer can carry them across links (see
-/// [`Filters::query_string`]); consumed by [`list_subalbums`] and applied to the
-/// photo grid. Designed to grow (tags, date range, …) — add a field, serialize it
-/// in `query_string`, and apply it where the queries filter.
+/// [`PhotoQuery`] so it can be passed to [`list_subalbums`] and applied to the
+/// photo grid. Designed to grow (tags, date range, …). The frontend now builds
+/// its links and parses the query string client-side (see [web.js](web.js)), so
+/// this is consumed only by the JSON API handlers.
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct Filters {
-    /// Minimum rating; the default `Rating(0)` means no rating filter and is
-    /// omitted from the serialized query string.
-    #[serde(skip_serializing_if = "Rating::is_unfiltered")]
+    /// Minimum rating; the default `Rating(0)` means no rating filter.
     pub min_rating: Rating,
-}
-
-impl Filters {
-    /// The query-string suffix encoding the active filters, e.g. `?min_rating=3`
-    /// (empty when nothing is active). The field set is serialized by
-    /// `serde_urlencoded` — the same encoder axum's `Query`/`Form` use — so the
-    /// typed `Filters` struct *is* the source of truth for the parameters.
-    pub fn query_string(&self) -> String {
-        match serde_urlencoded::to_string(self) {
-            Ok(qs) if !qs.is_empty() => format!("?{qs}"),
-            _ => String::new(),
-        }
-    }
-
-    /// A copy with `min_rating` changed, preserving any other active filters.
-    // `..self.clone()` is a no-op while `min_rating` is the only field, but keeps
-    // future filters (tags, …) automatically carried over.
-    #[allow(clippy::needless_update)]
-    pub fn with_min_rating(&self, min_rating: Rating) -> Filters {
-        Filters {
-            min_rating,
-            ..self.clone()
-        }
-    }
 }
 
 /// Escape `%`, `_` and `\` for use in a `LIKE ... ESCAPE '\'` pattern.

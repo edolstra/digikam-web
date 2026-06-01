@@ -1,14 +1,109 @@
-// Wire up the lightbox over the (now client-built) grid. Called after the grid
-// is populated (see the bootstrap at the bottom).
-function initLightbox() {
-  // Direct children only: a video tile's inner poster <img> is not its own item.
-  var tiles = Array.prototype.slice.call(document.querySelectorAll('.grid > img, .grid > .vtile'));
-  var items = tiles.map(function (el) {
-    var video = el.classList.contains('vtile');
-    // Photos display a decoded thumbnail in the grid; the lightbox always shows
-    // the full-size original from `data-full`.
-    return { src: video ? el.dataset.src : (el.dataset.full || el.src), alt: el.getAttribute('alt') || '', video: video };
+// The /photos page is a client-side SPA. The server ships a static shell (an
+// empty navbar + #subalbums/#photos containers + the lightbox); this script reads
+// the album + filters from the URL into `state`, fetches /api/subalbums and
+// /api/photos, and renders the navbar, sub-album tiles, and photo grid. Navigating
+// to another album or changing the rating filter re-renders in place (no page
+// load) and updates the URL via history.pushState, so bookmarking / Back / Forward
+// all work. A single persistent runtime — the thumbnail worker pool, the lightbox
+// listeners, and the nav/popstate handlers — is created once and reused across
+// every in-page navigation; only the DOM is rebuilt.
+
+// ===== State + URL ===========================================================
+// The current view, initialized from the URL by readUrl() and updated on each
+// navigation. `album` is the decoded display segments (e.g. ["Photos","Lego"];
+// [] is the virtual root); `minRating` is 0 (no filter) or 1..=5.
+var state = { album: [], minRating: 0 };
+// Bumped on every render(); a fetch that resolves after a newer navigation
+// compares against it and bails before touching the DOM (see render/buildGrid).
+var renderToken = 0;
+
+// The one place that reads `location`. Mirrors query::album_segments (split on
+// '/', drop empties) and clamps min_rating to 0..=5.
+function readUrl() {
+  var path = location.pathname.replace(/^\/photos/, '');
+  state.album = path.split('/').filter(Boolean).map(decodeURIComponent);
+  var r = parseInt(new URLSearchParams(location.search).get('min_rating'), 10);
+  state.minRating = (r >= 1 && r <= 5) ? r : 0;
+}
+
+// Build a frontend URL from album segments + a rating, percent-encoding each
+// segment. The single source of truth for every nav link.
+function photosUrl(segments, minRating) {
+  var p = segments.map(encodeURIComponent);
+  return '/photos' + (p.length ? '/' + p.join('/') : '') + (minRating ? '?min_rating=' + minRating : '');
+}
+
+// The frontend URL for a sub-album's display path (e.g. "/Photos/Lego"), carrying
+// the current filters.
+function albumHref(displayPath) {
+  return photosUrl(displayPath.split('/').filter(Boolean), state.minRating);
+}
+
+// The target href for rating star K: set the threshold to K, or clear it when K
+// is already the active threshold (toggle off).
+function ratingHref(k) {
+  return photosUrl(state.album, state.minRating === k ? 0 : k);
+}
+
+// The shared query for both API fetches: the album display path (empty for the
+// root) plus min_rating when set.
+function apiParams() {
+  var p = new URLSearchParams();
+  p.set('album', state.album.length ? '/' + state.album.join('/') : '');
+  if (state.minRating) p.set('min_rating', state.minRating);
+  return p;
+}
+
+// ===== Navbar (breadcrumb + rating selector) =================================
+// Synchronous + idempotent: rebuild the navbar shell's .crumb and .rating from
+// `state`. Runs during initial parse (before first paint, so no flash) and on
+// every navigation.
+function renderNavbar() {
+  var crumb = document.createDocumentFragment();
+  var home = document.createElement('a');
+  home.className = 'home';
+  home.href = photosUrl([], state.minRating);
+  home.setAttribute('aria-label', 'Home');
+  home.textContent = '⌂';
+  crumb.appendChild(home);
+  state.album.forEach(function (seg, i) {
+    var sep = document.createElement('span');
+    sep.className = 'sep';
+    sep.textContent = '›';
+    crumb.appendChild(sep);
+    var a = document.createElement('a');
+    // The cumulative path up to and including segment i.
+    a.href = photosUrl(state.album.slice(0, i + 1), state.minRating);
+    a.textContent = seg;
+    crumb.appendChild(a);
   });
+  document.querySelector('.crumb').replaceChildren(crumb);
+
+  var rating = document.createDocumentFragment();
+  for (var k = 1; k <= 5; k++) {
+    var on = k <= state.minRating;
+    var star = document.createElement('a');
+    if (on) star.className = 'on';
+    star.href = ratingHref(k);
+    star.title = '≥' + k + ' stars';
+    star.textContent = on ? '★' : '☆';
+    rating.appendChild(star);
+  }
+  document.querySelector('.rating').replaceChildren(rating);
+
+  document.title = state.album.length ? '/' + state.album.join('/') : 'Photos';
+}
+
+// ===== Lightbox ==============================================================
+// Wired up ONCE at startup; its listeners persist across navigations. The tile
+// list (`tiles`/`items`) is recomputed by refresh() after each render, and the
+// per-tile open is delegated, so nothing is re-bound per navigation. Exposed via
+// the module-level `LB` so the nav controller can query/dismiss it.
+var LB = null;
+function initLightbox() {
+  // Recomputed per render(); the persistent handlers close over these vars.
+  var tiles = [];
+  var items = [];
   var lb = document.getElementById('lightbox');
   var img = document.getElementById('lb-img');
   var vid = document.getElementById('lb-video');
@@ -20,6 +115,19 @@ function initLightbox() {
 
   function isOpen() { return lb.classList.contains('open'); }
   function activeEl() { return vid.classList.contains('active') ? vid : img; }
+
+  // Recompute the item list from the (just-rebuilt) grid. Direct grid children
+  // only: a video tile's inner poster <img> is not its own item.
+  function refresh() {
+    tiles = Array.prototype.slice.call(document.querySelectorAll('.grid > img, .grid > .vtile'));
+    items = tiles.map(function (el) {
+      var video = el.classList.contains('vtile');
+      // Photos display a decoded thumbnail in the grid; the lightbox always shows
+      // the full-size original from `data-full`.
+      return { src: video ? el.dataset.src : (el.dataset.full || el.src), alt: el.getAttribute('alt') || '', video: video };
+    });
+    idx = -1;
+  }
 
   // The close/nav controls start hidden (open() adds `.idle`); a mouse/pen move
   // or a tap reveals them, after which they auto-hide again after 2s of
@@ -74,9 +182,10 @@ function initLightbox() {
   }
 
   // Open via a pushed history entry so the device Back button (and gesture)
-  // pops it and dismisses, instead of navigating off the album page. Opening a
-  // video plays it (the tap is the user gesture, so audio is allowed), and we
-  // enter fullscreen to hide the browser chrome.
+  // pops it and dismisses, instead of navigating off the album page. The entry
+  // carries no URL, so the album URL is preserved while the lightbox is open (the
+  // nav controller's popstate relies on this). Opening a video plays it (the tap
+  // is the user gesture, so audio is allowed), and we enter fullscreen.
   function open(i) {
     if (!isOpen()) history.pushState({ lightbox: true }, '');
     show(i, true);
@@ -136,10 +245,6 @@ function initLightbox() {
     }
   }
 
-  window.addEventListener('popstate', function () {
-    if (isOpen()) dismiss();
-  });
-
   // Exiting fullscreen (Esc, or the browser's own control) closes the lightbox.
   document.addEventListener('fullscreenchange', function () {
     if (!document.fullscreenElement && isOpen()) close();
@@ -160,8 +265,15 @@ function initLightbox() {
     show(n, true);
   }
 
-  tiles.forEach(function (el, i) {
-    el.addEventListener('click', function () { open(i); });
+  // Open the lightbox on a clicked grid tile. Delegated (not per-tile) so it keeps
+  // working against the `tiles` rebuilt on each render with no re-binding. Grid
+  // tiles are <img>/<button>, never <a>, so the nav controller's link handler
+  // ignores them.
+  document.addEventListener('click', function (e) {
+    var t = e.target.closest('.grid > img.thumb, .grid > .vtile');
+    if (!t) return;
+    var i = tiles.indexOf(t);
+    if (i >= 0) open(i);
   });
 
   // Is (cx, cy) over the displayed media (vs the letterbox)? The media fills the
@@ -215,18 +327,6 @@ function initLightbox() {
     }
   });
 
-  // Alt+Up navigates to the parent album (the second-to-last breadcrumb link,
-  // which already carries the active filters). Only in the album view, not the
-  // lightbox; a no-op at the root, where there's no parent.
-  document.addEventListener('keydown', function (e) {
-    if (isOpen() || !e.altKey || e.key !== 'ArrowUp') return;
-    e.preventDefault();
-    var crumbs = document.querySelectorAll('.crumb a');
-    if (crumbs.length >= 2) {
-      location.href = crumbs[crumbs.length - 2].href;
-    }
-  });
-
   // Swipe (over the whole lightbox, including videos): up -> random item,
   // left/right -> prev/next. A swipe fires no click, so taps (handled above) and
   // swipes don't collide. On touch these gestures take over from the native video
@@ -271,31 +371,38 @@ function initLightbox() {
     lastWheel = e.timeStamp;
     go(e.deltaY > 0 ? 1 : -1);
   }, { passive: false });
+
+  LB = { isOpen: isOpen, dismiss: dismiss, refresh: refresh };
 }
 
-// --- Lazy PGF thumbnail decoding ---------------------------------------------
-// Each `img.thumb` tile fetches /api/photos/:id/thumbnail (a raw PGF blob) when
-// it nears the viewport, decodes it off the main thread in a webpgf (wasm) Web
-// Worker, and paints the result — rotated per the X-Orientation header — into
-// the <img>. Missing thumbnails (404) or any failure fall back to the full-size
-// /file original. Called after the grid is built (bootstrap at the bottom).
-function initThumbnails() {
-  var thumbs = document.querySelectorAll('img.thumb');
-  if (!thumbs.length) return;
+// ===== Thumbnail decoder (persistent worker pool) ============================
+// Each `img.thumb` tile fetches /api/photos/:id/thumbnail (a raw PGF blob) when it
+// nears the viewport, decodes it off the main thread in a webpgf (wasm) Web Worker,
+// and paints the result — rotated per the X-Orientation header — into the <img>.
+// Missing thumbnails (404) or any failure fall back to the full-size /file
+// original. The decoder (worker pool) is created ONCE and reused across every
+// navigation; only the per-render loader (observer + fetch limiter, below) is
+// rebuilt for each new set of tiles.
+var DEC = null;          // the persistent decoder, once ensureDecoder() runs
+var DEC_UNAVAIL = false; // no Worker/IntersectionObserver: load originals directly
 
-  // Without IntersectionObserver/Worker support, just load the originals.
+function ensureDecoder() {
+  if (DEC || DEC_UNAVAIL) return;
   if (!('IntersectionObserver' in window) || typeof Worker === 'undefined') {
-    thumbs.forEach(function (img) { img.src = img.dataset.full; });
+    DEC_UNAVAIL = true;
     return;
   }
+  DEC = createDecoder();
+}
 
-  // Decoding happens in a Blob-worker pool. To make the FIRST paint snappy, the
-  // decoder assets are fetched once here (not once per worker) and the pool is
-  // pre-warmed: webpgf.js is inlined into the worker body (so workers don't each
-  // re-fetch it), and the wasm module is instantiated right away via an init
-  // message — overlapping with the thumbnail fetches — so blobs decode the instant
-  // they arrive instead of waiting on a cold module. Fetch (network) and decode
-  // (CPU) stay separate stages so the wide prefetch window keeps up.
+// Build the Blob-worker pool. To make the FIRST paint snappy, the decoder assets
+// are fetched once here (not once per worker) and the pool is pre-warmed: webpgf.js
+// is inlined into the worker body (so workers don't each re-fetch it), and the wasm
+// module is instantiated right away via an init message — overlapping with the
+// thumbnail fetches — so blobs decode the instant they arrive instead of waiting on
+// a cold module. Fetch (network) and decode (CPU) stay separate stages so the wide
+// prefetch window keeps up. Returns { enqueue, fallback }.
+function createDecoder() {
   var base = location.origin;
   var POOL = Math.min(navigator.hardwareConcurrency || 4, 6);
   var idleWorkers = [];
@@ -383,6 +490,9 @@ function initThumbnails() {
   }
 
   function fallback(img) {
+    // The tile may have been detached by a navigation before its decode/fetch
+    // resolved — nothing to paint into.
+    if (!img.isConnected) return;
     // Video posters carry no `data-full`: a missing/failed thumbnail just leaves
     // the empty tile showing the ▶ placeholder, rather than loading the video.
     var full = img.dataset.full;
@@ -392,6 +502,7 @@ function initThumbnails() {
   }
 
   function paint(img, w, h, buf, o) {
+    if (!img.isConnected) return; // tile replaced by a navigation; drop the result
     var canvas = oriented(new ImageData(new Uint8ClampedArray(buf), w, h), o);
     canvas.toBlob(function (blob) {
       if (!blob) { fallback(img); return; }
@@ -430,6 +541,39 @@ function initThumbnails() {
     return out;
   }
 
+  return {
+    // Queue a fetched PGF blob for decoding (or fall back if the pool is dead).
+    enqueue: function (img, buf, o) {
+      if (ditched) { fallback(img); return; }
+      queue.push({ img: img, buf: buf, o: o });
+      drain();
+    },
+    fallback: fallback
+  };
+}
+
+// ===== Thumbnail loader (per render) =========================================
+// Observe a set of `img.thumb` tiles and fetch each one's thumbnail as it nears
+// the viewport, handing the blob to the persistent decoder. Rebuilt for each new
+// grid; the previous loader is disposed (observer disconnected, pending fetches
+// for the now-detached old tiles dropped) so we never fetch for a stale grid.
+var currentLoader = null;
+
+function collectThumbs() {
+  return document.querySelectorAll('img.thumb'); // sub-album covers + grid posters
+}
+
+function observeTiles(thumbs) {
+  if (currentLoader) { currentLoader.dispose(); currentLoader = null; }
+  if (!thumbs.length) return;
+  if (DEC_UNAVAIL) {
+    thumbs.forEach(function (img) { if (img.dataset.full) img.src = img.dataset.full; });
+    return;
+  }
+  currentLoader = createLoader(thumbs, DEC);
+}
+
+function createLoader(thumbs, dec) {
   // Cap concurrent thumbnail fetches. Firing a whole screenful of fetches at once
   // makes Firefox's request pacer hold the burst (~hundreds of ms before any is
   // even dispatched); a small cap matching the ~6-connection limit keeps the pacer
@@ -438,6 +582,7 @@ function initThumbnails() {
   var MAXFETCH = 6;
   var inflight = 0;
   var waiting = []; // imgs observed, awaiting a fetch slot (FIFO ~ visual order)
+  var disposed = false;
 
   function schedule(img) { waiting.push(img); pumpFetch(); }
   function pumpFetch() {
@@ -450,15 +595,13 @@ function initThumbnails() {
     // High priority: Firefox otherwise holds default-priority fetch() requests
     // for ~150ms during/after page load before dispatching them.
     fetch('/api/photos/' + id + '/thumbnail', { priority: 'high' }).then(function (res) {
-      if (!res.ok) { fallback(img); done(); return; }
+      if (!res.ok) { dec.fallback(img); done(); return; }
       var o = parseInt(res.headers.get('X-Orientation'), 10) || 1;
       return res.arrayBuffer().then(function (buf) {
         done();
-        if (ditched) { fallback(img); return; } // no decoders left
-        queue.push({ img: img, buf: buf, o: o });
-        drain();
+        dec.enqueue(img, buf, o);
       });
-    }).catch(function () { fallback(img); done(); });
+    }).catch(function () { dec.fallback(img); done(); });
   }
 
   // Kick off the first rows' fetches synchronously, during initial parse, when
@@ -472,6 +615,7 @@ function initThumbnails() {
   // once per tile.
   var vh = window.innerHeight || 800;
   var io = new IntersectionObserver(function (entries) {
+    if (disposed) return;
     entries.forEach(function (en) {
       if (en.isIntersecting) {
         io.unobserve(en.target);
@@ -480,13 +624,17 @@ function initThumbnails() {
     });
   }, { rootMargin: Math.round(vh) + 'px 0px ' + Math.round(vh * 2.5) + 'px 0px' });
   thumbs.forEach(function (img) { if (!img.__sched) io.observe(img); });
+
+  return {
+    dispose: function () {
+      disposed = true;
+      io.disconnect();
+      waiting = []; // drop queued fetches for the now-detached old tiles
+    }
+  };
 }
 
-// --- Client-rendered photo grid ----------------------------------------------
-// The page ships a static shell with an empty `#photos` container (real albums
-// only). We fetch /api/photos for the current album + filters (read from the
-// URL) and build the day-grouped grid, then wire up thumbnails + the lightbox.
-// (A later step will re-run this on in-page album/filter navigation.)
+// ===== Grid + sub-album tiles ================================================
 function buildTile(p) {
   var full = '/api/photos/' + p.id + '/file';
   // Reserve the tile's width from its aspect ratio (grid row height is 200px) so
@@ -520,20 +668,19 @@ function buildTile(p) {
   return img;
 }
 
-function buildGrid(host) {
-  // album is the display path after `/photos` (decoded); filters come from the
-  // query string. e.g. /photos/Photos/Lego?min_rating=3 -> album=/Photos/Lego.
-  var album = decodeURIComponent(location.pathname.replace(/^\/photos/, ''));
-  var params = new URLSearchParams(location.search); // min_rating, …
-  params.set('album', album);
-  return fetch('/api/photos?' + params.toString())
+// Fetch /api/photos for the current album + filters and build the day-grouped
+// grid. `token` is the render() generation: if a newer navigation has started by
+// the time this resolves, bail before touching the DOM.
+function buildGrid(host, token) {
+  return fetch('/api/photos?' + apiParams().toString())
     .then(function (r) { return r.json(); })
     .then(function (page) {
+      if (token !== renderToken) return;
       host.textContent = '';
       if (!page.items.length) {
-        // A real album with no direct photos gets a note; the virtual root (no
-        // album segments) just shows its sub-albums, with no message.
-        if (album && album !== '/') {
+        // A real album with no direct photos gets a note; the virtual root just
+        // shows its sub-albums, with no message.
+        if (state.album.length) {
           var none = document.createElement('p');
           none.textContent = 'No photos in this album.';
           host.appendChild(none);
@@ -562,6 +709,7 @@ function buildGrid(host) {
       });
     })
     .catch(function () {
+      if (token !== renderToken) return;
       host.textContent = '';
       var err = document.createElement('p');
       err.textContent = 'Failed to load photos.';
@@ -569,24 +717,14 @@ function buildGrid(host) {
     });
 }
 
-// The frontend URL for a sub-album's display path (e.g. "/Photos/Lego" ->
-// "/photos/Photos/Lego"), each segment encoded, carrying the current filters
-// (the page's query string).
-function albumHref(displayPath) {
-  var segs = displayPath.split('/').filter(Boolean).map(encodeURIComponent);
-  return '/photos' + (segs.length ? '/' + segs.join('/') : '') + location.search;
-}
-
-// Fill `#subalbums` from /api/subalbums for the current album + filters (an
-// empty album lists the roots). Each tile is the cover image (lazy thumbnail
-// pipeline) with the bold name + count overlaid, linking to that sub-album.
-function buildSubalbums(host) {
-  var album = decodeURIComponent(location.pathname.replace(/^\/photos/, ''));
-  var params = new URLSearchParams(location.search); // min_rating, …
-  params.set('album', album);
-  return fetch('/api/subalbums?' + params.toString())
+// Fill `#subalbums` from /api/subalbums for the current album + filters (an empty
+// album lists the roots). Each tile is the cover image (lazy thumbnail pipeline)
+// with the bold name + count overlaid, linking to that sub-album.
+function buildSubalbums(host, token) {
+  return fetch('/api/subalbums?' + apiParams().toString())
     .then(function (r) { return r.json(); })
     .then(function (subs) {
+      if (token !== renderToken) return;
       host.textContent = '';
       if (!subs.length) return;
       var wrap = document.createElement('div');
@@ -619,19 +757,85 @@ function buildSubalbums(host) {
       });
       host.appendChild(wrap);
     })
-    .catch(function () { /* leave the sub-album area empty on error */ });
+    .catch(function () { if (token === renderToken) host.textContent = ''; });
 }
 
-// Bootstrap: build the sub-album tiles and (for a real album) the photo grid,
-// then wire the thumbnail pipeline and lightbox, which both scan the populated
-// DOM (so they run once everything is in place).
+// ===== Render orchestrator ===================================================
+// Re-derive the whole page from `state`: rebuild the navbar synchronously, then
+// refetch + rebuild the sub-album tiles and photo grid, and finally re-point the
+// thumbnail pipeline and lightbox at the new tiles. Called on initial load, on
+// nav clicks, and on Back/Forward.
+function render() {
+  renderNavbar();
+  var token = ++renderToken;
+  var subsHost = document.getElementById('subalbums');
+  var photosHost = document.getElementById('photos');
+  return Promise.all([
+    buildSubalbums(subsHost, token),
+    buildGrid(photosHost, token)
+  ]).then(function () {
+    if (token !== renderToken) return; // superseded by a newer navigation
+    ensureDecoder();
+    observeTiles(collectThumbs());
+    LB.refresh();
+  });
+}
+
+// ===== Navigation controller =================================================
+// In-page navigation: update the URL, re-read state, scroll to top, re-render.
+function navigateTo(target) {
+  history.pushState({}, '', target);
+  readUrl();
+  window.scrollTo(0, 0);
+  render();
+}
+
+function initNav() {
+  // Intercept internal nav links (breadcrumb / rating / sub-album tiles — all
+  // /photos hrefs). Grid tiles are <img>/<button>, not <a>, so they fall through
+  // to the lightbox. Modified / non-primary clicks fall through to the browser
+  // (open-in-new-tab etc.).
+  document.addEventListener('click', function (e) {
+    if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    var a = e.target.closest('a');
+    if (!a || a.target === '_blank' || a.hasAttribute('download')) return;
+    var url;
+    try { url = new URL(a.href, location.origin); } catch (_) { return; }
+    if (url.origin !== location.origin) return;
+    if (url.pathname !== '/photos' && url.pathname.indexOf('/photos/') !== 0) return;
+    e.preventDefault();
+    navigateTo(url.pathname + url.search);
+  });
+
+  // Back/Forward. While the lightbox is open, the popped entry is its (URL-less)
+  // history entry, so just dismiss it — the album URL is unchanged, no re-render.
+  // Otherwise the URL changed to another album: re-read state and re-render.
+  window.addEventListener('popstate', function () {
+    if (LB && LB.isOpen()) { LB.dismiss(); return; }
+    readUrl();
+    window.scrollTo(0, 0);
+    render();
+  });
+
+  // Alt+Up navigates to the parent album (in-page). A no-op at the root and while
+  // the lightbox is open.
+  document.addEventListener('keydown', function (e) {
+    if (e.altKey && e.key === 'ArrowUp' && !(LB && LB.isOpen()) && state.album.length) {
+      e.preventDefault();
+      navigateTo(photosUrl(state.album.slice(0, -1), state.minRating));
+    }
+  });
+}
+
+// ===== Bootstrap =============================================================
 (function () {
-  var subs = document.getElementById('subalbums');
-  var photos = document.getElementById('photos');
-  var jobs = [];
-  if (subs) jobs.push(buildSubalbums(subs));
-  if (photos) jobs.push(buildGrid(photos));
-  Promise.all(jobs).then(function () { initThumbnails(); initLightbox(); });
+  // We rebuild the grid asynchronously on Back/Forward, so the browser's own
+  // scroll restoration would race our refetch — manage scroll ourselves.
+  if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
+  readUrl();
+  initLightbox();
+  initNav();
+  render();
 })();
 
 // Register the service worker (makes the app installable as a PWA). Deferred to

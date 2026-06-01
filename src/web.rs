@@ -2,14 +2,11 @@
 //! with automatic escaping). This is the seed of the browsing UI.
 
 use axum::body::{Body, Bytes};
-use axum::extract::{Path, Query};
 use axum::http::{header, HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use maud::{html, Markup, PreEscaped, DOCTYPE};
-use serde::Deserialize;
 
 use crate::handlers::{if_none_match_matches, IMMUTABLE_CACHE_CONTROL};
-use crate::query::{self, Filters, Rating};
 
 /// The webpgf wasm PGF decoder, embedded at build time. `WEBPGF_PATH` is set by
 /// the flake (and the dev shell) to the `nix build .#webpgf` output directory.
@@ -166,57 +163,11 @@ const STYLE: &str = include_str!("web.css");
 /// `data-src` attributes. Photos use `#lb-img`, videos `#lb-video`.
 const SCRIPT: &str = include_str!("web.js");
 
-/// The frontend URL for album path segments, e.g. `["Photos", "Lego"]` ->
-/// `/photos/Photos/Lego`, percent-encoding each segment and appending the active
-/// filters so they are carried along. `[]` is the root (`/photos`).
-fn album_href(album: &[String], filters: &Filters) -> String {
-    let mut href = String::from("/photos");
-    for segment in album {
-        href.push('/');
-        href.push_str(&urlencoding::encode(segment));
-    }
-    href.push_str(&filters.query_string());
-    href
-}
-
-/// Render album path segments as a clickable breadcrumb
-/// `⌂ › Photos › Lego › Porsche911`. The leading house symbol links to `/photos`
-/// (the top of the database); each segment links to that album page, carrying the
-/// active filters.
-fn breadcrumb(album: &[String], filters: &Filters) -> Markup {
-    html! {
-        a.home href=(album_href(&[], filters)) aria-label="Home" { "⌂" }
-        @for i in 0..album.len() {
-            span.sep { "›" }
-            // `album[..=i]` is the cumulative path up to and including segment i.
-            a href=(album_href(&album[..=i], filters)) { (album[i]) }
-        }
-    }
-}
-
-/// Render the navbar's rating selector: five stars where the first `min_rating`
-/// are gold. Clicking star K filters to `≥K`; clicking the active threshold again
-/// clears it. Links keep the other filters and the current album.
-fn rating_selector(album: &[String], filters: &Filters) -> Markup {
-    let cur = filters.min_rating.get();
-    html! {
-        span.rating {
-            @for k in 1..=5 {
-                // Toggle off (back to Rating(0)) when clicking the active threshold.
-                @let target =
-                    filters.with_min_rating(Rating::new(if cur == k { 0 } else { k }).unwrap_or_default());
-                @let on = k <= cur;
-                a.on[on] href=(album_href(album, &target)) title=(format!("≥{k} stars")) {
-                    @if on { "★" } @else { "☆" }
-                }
-            }
-        }
-    }
-}
-
-/// Assemble a full HTML page. `controls` is the right-hand side of the navbar
-/// (e.g. the rating selector), or empty.
-fn page_html(title: &str, crumb: Markup, controls: Markup, body: Markup) -> Markup {
+/// Assemble the full HTML page shell. The navbar's breadcrumb (`.crumb`) and
+/// rating selector (`.rating`) are emitted **empty**; [web.js](web.js) fills them
+/// from the URL on load and rebuilds them on each in-page navigation (the page is
+/// a client-side SPA, so the shell is identical for every album/filter).
+fn page_html(title: &str, body: Markup) -> Markup {
     html! {
         (DOCTYPE)
         html lang="en" {
@@ -236,8 +187,8 @@ fn page_html(title: &str, crumb: Markup, controls: Markup, body: Markup) -> Mark
             }
             body {
                 header.navbar {
-                    span.crumb { (crumb) }
-                    (controls)
+                    span.crumb {}
+                    span.rating {}
                 }
                 (body)
                 div.lightbox id="lightbox" {
@@ -253,115 +204,34 @@ fn page_html(title: &str, crumb: Markup, controls: Markup, body: Markup) -> Mark
     }
 }
 
-/// Query parameters parsed from the album page URL into [`Filters`].
-#[derive(Debug, Deserialize)]
-pub struct AlbumViewParams {
-    #[serde(default)]
-    min_rating: Rating,
-}
-
 /// The album browsing page, serving `/`, `/photos`, and `/photos/<album path>`.
-/// An empty/absent path (`/`, `/photos`) is the virtual root (album roots shown
-/// as tiles); `/photos/Photos/Lego` -> `["Photos", "Lego"]`.
-pub async fn album_page(
-    // `None` for the routes without a `*path` capture (`/`, `/photos`).
-    path: Option<Path<String>>,
-    Query(params): Query<AlbumViewParams>,
-) -> impl IntoResponse {
-    let filters = Filters {
-        min_rating: params.min_rating,
-    };
-    let path = path.map(|Path(p)| p).unwrap_or_default();
-    let album = query::album_segments(&path);
-    // Cache the page for an hour (browser-only). Navigations / back-forward reuse
+/// The served HTML is a **static shell** — identical for every URL — that
+/// [web.js](web.js) turns into a client-side SPA: it reads the album + filters
+/// from the URL, fetches `/api/subalbums` + `/api/photos`, and renders the navbar,
+/// sub-album tiles, and photo grid, re-rendering in place (no page load) as the
+/// user navigates. The route captures are therefore ignored here.
+pub async fn album_page() -> impl IntoResponse {
+    // Cache the shell for an hour (browser-only). Navigations / back-forward reuse
     // it; a force-reload (Ctrl/Cmd+Shift+R) bypasses it.
     (
         [(
             header::CACHE_CONTROL,
             HeaderValue::from_static("private, max-age=3600"),
         )],
-        render(&album, &filters),
+        render(),
     )
 }
 
-/// Render the album browsing page **shell**. No DB work happens here: both the
-/// sub-album tiles and the photo grid are fetched client-side (`/api/subalbums`
-/// and `/api/photos`, album + filters read from the URL by [web.js](web.js)) and
-/// fill the empty `#subalbums` / `#photos` containers. Only the navbar (breadcrumb
-/// and rating selector) and the title are server-rendered. `album` is empty for
-/// the virtual root (no photo grid), or the album's path segments for a real album.
-fn render(album: &[String], filters: &Filters) -> Markup {
+/// Render the album browsing page **shell**. No DB work and no album/filter logic
+/// happens here: the navbar, sub-album tiles, and photo grid are all built
+/// client-side (see [web.js](web.js)) into the empty navbar / `#subalbums` /
+/// `#photos` containers. The `<title>` is a constant placeholder that web.js
+/// replaces with the album path on first render.
+fn render() -> Markup {
     let body = html! {
         // Empty containers the client fills from /api/subalbums and /api/photos.
-        // The virtual root is just an album with no photos of its own.
         div id="subalbums" {}
         div id="photos" {}
     };
-    let title = if album.is_empty() {
-        "Photos".to_string()
-    } else {
-        format!("/{}", album.join("/"))
-    };
-    page_html(
-        &title,
-        breadcrumb(album, filters),
-        rating_selector(album, filters),
-        body,
-    )
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// Build album segments from string literals.
-    fn segs(parts: &[&str]) -> Vec<String> {
-        parts.iter().map(|s| s.to_string()).collect()
-    }
-
-    #[test]
-    fn builds_breadcrumb() {
-        let html = breadcrumb(
-            &segs(&["Photos", "Lego", "Porsche911"]),
-            &Filters::default(),
-        )
-        .into_string();
-        assert!(html.contains("<a href=\"/photos/Photos\">Photos</a>"));
-        assert!(html.contains("<a href=\"/photos/Photos/Lego\">Lego</a>"));
-        assert!(html.contains("<a href=\"/photos/Photos/Lego/Porsche911\">Porsche911</a>"));
-    }
-
-    #[test]
-    fn breadcrumb_encodes_and_escapes() {
-        // Spaces are percent-encoded in the href; the label stays human-readable.
-        let html = breadcrumb(&segs(&["My Photos"]), &Filters::default()).into_string();
-        assert!(html.contains("href=\"/photos/My%20Photos\""));
-        assert!(html.contains(">My Photos</a>"));
-    }
-
-    #[test]
-    fn filters_propagate_into_links() {
-        let f = Filters {
-            min_rating: Rating::new(3).unwrap(),
-        };
-        // Breadcrumb links carry the active filter.
-        let html = breadcrumb(&segs(&["Photos", "Lego"]), &f).into_string();
-        assert!(html.contains("href=\"/photos/Photos/Lego?min_rating=3\""));
-    }
-
-    #[test]
-    fn rating_selector_toggles_and_fills() {
-        let html = rating_selector(
-            &segs(&["Photos", "Lego"]),
-            &Filters {
-                min_rating: Rating::new(2).unwrap(),
-            },
-        )
-        .into_string();
-        // First two stars filled (on), and clicking star 2 again clears the filter.
-        assert_eq!(html.matches("class=\"on\"").count(), 2);
-        assert!(html.contains("href=\"/photos/Photos/Lego\" title=\"≥2 stars\""));
-        // Star 4 raises the threshold.
-        assert!(html.contains("href=\"/photos/Photos/Lego?min_rating=4\""));
-    }
+    page_html("digiKam Browse", body)
 }
