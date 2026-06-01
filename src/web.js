@@ -210,12 +210,20 @@
   // Worker body, appended after webpgf.js (which defines `WebPGF`): the init
   // message (`wasm`) instantiates the module from the shared bytes; each later
   // message decodes a blob and transfers the pixel buffer back.
-  var glue =
-    "var mod;onmessage=function(e){var d=e.data;" +
-    "if(d.wasm){mod=WebPGF({wasmBinary:d.wasm});return;}" +
-    "mod.then(function(m){var im=m.decode(new Uint8Array(d.buf));var o=im.data;" +
-    "postMessage({id:d.id,w:im.width,h:im.height,buf:o.buffer},[o.buffer]);})" +
-    ".catch(function(err){postMessage({id:d.id,error:String((err&&err.message)||err)});});};";
+  var glue = `
+    var mod;
+    onmessage = function (e) {
+      var d = e.data;
+      if (d.wasm) { mod = WebPGF({ wasmBinary: d.wasm }); return; }
+      mod.then(function (m) {
+        var im = m.decode(new Uint8Array(d.buf));
+        var o = im.data;
+        postMessage({ id: d.id, w: im.width, h: im.height, buf: o.buffer }, [o.buffer]);
+      }).catch(function (err) {
+        postMessage({ id: d.id, error: String((err && err.message) || err) });
+      });
+    };
+  `;
 
   // High priority: these gate the whole decode pipeline, so they shouldn't wait
   // behind the thumbnail fetches.
