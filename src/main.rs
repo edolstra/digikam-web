@@ -127,12 +127,15 @@ async fn serve_tls(listener: tokio::net::TcpListener, app: Router) -> Result<()>
         let app = app.clone();
         tokio::spawn(async move {
             // A failed handshake (e.g. a plain-HTTP probe) just drops the conn.
-            let Ok(stream) = acceptor.accept(stream).await else { return };
+            let Ok(stream) = acceptor.accept(stream).await else {
+                return;
+            };
             let io = TokioIo::new(stream);
-            let service = hyper::service::service_fn(move |req: hyper::Request<hyper::body::Incoming>| {
-                use tower::Service;
-                app.clone().call(req.map(axum::body::Body::new))
-            });
+            let service =
+                hyper::service::service_fn(move |req: hyper::Request<hyper::body::Incoming>| {
+                    use tower::Service;
+                    app.clone().call(req.map(axum::body::Body::new))
+                });
             if let Err(e) = Builder::new(TokioExecutor::new())
                 .serve_connection(io, service)
                 .await
@@ -157,8 +160,7 @@ fn self_signed_tls_config() -> Result<rustls::ServerConfig> {
     ])
     .context("generating self-signed certificate")?;
     let cert_der = cert.cert.der().clone();
-    let key_der =
-        rustls::pki_types::PrivateKeyDer::Pkcs8(cert.key_pair.serialize_der().into());
+    let key_der = rustls::pki_types::PrivateKeyDer::Pkcs8(cert.key_pair.serialize_der().into());
 
     let mut config = rustls::ServerConfig::builder()
         .with_no_client_auth()
