@@ -191,6 +191,15 @@
     else if (e.key === 'ArrowRight') { e.preventDefault(); go(1); }
     else if (e.key === 'Home') { e.preventDefault(); show(0, true); }
     else if (e.key === 'End') { e.preventDefault(); show(items.length - 1, true); }
+    else if (e.key === 'r' || e.key === 'R') {
+      // Jump to a random other item.
+      e.preventDefault();
+      if (items.length > 1) {
+        var n;
+        do { n = Math.floor(Math.random() * items.length); } while (n === idx);
+        show(n, true);
+      }
+    }
     else if (e.key === ' ' && activeEl() === vid) {
       // Toggle the video (it isn't focused, so the native space-to-play won't fire).
       e.preventDefault();
