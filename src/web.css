@@ -8,13 +8,18 @@ body { font-family: sans-serif; margin: 1rem; background: #111; color: #eee; }
           display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
 .crumb { font-size: 1.2rem; font-weight: 600; }
 .crumb a { color: #6cf; text-decoration: none; }
-.crumb a:hover { text-decoration: underline; }
 .crumb .home { font-size: 1.3rem; }
 .crumb .sep { color: #666; margin: 0 0.2rem; }
 .rating { white-space: nowrap; }
 .rating a { color: #555; text-decoration: none; font-size: 1.2rem; padding: 0 1px; }
 .rating a.on { color: #f5c518; }
-.rating a:hover { color: #f5c518; }
+/* Only react to a real pointer: on touch, `:hover` sticks to the last-tapped
+   spot, lighting up the rightmost star after closing the lightbox via the X
+   (both sit in the top-right corner). Same for the breadcrumb underline. */
+@media (hover: hover) {
+  .crumb a:hover { text-decoration: underline; }
+  .rating a:hover { color: #f5c518; }
+}
 h2 { font-size: 1rem; margin: 1.5rem 0 0.5rem; padding-bottom: 0.25rem;
      border-bottom: 1px solid #333; color: #aaa; }
 .count { color: #888; font-size: 0.85rem; }
