@@ -565,13 +565,69 @@ function buildGrid(host) {
     });
 }
 
-// Bootstrap: build the grid (if this is a real album) before wiring the
-// thumbnail pipeline and lightbox, which both scan the now-populated DOM.
+// The frontend URL for a sub-album's display path (e.g. "/Photos/Lego" ->
+// "/photos/Photos/Lego"), each segment encoded, carrying the current filters
+// (the page's query string).
+function albumHref(displayPath) {
+  var segs = displayPath.split('/').filter(Boolean).map(encodeURIComponent);
+  return '/photos' + (segs.length ? '/' + segs.join('/') : '') + location.search;
+}
+
+// Fill `#subalbums` from /api/subalbums for the current album + filters (an
+// empty album lists the roots). Each tile is the cover image (lazy thumbnail
+// pipeline) with the bold name + count overlaid, linking to that sub-album.
+function buildSubalbums(host) {
+  var album = decodeURIComponent(location.pathname.replace(/^\/photos/, ''));
+  var params = new URLSearchParams(location.search); // min_rating, …
+  params.set('album', album);
+  return fetch('/api/subalbums?' + params.toString())
+    .then(function (r) { return r.json(); })
+    .then(function (subs) {
+      host.textContent = '';
+      if (!subs.length) return;
+      var wrap = document.createElement('div');
+      wrap.className = 'albums';
+      subs.forEach(function (s) {
+        var a = document.createElement('a');
+        a.className = 'album';
+        a.href = albumHref(s.path);
+        if (s.cover) {
+          var img = document.createElement('img');
+          img.className = 'thumb';
+          img.dataset.id = s.cover.id;
+          img.dataset.full = '/api/photos/' + s.cover.id + '/file';
+          img.alt = '';
+          a.appendChild(img);
+        }
+        var cap = document.createElement('span');
+        cap.className = 'caption';
+        var title = document.createElement('span');
+        title.className = 'title';
+        title.textContent = s.name;
+        var cnt = document.createElement('span');
+        cnt.className = 'cnt';
+        cnt.textContent = '(' + s.photo_count + ')';
+        cap.appendChild(title);
+        cap.appendChild(document.createTextNode(' '));
+        cap.appendChild(cnt);
+        a.appendChild(cap);
+        wrap.appendChild(a);
+      });
+      host.appendChild(wrap);
+    })
+    .catch(function () { /* leave the sub-album area empty on error */ });
+}
+
+// Bootstrap: build the sub-album tiles and (for a real album) the photo grid,
+// then wire the thumbnail pipeline and lightbox, which both scan the populated
+// DOM (so they run once everything is in place).
 (function () {
-  var host = document.getElementById('photos');
-  function start() { initThumbnails(); initLightbox(); }
-  if (host) buildGrid(host).then(start);
-  else start();
+  var subs = document.getElementById('subalbums');
+  var photos = document.getElementById('photos');
+  var jobs = [];
+  if (subs) jobs.push(buildSubalbums(subs));
+  if (photos) jobs.push(buildGrid(photos));
+  Promise.all(jobs).then(function () { initThumbnails(); initLightbox(); });
 })();
 
 // Register the service worker (makes the app installable as a PWA). Deferred to

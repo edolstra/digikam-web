@@ -2,16 +2,13 @@
 //! with automatic escaping). This is the seed of the browsing UI.
 
 use axum::body::{Body, Bytes};
-use axum::extract::{Path, Query, State};
+use axum::extract::{Path, Query};
 use axum::http::{header, HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use maud::{html, Markup, PreEscaped, DOCTYPE};
 use serde::Deserialize;
 
-use crate::db::AppState;
-use crate::error::AppResult;
-use crate::handlers::{if_none_match_matches, run_blocking, IMMUTABLE_CACHE_CONTROL};
-use crate::models::SubAlbum;
+use crate::handlers::{if_none_match_matches, IMMUTABLE_CACHE_CONTROL};
 use crate::query::{self, Filters, Rating};
 
 /// The webpgf wasm PGF decoder, embedded at build time. `WEBPGF_PATH` is set by
@@ -182,13 +179,6 @@ fn album_href(album: &[String], filters: &Filters) -> String {
     href
 }
 
-/// `album` segments extended with one more child segment.
-fn child(album: &[String], name: &str) -> Vec<String> {
-    let mut segments = album.to_vec();
-    segments.push(name.to_string());
-    segments
-}
-
 /// Render album path segments as a clickable breadcrumb
 /// `⌂ › Photos › Lego › Porsche911`. The leading house symbol links to `/photos`
 /// (the top of the database); each segment links to that album page, carrying the
@@ -218,33 +208,6 @@ fn rating_selector(album: &[String], filters: &Filters) -> Markup {
                 @let on = k <= cur;
                 a.on[on] href=(album_href(album, &target)) title=(format!("≥{k} stars")) {
                     @if on { "★" } @else { "☆" }
-                }
-            }
-        }
-    }
-}
-
-/// Render a grid of sub-album tiles (cover with the bold title + count overlaid).
-/// Empty input yields empty markup; video-only sub-albums (no cover) get a plain
-/// dark tile. Tile links carry the active filters.
-fn render_subalbums(album: &[String], subalbums: &[SubAlbum], filters: &Filters) -> Markup {
-    html! {
-        @if !subalbums.is_empty() {
-            div.albums {
-                @for sub in subalbums {
-                    a.album href=(album_href(&child(album, &sub.name), filters)) {
-                        @if let Some(cover) = &sub.cover {
-                            // Same lazy thumbnail pipeline as the grid (web.js);
-                            // the caption already shows the name, so `alt=""`.
-                            img.thumb data-id=(cover.id)
-                                data-full=(format!("/api/photos/{}/file", cover.id)) alt="";
-                        }
-                        span.caption {
-                            span.title { (sub.name) }
-                            " "
-                            span.cnt { "(" (sub.photo_count) ")" }
-                        }
-                    }
                 }
             }
         }
@@ -301,63 +264,50 @@ pub struct AlbumViewParams {
 /// An empty/absent path (`/`, `/photos`) is the virtual root (album roots shown
 /// as tiles); `/photos/Photos/Lego` -> `["Photos", "Lego"]`.
 pub async fn album_page(
-    State(state): State<AppState>,
     // `None` for the routes without a `*path` capture (`/`, `/photos`).
     path: Option<Path<String>>,
     Query(params): Query<AlbumViewParams>,
-) -> AppResult<impl IntoResponse> {
+) -> impl IntoResponse {
     let filters = Filters {
         min_rating: params.min_rating,
     };
     let path = path.map(|Path(p)| p).unwrap_or_default();
     let album = query::album_segments(&path);
-    let markup = render(state, &album, filters).await?;
     // Cache the page for an hour (browser-only). Navigations / back-forward reuse
-    // it; a force-reload (Ctrl/Cmd+Shift+R) bypasses it. Errors aren't cached.
-    Ok((
+    // it; a force-reload (Ctrl/Cmd+Shift+R) bypasses it.
+    (
         [(
             header::CACHE_CONTROL,
             HeaderValue::from_static("private, max-age=3600"),
         )],
-        markup,
-    ))
+        render(&album, &filters),
+    )
 }
 
-/// Render the album browsing page. `album` is `[]` for the virtual root (album
-/// roots shown as tiles, no photo grid), or `["Root", "rel", …]` for a real album.
-///
-/// The **photo grid is not rendered here**: the page ships an empty `#photos`
-/// container (for real albums) that [web.js](web.js) fills by fetching
-/// `/api/photos` (album + filters read from the URL). Only the sub-album tiles are
-/// still server-rendered, so the rest of the page is essentially a static shell.
-async fn render(state: AppState, album: &[String], filters: Filters) -> AppResult<Markup> {
-    let album_for_subs = album.to_vec();
-    let filters_for_subs = filters.clone();
-    let subalbums = run_blocking(&state, move |conn, state| {
-        query::list_subalbums(conn, &state.roots, &album_for_subs, &filters_for_subs)
-    })
-    .await?;
-
-    // Real albums get an (initially empty) photo-grid container the client fills;
-    // the virtual root has only sub-album tiles.
-    let grid = if album.is_empty() {
-        html! {}
-    } else {
-        html! { div id="photos" {} }
+/// Render the album browsing page **shell**. No DB work happens here: both the
+/// sub-album tiles and the photo grid are fetched client-side (`/api/subalbums`
+/// and `/api/photos`, album + filters read from the URL by [web.js](web.js)) and
+/// fill the empty `#subalbums` / `#photos` containers. Only the navbar (breadcrumb
+/// and rating selector) and the title are server-rendered. `album` is empty for
+/// the virtual root (no photo grid), or the album's path segments for a real album.
+fn render(album: &[String], filters: &Filters) -> Markup {
+    let body = html! {
+        // Sub-album tiles (virtual root and real albums alike); the photo grid is
+        // a real album only. Both are populated by the client.
+        div id="subalbums" {}
+        @if !album.is_empty() { div id="photos" {} }
     };
-
     let title = if album.is_empty() {
         "Photos".to_string()
     } else {
         format!("/{}", album.join("/"))
     };
-    let body = html! { (render_subalbums(album, &subalbums, &filters)) (grid) };
-    Ok(page_html(
+    page_html(
         &title,
-        breadcrumb(album, &filters),
-        rating_selector(album, &filters),
+        breadcrumb(album, filters),
+        rating_selector(album, filters),
         body,
-    ))
+    )
 }
 
 #[cfg(test)]
