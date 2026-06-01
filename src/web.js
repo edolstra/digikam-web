@@ -18,6 +18,28 @@
   function isOpen() { return lb.classList.contains('open'); }
   function activeEl() { return vid.classList.contains('active') ? vid : img; }
 
+  // The close/nav controls start hidden (open() adds `.idle`); a mouse/pen move
+  // or a tap reveals them, after which they auto-hide again after 2s of
+  // inactivity. Keyboard navigation and swipes deliberately do NOT reveal them.
+  var idleTimer = 0;
+  function wake() {
+    lb.classList.remove('idle');
+    clearTimeout(idleTimer);
+    if (isOpen()) idleTimer = setTimeout(function () {
+      if (isOpen()) lb.classList.add('idle');
+    }, 2000);
+  }
+  // Mouse/pen movement reveals; touch movement (a swipe) does not.
+  lb.addEventListener('pointermove', function (e) { if (e.pointerType !== 'touch') wake(); });
+  // A tap/click reveals the controls; a swipe fires no click, so it doesn't. A
+  // click while they're hidden only reveals (consumed, so it doesn't also
+  // dismiss/navigate). Capture phase runs before the other click handlers.
+  lb.addEventListener('click', function (e) {
+    var hidden = lb.classList.contains('idle');
+    wake();
+    if (hidden) { e.stopPropagation(); e.preventDefault(); }
+  }, true);
+
   // Decode image neighbours ahead of time so tapping prev/next paints instantly
   // (originals are full-size, so the decode is the slow part — worst on Firefox).
   // Videos are skipped: we don't want to prefetch multi-MB media.
@@ -62,6 +84,7 @@
   function open(i) {
     if (!isOpen()) history.pushState({ lightbox: true }, '');
     show(i, true);
+    lb.classList.add('idle'); // controls start hidden until a mouse move / tap
     // Must be requested inside the click gesture. Unsupported on iPhone Safari
     // (guarded), where the full-viewport overlay alone is used.
     if (!document.fullscreenElement && lb.requestFullscreen) {
@@ -82,6 +105,8 @@
 
   function dismiss() {
     closing = false;
+    clearTimeout(idleTimer);
+    lb.classList.remove('idle');
     lb.classList.remove('open');
     document.body.classList.remove('modal-open');
     vid.pause();

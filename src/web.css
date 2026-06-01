@@ -77,3 +77,8 @@ body.modal-open { overflow: hidden; }
                    user-select: none; opacity: 0.8; touch-action: manipulation; }
 .lightbox button:hover { opacity: 1; }
 .lightbox button[disabled] { opacity: 0.15; cursor: default; }
+/* Auto-hide the controls after inactivity (web.js toggles `.idle`); they fade
+   back on any pointer move / touch / key. */
+.lightbox .close, .lightbox .nav { transition: opacity 0.25s ease; }
+.lightbox.idle .close, .lightbox.idle .nav { opacity: 0; }
+.lightbox.idle { cursor: none; }
