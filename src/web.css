@@ -80,5 +80,7 @@ body.modal-open { overflow: hidden; }
 /* Auto-hide the controls after inactivity (web.js toggles `.idle`); they fade
    back on any pointer move / touch / key. */
 .lightbox .close, .lightbox .nav { transition: opacity 0.25s ease; }
-.lightbox.idle .close, .lightbox.idle .nav { opacity: 0; }
+/* Hidden controls don't capture taps — a tap there reveals them (and pauses a
+   video / closes on the letterbox) rather than navigating/closing via the button. */
+.lightbox.idle .close, .lightbox.idle .nav { opacity: 0; pointer-events: none; }
 .lightbox.idle { cursor: none; }

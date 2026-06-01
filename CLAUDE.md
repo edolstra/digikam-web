@@ -92,11 +92,12 @@ cached): cached an hour for navigations / back-forward, while a force-reload
   **fullscreen** (Fullscreen API; guarded/no-op where unsupported, e.g. iPhone Safari).
   The media is scaled to fill the viewport (up or down, preserving aspect). Videos
   auto-play, looping, with **native `controls`** (play/pause/seek/volume; mp4/webm only);
-  Space toggles play/pause and `m` toggles mute. ←/→ keys still navigate between items even on a video
-  (`preventDefault` stops a focused video from also seeking); Home/End jump to first/last,
-  `r` (or a **swipe up**) jumps to a random item. Navigate via swipe (not over the
-  video, so dragging its seek bar seeks), ←/→ keys, or on-screen ‹ › chevrons (stop at
-  ends). Dismiss by
+  Space toggles play/pause and `m` toggles mute. **Touch gestures take over from the
+  native controls on touch** (which stay mouse-usable on desktop): tap a video to
+  pause/play, swipe left/right (anywhere, incl. over a video) to go prev/next, swipe up
+  for a random item. With a keyboard, ←/→ navigate (`preventDefault` stops a focused video
+  from also seeking), Home/End jump to first/last, and `r` jumps to a random item; the
+  on-screen ‹ › chevrons navigate too (all stop at ends). Dismiss by
   clicking the letterbox / Esc / the X / the device Back button — opening pushes a
   history entry so Back closes the lightbox instead of leaving the page, and exiting
   fullscreen closes it too. On dismiss, the grid scrolls the last-viewed tile fully into

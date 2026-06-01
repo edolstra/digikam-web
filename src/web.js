@@ -14,6 +14,7 @@
   var next = lb.querySelector('.next');
   var idx = -1;
   var closing = false; // guards against issuing history.back() twice per open
+  var suppressClick = false; // swallow the synthetic click a touch tap produces
 
   function isOpen() { return lb.classList.contains('open'); }
   function activeEl() { return vid.classList.contains('active') ? vid : img; }
@@ -29,16 +30,9 @@
       if (isOpen()) lb.classList.add('idle');
     }, 2000);
   }
-  // Mouse/pen movement reveals; touch movement (a swipe) does not.
+  // Mouse/pen movement reveals the controls; touch is handled by the gestures
+  // below (a tap reveals; a swipe doesn't).
   lb.addEventListener('pointermove', function (e) { if (e.pointerType !== 'touch') wake(); });
-  // A tap/click reveals the controls; a swipe fires no click, so it doesn't. A
-  // click while they're hidden only reveals (consumed, so it doesn't also
-  // dismiss/navigate). Capture phase runs before the other click handlers.
-  lb.addEventListener('click', function (e) {
-    var hidden = lb.classList.contains('idle');
-    wake();
-    if (hidden) { e.stopPropagation(); e.preventDefault(); }
-  }, true);
 
   // Decode image neighbours ahead of time so tapping prev/next paints instantly
   // (originals are full-size, so the decode is the slow part — worst on Firefox).
@@ -168,10 +162,9 @@
     el.addEventListener('click', function () { open(i); });
   });
 
-  // The media fills the viewport (so small items scale up too), letterboxed via
-  // object-fit: contain. Clicking that letterbox (outside the media) dismisses;
-  // clicking a video toggles play/pause; clicking a photo does nothing.
-  function onMedia(e) {
+  // Is (cx, cy) over the displayed media (vs the letterbox)? The media fills the
+  // viewport letterboxed via object-fit: contain.
+  function onMedia(cx, cy) {
     var el = activeEl();
     var r = el.getBoundingClientRect();
     var nw = el.naturalWidth || el.videoWidth, nh = el.naturalHeight || el.videoHeight;
@@ -179,12 +172,21 @@
     var s = Math.min(r.width / nw, r.height / nh);
     var w = nw * s, h = nh * s;
     var x = r.left + (r.width - w) / 2, y = r.top + (r.height - h) / 2;
-    return e.clientX >= x && e.clientX <= x + w && e.clientY >= y && e.clientY <= y + h;
+    return cx >= x && cx <= x + w && cy >= y && cy <= y + h;
   }
+  function togglePlay() {
+    if (vid.paused) { var p = vid.play(); if (p && p.catch) p.catch(function () {}); }
+    else vid.pause();
+  }
+  // Mouse click: reveal the controls, and on the letterbox dismiss (unless the
+  // click only revealed the hidden controls). Video play/pause on desktop is the
+  // native controls' job. Touch taps are handled in the touch gestures below;
+  // their synthetic click is swallowed here so this doesn't re-fire.
   lb.addEventListener('click', function (e) {
-    // Click outside the media (the letterbox) closes; clicks on the media itself
-    // are left to the native video controls (and do nothing for images).
-    if (!onMedia(e)) close();
+    if (suppressClick) { suppressClick = false; return; }
+    var hidden = lb.classList.contains('idle');
+    wake();
+    if (!onMedia(e.clientX, e.clientY) && !hidden) close();
   });
   lb.querySelector('.close').addEventListener('click', function (e) { e.stopPropagation(); close(); });
   prev.addEventListener('click', function (e) { e.stopPropagation(); go(-1); });
@@ -203,8 +205,7 @@
     else if (e.key === ' ' && activeEl() === vid) {
       // Toggle the video (it isn't focused, so the native space-to-play won't fire).
       e.preventDefault();
-      if (vid.paused) { var p = vid.play(); if (p && p.catch) p.catch(function () {}); }
-      else vid.pause();
+      togglePlay();
     }
     else if ((e.key === 'm' || e.key === 'M') && activeEl() === vid) {
       e.preventDefault();
@@ -224,24 +225,33 @@
     }
   });
 
-  // Swipe: a vertical swipe up jumps to a random item; a horizontal swipe goes
-  // prev/next. The horizontal case skips drags that begin on the video (so
-  // dragging its seek bar seeks instead of navigating); the vertical case is fine
-  // there since seeking is horizontal.
-  var sx = 0, sy = 0, fromVideo = false;
+  // Swipe (over the whole lightbox, including videos): up -> random item,
+  // left/right -> prev/next. A swipe fires no click, so taps (handled above) and
+  // swipes don't collide. On touch these gestures take over from the native video
+  // seek bar (which stays usable with a mouse on desktop).
+  var sx = 0, sy = 0;
   lb.addEventListener('touchstart', function (e) {
     var t = e.changedTouches[0]; sx = t.clientX; sy = t.clientY;
-    fromVideo = (e.target === vid);
+    suppressClick = false;
   }, { passive: true });
   lb.addEventListener('touchend', function (e) {
     var t = e.changedTouches[0];
     var dx = t.clientX - sx, dy = t.clientY - sy;
-    if (Math.abs(dy) > 50 && Math.abs(dy) > Math.abs(dx)) {
-      if (dy < 0) goRandom(); // swipe up -> random item
-      return;
+    var adx = Math.abs(dx), ady = Math.abs(dy);
+    if (ady > 50 && ady > adx) { if (dy < 0) goRandom(); return; }  // swipe up -> random
+    if (adx > 50 && adx > ady) { go(dx < 0 ? 1 : -1); return; }     // swipe left/right
+    // Tap: reveal the controls, then pause a video / close on the letterbox.
+    // Handled here (not via click) because the native video controls swallow the
+    // click on a video; swallow the synthetic click so the mouse handler doesn't
+    // re-fire (which would close on a reveal-tap).
+    var hidden = lb.classList.contains('idle');
+    wake();
+    if (onMedia(t.clientX, t.clientY)) {
+      if (activeEl() === vid) togglePlay();
+    } else if (!hidden) {
+      close();
     }
-    if (fromVideo) return; // horizontal drag on the video = seek, not navigate
-    if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy)) go(dx < 0 ? 1 : -1);
+    suppressClick = true;
   }, { passive: true });
 })();
 
