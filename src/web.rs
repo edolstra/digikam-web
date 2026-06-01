@@ -11,8 +11,8 @@ use serde::Deserialize;
 use crate::db::AppState;
 use crate::error::AppResult;
 use crate::handlers::{if_none_match_matches, run_blocking, IMMUTABLE_CACHE_CONTROL};
-use crate::models::{PhotoSummary, SubAlbum};
-use crate::query::{self, Filters, PhotoQuery, Rating};
+use crate::models::SubAlbum;
+use crate::query::{self, Filters, Rating};
 
 /// The webpgf wasm PGF decoder, embedded at build time. `WEBPGF_PATH` is set by
 /// the flake (and the dev shell) to the `nix build .#webpgf` output directory.
@@ -169,22 +169,6 @@ const STYLE: &str = include_str!("web.css");
 /// `data-src` attributes. Photos use `#lb-img`, videos `#lb-video`.
 const SCRIPT: &str = include_str!("web.js");
 
-/// The day a photo belongs to (`YYYY-MM-DD`), or `None` if it has no date.
-fn photo_day(date: Option<&str>) -> Option<&str> {
-    date.filter(|d| d.len() >= 10).map(|d| &d[..10])
-}
-
-/// Inline `width` (the grid row height is 200px) reserving a tile's space from
-/// its aspect ratio, so the layout doesn't reflow as thumbnails decode in. `None`
-/// when the dimensions are unknown; JS clears it once the real image loads (the
-/// natural aspect then takes over, which also corrects rotated images).
-fn thumb_reserve(width: Option<u64>, height: Option<u64>) -> Option<String> {
-    match (width, height) {
-        (Some(w), Some(h)) if h > 0 => Some(format!("width:{}px", (200 * w) / h)),
-        _ => None,
-    }
-}
-
 /// The frontend URL for album path segments, e.g. `["Photos", "Lego"]` ->
 /// `/photos/Photos/Lego`, percent-encoding each segment and appending the active
 /// filters so they are carried along. `[]` is the root (`/photos`).
@@ -267,20 +251,6 @@ fn render_subalbums(album: &[String], subalbums: &[SubAlbum], filters: &Filters)
     }
 }
 
-/// Group photos into contiguous runs by day. `list_photos` already orders
-/// newest-first, so a single pass suffices.
-fn group_by_day(items: &[PhotoSummary]) -> Vec<(&str, Vec<&PhotoSummary>)> {
-    let mut groups: Vec<(&str, Vec<&PhotoSummary>)> = Vec::new();
-    for photo in items {
-        let day = photo_day(photo.modification_date.as_deref()).unwrap_or("Unknown date");
-        match groups.last_mut() {
-            Some((d, v)) if *d == day => v.push(photo),
-            _ => groups.push((day, vec![photo])),
-        }
-    }
-    groups
-}
-
 /// Assemble a full HTML page. `controls` is the right-hand side of the navbar
 /// (e.g. the rating selector), or empty.
 fn page_html(title: &str, crumb: Markup, controls: Markup, body: Markup) -> Markup {
@@ -356,73 +326,24 @@ pub async fn album_page(
 /// Render the album browsing page. `album` is `[]` for the virtual root (album
 /// roots shown as tiles, no photo grid), or `["Root", "rel", …]` for a real album.
 ///
-/// `list_subalbums` handles both; only a real album also runs a `PhotoQuery`.
+/// The **photo grid is not rendered here**: the page ships an empty `#photos`
+/// container (for real albums) that [web.js](web.js) fills by fetching
+/// `/api/photos` (album + filters read from the URL). Only the sub-album tiles are
+/// still server-rendered, so the rest of the page is essentially a static shell.
 async fn render(state: AppState, album: &[String], filters: Filters) -> AppResult<Markup> {
-    let q = (!album.is_empty()).then(|| PhotoQuery {
-        album: album.to_vec(),
-        recursive: false,
-        tags: Vec::new(),
-        min_rating: filters.min_rating,
-        // No real pagination in this first cut; list everything in the album.
-        limit: query::DEFAULT_LIMIT,
-        offset: 0,
-    });
-
-    // Fetch the (optional) photo page and the sub-album tiles on one connection.
     let album_for_subs = album.to_vec();
     let filters_for_subs = filters.clone();
-    let (page, subalbums) = run_blocking(&state, move |conn, state| {
-        let page = match &q {
-            Some(q) => Some(query::list_photos(conn, &state.roots, q)?),
-            None => None,
-        };
-        let subalbums =
-            query::list_subalbums(conn, &state.roots, &album_for_subs, &filters_for_subs)?;
-        Ok((page, subalbums))
+    let subalbums = run_blocking(&state, move |conn, state| {
+        query::list_subalbums(conn, &state.roots, &album_for_subs, &filters_for_subs)
     })
     .await?;
 
-    // The photo grid + count line, present only for a real album.
-    let grid = match &page {
-        None => html! {},
-        Some(page) => {
-            let groups = group_by_day(&page.items);
-            html! {
-                p.count { (page.items.len()) @if page.incomplete { "+" } " photo(s)" }
-                @if page.items.is_empty() {
-                    p { "No photos in this album." }
-                } @else {
-                    @for (day, photos) in &groups {
-                        h2 { (day) }
-                        div.grid {
-                            @for photo in photos {
-                                @let full = format!("/api/photos/{}/file", photo.id);
-                                @if photo.is_video {
-                                    // Video tile: a poster from the same lazy
-                                    // thumbnail pipeline (the inner `img.thumb` has
-                                    // no `data-full`, so a missing thumbnail just
-                                    // leaves the ▶ placeholder), under the ▶ badge
-                                    // (CSS). The button carries the media URL for
-                                    // the lightbox; the poster is not a lightbox tile
-                                    // (it's not a *direct* child of `.grid`).
-                                    button.vtile data-src=(full) title=(photo.name)
-                                        style=[thumb_reserve(photo.width, photo.height)] {
-                                        img.thumb data-id=(photo.id) alt="";
-                                    }
-                                } @else {
-                                    // The thumbnail (raw PGF) is fetched + wasm-decoded
-                                    // lazily by web.js; `data-full` is the original,
-                                    // used by the lightbox and as the decode fallback.
-                                    img.thumb data-id=(photo.id) data-full=(full)
-                                        alt="" title=(photo.name)
-                                        style=[thumb_reserve(photo.width, photo.height)];
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
+    // Real albums get an (initially empty) photo-grid container the client fills;
+    // the virtual root has only sub-album tiles.
+    let grid = if album.is_empty() {
+        html! {}
+    } else {
+        html! { div id="photos" {} }
     };
 
     let title = if album.is_empty() {
@@ -492,13 +413,5 @@ mod tests {
         assert!(html.contains("href=\"/photos/Photos/Lego\" title=\"≥2 stars\""));
         // Star 4 raises the threshold.
         assert!(html.contains("href=\"/photos/Photos/Lego?min_rating=4\""));
-    }
-
-    #[test]
-    fn extracts_day() {
-        assert_eq!(photo_day(Some("2011-11-06T07:40:07")), Some("2011-11-06"));
-        assert_eq!(photo_day(Some("2026-05-31")), Some("2026-05-31"));
-        assert_eq!(photo_day(Some("bad")), None);
-        assert_eq!(photo_day(None), None);
     }
 }

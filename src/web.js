@@ -1,4 +1,6 @@
-(function () {
+// Wire up the lightbox over the (now client-built) grid. Called after the grid
+// is populated (see the bootstrap at the bottom).
+function initLightbox() {
   // Direct children only: a video tile's inner poster <img> is not its own item.
   var tiles = Array.prototype.slice.call(document.querySelectorAll('.grid > img, .grid > .vtile'));
   var items = tiles.map(function (el) {
@@ -269,15 +271,15 @@
     lastWheel = e.timeStamp;
     go(e.deltaY > 0 ? 1 : -1);
   }, { passive: false });
-})();
+}
 
 // --- Lazy PGF thumbnail decoding ---------------------------------------------
 // Each `img.thumb` tile fetches /api/photos/:id/thumbnail (a raw PGF blob) when
 // it nears the viewport, decodes it off the main thread in a webpgf (wasm) Web
 // Worker, and paints the result — rotated per the X-Orientation header — into
 // the <img>. Missing thumbnails (404) or any failure fall back to the full-size
-// /file original.
-(function () {
+// /file original. Called after the grid is built (bootstrap at the bottom).
+function initThumbnails() {
   var thumbs = document.querySelectorAll('img.thumb');
   if (!thumbs.length) return;
 
@@ -478,6 +480,98 @@
     });
   }, { rootMargin: Math.round(vh) + 'px 0px ' + Math.round(vh * 2.5) + 'px 0px' });
   thumbs.forEach(function (img) { if (!img.__sched) io.observe(img); });
+}
+
+// --- Client-rendered photo grid ----------------------------------------------
+// The page ships a static shell with an empty `#photos` container (real albums
+// only). We fetch /api/photos for the current album + filters (read from the
+// URL) and build the day-grouped grid, then wire up thumbnails + the lightbox.
+// (A later step will re-run this on in-page album/filter navigation.)
+function buildTile(p) {
+  var full = '/api/photos/' + p.id + '/file';
+  // Reserve the tile's width from its aspect ratio (grid row height is 200px) so
+  // the layout doesn't reflow as thumbnails decode in.
+  var reserve = (p.width && p.height) ? ('width:' + Math.round(200 * p.width / p.height) + 'px') : '';
+  if (p.is_video) {
+    // Video tile: a ▶-badged button with an inner poster fed by the thumbnail
+    // pipeline (no data-full, so a missing thumbnail just leaves the ▶). The
+    // button (a direct grid child) carries the media URL for the lightbox.
+    var btn = document.createElement('button');
+    btn.className = 'vtile';
+    btn.dataset.src = full;
+    btn.title = p.name || '';
+    if (reserve) btn.style.cssText = reserve;
+    var poster = document.createElement('img');
+    poster.className = 'thumb';
+    poster.dataset.id = p.id;
+    poster.alt = '';
+    btn.appendChild(poster);
+    return btn;
+  }
+  // Photo tile: src-less <img>; the pipeline paints the decoded thumbnail, and
+  // `data-full` is the original (lightbox + decode fallback).
+  var img = document.createElement('img');
+  img.className = 'thumb';
+  img.dataset.id = p.id;
+  img.dataset.full = full;
+  img.alt = '';
+  img.title = p.name || '';
+  if (reserve) img.style.cssText = reserve;
+  return img;
+}
+
+function buildGrid(host) {
+  // album is the display path after `/photos` (decoded); filters come from the
+  // query string. e.g. /photos/Photos/Lego?min_rating=3 -> album=/Photos/Lego.
+  var album = decodeURIComponent(location.pathname.replace(/^\/photos/, ''));
+  var params = new URLSearchParams(location.search); // min_rating, …
+  params.set('album', album);
+  return fetch('/api/photos?' + params.toString())
+    .then(function (r) { return r.json(); })
+    .then(function (page) {
+      host.textContent = '';
+      var count = document.createElement('p');
+      count.className = 'count';
+      count.textContent = page.items.length + (page.incomplete ? '+' : '') + ' photo(s)';
+      host.appendChild(count);
+      if (!page.items.length) {
+        var none = document.createElement('p');
+        none.textContent = 'No photos in this album.';
+        host.appendChild(none);
+        return;
+      }
+      // Group into contiguous runs by day (the API already orders newest-first).
+      var curDay = null, grid = null;
+      page.items.forEach(function (p) {
+        var d = p.modification_date;
+        var day = (d && d.length >= 10) ? d.slice(0, 10) : 'Unknown date';
+        if (day !== curDay) {
+          curDay = day;
+          var h2 = document.createElement('h2');
+          h2.textContent = day;
+          host.appendChild(h2);
+          grid = document.createElement('div');
+          grid.className = 'grid';
+          host.appendChild(grid);
+        }
+        grid.appendChild(buildTile(p));
+      });
+    })
+    .catch(function () {
+      host.textContent = '';
+      var err = document.createElement('p');
+      err.textContent = 'Failed to load photos.';
+      host.appendChild(err);
+    });
+}
+
+// Bootstrap: build the grid (if this is a real album) before wiring the
+// thumbnail pipeline and lightbox, which both scan the now-populated DOM.
+(function () {
+  var host = document.getElementById('photos');
+  function start() { initThumbnails(); initLightbox(); }
+  if (host) buildGrid(host).then(start);
+  else start();
 })();
 
 // Register the service worker (makes the app installable as a PWA). Deferred to
