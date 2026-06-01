@@ -82,8 +82,11 @@ This is the seed of the browsing UI (planned to grow into Leptos later).
 - **Lightbox** (click a photo/video): full-page over a dimmed grid, requesting
   **fullscreen** (Fullscreen API; guarded/no-op where unsupported, e.g. iPhone Safari).
   The media is scaled to fill the viewport (up or down, preserving aspect). Videos
-  play, looping (tap toggles play/pause; mp4/webm only). Navigate via swipe, ←/→ keys,
-  or on-screen ‹ › chevrons (stop at ends); Home/End jump to first/last. Dismiss by
+  auto-play, looping, with **native `controls`** (play/pause/seek/volume; mp4/webm only);
+  Space toggles play/pause. ←/→ keys still navigate between items even on a video
+  (`preventDefault` stops a focused video from also seeking); Home/End jump to first/last. Navigate via swipe (not over the
+  video, so dragging its seek bar seeks), ←/→ keys, or on-screen ‹ › chevrons (stop at
+  ends). Dismiss by
   clicking the letterbox / Esc / the X / the device Back button — opening pushes a
   history entry so Back closes the lightbox instead of leaving the page, and exiting
   fullscreen closes it too. Perf: preloads the prev/next images, `decoding="async"`,

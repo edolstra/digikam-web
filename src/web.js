@@ -16,7 +16,6 @@
   var closing = false; // guards against issuing history.back() twice per open
 
   function isOpen() { return lb.classList.contains('open'); }
-  function curItem() { return idx >= 0 ? items[idx] : null; }
   function activeEl() { return vid.classList.contains('active') ? vid : img; }
 
   // Decode image neighbours ahead of time so tapping prev/next paints instantly
@@ -111,11 +110,6 @@
     if (n >= 0 && n < items.length) show(n, true);
   }
 
-  function togglePlay() {
-    if (vid.paused) { var p = vid.play(); if (p && p.catch) p.catch(function () {}); }
-    else vid.pause();
-  }
-
   tiles.forEach(function (el, i) {
     el.addEventListener('click', function () { open(i); });
   });
@@ -134,9 +128,9 @@
     return e.clientX >= x && e.clientX <= x + w && e.clientY >= y && e.clientY <= y + h;
   }
   lb.addEventListener('click', function (e) {
-    if (!onMedia(e)) { close(); return; }
-    var it = curItem();
-    if (it && it.video) togglePlay();
+    // Click outside the media (the letterbox) closes; clicks on the media itself
+    // are left to the native video controls (and do nothing for images).
+    if (!onMedia(e)) close();
   });
   lb.querySelector('.close').addEventListener('click', function (e) { e.stopPropagation(); close(); });
   prev.addEventListener('click', function (e) { e.stopPropagation(); go(-1); });
@@ -144,12 +138,19 @@
 
   document.addEventListener('keydown', function (e) {
     if (!isOpen()) return;
-    if (e.key === 'Escape') close();
-    else if (e.key === 'ArrowLeft') go(-1);
-    else if (e.key === 'ArrowRight') go(1);
-    else if (e.key === 'Home') show(0, true);
-    else if (e.key === 'End') show(items.length - 1, true);
-    else if (e.key === ' ') { var it = curItem(); if (it && it.video) { e.preventDefault(); togglePlay(); } }
+    if (e.key === 'Escape') { close(); return; }
+    // Arrows/Home/End navigate between items as usual. preventDefault keeps a
+    // focused <video> (it has controls) from also consuming them to seek.
+    if (e.key === 'ArrowLeft') { e.preventDefault(); go(-1); }
+    else if (e.key === 'ArrowRight') { e.preventDefault(); go(1); }
+    else if (e.key === 'Home') { e.preventDefault(); show(0, true); }
+    else if (e.key === 'End') { e.preventDefault(); show(items.length - 1, true); }
+    else if (e.key === ' ' && activeEl() === vid) {
+      // Toggle the video (it isn't focused, so the native space-to-play won't fire).
+      e.preventDefault();
+      if (vid.paused) { var p = vid.play(); if (p && p.catch) p.catch(function () {}); }
+      else vid.pause();
+    }
   });
 
   // Alt+Up navigates to the parent album (the second-to-last breadcrumb link,
@@ -164,12 +165,15 @@
     }
   });
 
-  // Horizontal swipe: left -> next, right -> prev.
-  var sx = 0, sy = 0;
+  // Horizontal swipe: left -> next, right -> prev. Skip drags that begin on the
+  // video so dragging its seek bar (also a horizontal gesture) seeks, not navigates.
+  var sx = 0, sy = 0, fromVideo = false;
   lb.addEventListener('touchstart', function (e) {
     var t = e.changedTouches[0]; sx = t.clientX; sy = t.clientY;
+    fromVideo = (e.target === vid);
   }, { passive: true });
   lb.addEventListener('touchend', function (e) {
+    if (fromVideo) return;
     var t = e.changedTouches[0];
     var dx = t.clientX - sx, dy = t.clientY - sy;
     if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy)) go(dx < 0 ? 1 : -1);
