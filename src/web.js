@@ -120,7 +120,16 @@
     // a fullscreen exit so the scroll applies to the restored page layout.
     var tile = idx >= 0 ? tiles[idx] : null;
     idx = -1;
-    function reveal() { if (tile) tile.scrollIntoView({ block: 'nearest' }); }
+    function reveal() {
+      if (!tile) return;
+      // Reserve room for the sticky navbar (its actual height) plus a small gap,
+      // so the tile lands fully visible — not tucked under the navbar or flush
+      // against the bottom edge. scrollIntoView honors scroll-margin.
+      var nav = document.querySelector('.navbar');
+      tile.style.scrollMarginTop = ((nav ? nav.offsetHeight : 0) + 96) + 'px';
+      tile.style.scrollMarginBottom = '96px';
+      tile.scrollIntoView({ block: 'nearest' });
+    }
     if (document.fullscreenElement) {
       // X / letterbox / Back: we trigger the exit, then scroll once it's done.
       document.exitFullscreen().then(reveal, reveal);
