@@ -238,7 +238,12 @@
     var t = e.changedTouches[0];
     var dx = t.clientX - sx, dy = t.clientY - sy;
     var adx = Math.abs(dx), ady = Math.abs(dy);
-    if (ady > 50 && ady > adx) { if (dy < 0) goRandom(); return; }  // swipe up -> random
+    if (ady > 50 && ady > adx) {
+      // Swipe up -> random, unless it starts in the bottom ~100px, where it
+      // collides with the Android "swipe up from the bottom" system gesture.
+      if (dy < 0 && sy < window.innerHeight - 100) goRandom();
+      return;
+    }
     if (adx > 50 && adx > ady) { go(dx < 0 ? 1 : -1); return; }     // swipe left/right
     // Tap: reveal the controls, then pause a video / close on the letterbox.
     // Handled here (not via click) because the native video controls swallow the
