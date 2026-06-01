@@ -89,6 +89,24 @@ This is the seed of the browsing UI (planned to grow into Leptos later).
   fullscreen closes it too. Perf: preloads the prev/next images, `decoding="async"`,
   and `touch-action: manipulation` to cut mobile tap latency.
 
+#### Installable PWA
+The app is a Progressive Web App, so it can be "installed" (Android home screen,
+desktop, etc.). Embedded + served like the other static assets:
+`GET /manifest.webmanifest` (the manifest: `digiKam Browse`, `display: standalone`,
+`start_url: /photos`, theme/background `#1a1a1a`/`#111`), `GET /icon-192.png` &
+`GET /icon-512.png` (rasterized from digiKam's `digikam_oxygen.svg`), and
+`GET /sw.js` (the service worker). The `<head>` carries `<link rel="manifest">`,
+`<meta name="theme-color">`, and an `apple-touch-icon`; [web.js](src/web.js) registers the
+service worker on `load`. The SW is **network-first** with a cached app-shell fallback,
+and **passes `/api/...` through untouched** so the thumbnail-loading path is unaffected.
+The manifest and `sw.js` are served `no-cache` (revalidated via content-hash `ETag`) so
+updates propagate; icons are `immutable`.
+
+> **Installation needs a secure context.** Service workers only register over **HTTPS**
+> (or `localhost`). Reaching the server from a phone over plain `http://<lan-ip>:8080`
+> is **not** a secure context, so the SW won't register and the browser won't offer
+> "Install". Put it behind TLS (a reverse proxy / `tailscale serve` / a tunnel) to install.
+
 ### Query semantics
 - **`album=/Root/rel`** — the first path segment is the `AlbumRoots.label`; the
   remainder is a `relativePath`. By default it matches **only that album**
@@ -213,15 +231,18 @@ src/
   handlers.rs  axum JSON API handlers, run_blocking DB helper
   web.rs       server-rendered HTML frontend pages (maud)    (+ unit tests)
   web.css      frontend stylesheet, inlined via include_str!  (STYLE)
-  web.js       lightbox behavior, inlined via include_str!    (SCRIPT)
+  web.js       lightbox + thumbnails + SW registration, inlined via include_str! (SCRIPT)
   favicon.ico  Digikam's site icon, embedded via include_bytes!, served at /favicon.ico
+  manifest.webmanifest  PWA manifest (include_str!), served at /manifest.webmanifest
+  sw.js        PWA service worker (include_str!), served at /sw.js
+  icon-192.png icon-512.png  PWA icons (include_bytes!), served at /icon-*.png
   error.rs     AppError -> JSON HTTP responses
 ```
 
-> `web.css`/`web.js` are pulled in with `include_str!` and inlined into each page;
-> `favicon.ico` with `include_bytes!`. The flake's `src` filter keeps `.css`/`.js`/`.ico`
-> alongside the Cargo sources (plain `cleanCargoSource` would drop them and the build
-> would fail).
+> `web.css`/`web.js`/`manifest.webmanifest` are pulled in with `include_str!` and the
+> binary assets (`favicon.ico`, `icon-*.png`) with `include_bytes!`. The flake's `src`
+> filter keeps `.css`/`.js`/`.ico`/`.png`/`.webmanifest` alongside the Cargo sources
+> (plain `cleanCargoSource` would drop them and the build would fail).
 
 ## Future frontend
 Planned as full-stack Rust (**Leptos** recommended). The JSON API + `/file` endpoint

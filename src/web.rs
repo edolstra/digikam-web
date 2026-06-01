@@ -24,6 +24,13 @@ const WEBPGF_WASM: &[u8] = include_bytes!(concat!(env!("WEBPGF_PATH"), "/webpgf.
 /// `/favicon.ico`. Its `ETag` is a content hash so it busts the cache if replaced.
 const FAVICON: &[u8] = include_bytes!("favicon.ico");
 
+/// PWA assets, embedded and served so the app can be "installed" (Android etc.):
+/// the web app manifest, the service worker, and the icons it references.
+const MANIFEST: &str = include_str!("manifest.webmanifest");
+const SW_JS: &str = include_str!("sw.js");
+const ICON_192: &[u8] = include_bytes!("icon-192.png");
+const ICON_512: &[u8] = include_bytes!("icon-512.png");
+
 /// `GET /webpgf.js` — the Emscripten loader for the PGF decoder.
 pub async fn webpgf_js(headers: HeaderMap) -> Response {
     static_asset(
@@ -31,6 +38,7 @@ pub async fn webpgf_js(headers: HeaderMap) -> Response {
         WEBPGF_JS,
         "text/javascript; charset=utf-8",
         &format!("{}-js", webpgf_build_id()),
+        IMMUTABLE_CACHE_CONTROL,
     )
 }
 
@@ -42,6 +50,7 @@ pub async fn webpgf_wasm(headers: HeaderMap) -> Response {
         WEBPGF_WASM,
         "application/wasm",
         &format!("{}-wasm", webpgf_build_id()),
+        IMMUTABLE_CACHE_CONTROL,
     )
 }
 
@@ -52,6 +61,53 @@ pub async fn favicon(headers: HeaderMap) -> Response {
         FAVICON,
         "image/x-icon",
         &format!("favicon-{:x}", fnv1a(FAVICON)),
+        IMMUTABLE_CACHE_CONTROL,
+    )
+}
+
+/// `GET /manifest.webmanifest` — the PWA manifest. `no-cache` (revalidated via
+/// its content-hash `ETag`) so manifest tweaks are picked up promptly.
+pub async fn manifest(headers: HeaderMap) -> Response {
+    static_asset(
+        &headers,
+        MANIFEST.as_bytes(),
+        "application/manifest+json",
+        &format!("manifest-{:x}", fnv1a(MANIFEST.as_bytes())),
+        "no-cache",
+    )
+}
+
+/// `GET /sw.js` — the service worker. `no-cache` so the browser's update check
+/// always revalidates the script (it also byte-compares on its own).
+pub async fn service_worker(headers: HeaderMap) -> Response {
+    static_asset(
+        &headers,
+        SW_JS.as_bytes(),
+        "text/javascript; charset=utf-8",
+        &format!("sw-{:x}", fnv1a(SW_JS.as_bytes())),
+        "no-cache",
+    )
+}
+
+/// `GET /icon-192.png` — the PWA icon (192×192).
+pub async fn icon_192(headers: HeaderMap) -> Response {
+    static_asset(
+        &headers,
+        ICON_192,
+        "image/png",
+        &format!("icon192-{:x}", fnv1a(ICON_192)),
+        IMMUTABLE_CACHE_CONTROL,
+    )
+}
+
+/// `GET /icon-512.png` — the PWA icon (512×512).
+pub async fn icon_512(headers: HeaderMap) -> Response {
+    static_asset(
+        &headers,
+        ICON_512,
+        "image/png",
+        &format!("icon512-{:x}", fnv1a(ICON_512)),
+        IMMUTABLE_CACHE_CONTROL,
     )
 }
 
@@ -67,18 +123,18 @@ const fn fnv1a(bytes: &[u8]) -> u64 {
     hash
 }
 
-/// Serve an embedded, immutable static asset with a strong content-addressed
-/// `ETag` (`etag_id`) honoring `If-None-Match` → `304`, plus a long
-/// `Cache-Control`. The id changes whenever the bytes change, so the ETag busts
-/// the cache exactly then.
+/// Serve an embedded static asset with a strong content-addressed `ETag`
+/// (`etag_id`) honoring `If-None-Match` → `304`, plus the given `Cache-Control`.
+/// The id changes whenever the bytes change, so the ETag busts the cache then.
 fn static_asset(
     headers: &HeaderMap,
     bytes: &'static [u8],
     content_type: &'static str,
     etag_id: &str,
+    cache_control: &'static str,
 ) -> Response {
     let etag = HeaderValue::from_str(&format!("\"{etag_id}\""));
-    let cache_control = HeaderValue::from_static(IMMUTABLE_CACHE_CONTROL);
+    let cache_control = HeaderValue::from_static(cache_control);
     if let Ok(etag) = &etag {
         if if_none_match_matches(headers, etag) {
             let mut not_modified = Response::new(Body::empty());
@@ -235,6 +291,13 @@ fn page_html(title: &str, crumb: Markup, controls: Markup, body: Markup) -> Mark
                 meta charset="utf-8";
                 meta name="viewport" content="width=device-width, initial-scale=1";
                 link rel="icon" href="/favicon.ico" type="image/x-icon";
+                // PWA: installable web app (manifest + icons; service worker
+                // registered from web.js). theme-color tints the system UI.
+                link rel="manifest" href="/manifest.webmanifest";
+                meta name="theme-color" content="#1a1a1a";
+                link rel="apple-touch-icon" href="/icon-192.png";
+                meta name="apple-mobile-web-app-capable" content="yes";
+                meta name="apple-mobile-web-app-title" content="digiKam";
                 title { (title) }
                 style { (PreEscaped(STYLE)) }
             }

@@ -32,6 +32,8 @@
             (pkgs.lib.hasSuffix ".css" path)
             || (pkgs.lib.hasSuffix ".js" path)
             || (pkgs.lib.hasSuffix ".ico" path)
+            || (pkgs.lib.hasSuffix ".png" path)
+            || (pkgs.lib.hasSuffix ".webmanifest" path)
             || (craneLib.filterCargoSources path type);
         };
 

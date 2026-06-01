@@ -75,6 +75,10 @@ async fn main() -> Result<()> {
         .route("/webpgf.js", get(web::webpgf_js))
         .route("/webpgf.wasm", get(web::webpgf_wasm))
         .route("/favicon.ico", get(web::favicon))
+        .route("/manifest.webmanifest", get(web::manifest))
+        .route("/sw.js", get(web::service_worker))
+        .route("/icon-192.png", get(web::icon_192))
+        .route("/icon-512.png", get(web::icon_512))
         // Log each request (method + URI) and its response (status + latency) at
         // INFO; the span carries the URI so it shows on the response line too.
         .layer(

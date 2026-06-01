@@ -376,3 +376,12 @@
   }, { rootMargin: Math.round(vh) + 'px 0px ' + Math.round(vh * 2.5) + 'px 0px' });
   thumbs.forEach(function (img) { if (!img.__sched) io.observe(img); });
 })();
+
+// Register the service worker (makes the app installable as a PWA). Deferred to
+// `load` so it doesn't compete with the initial thumbnail fetches. Needs a secure
+// context — HTTPS, or localhost during development.
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', function () {
+    navigator.serviceWorker.register('/sw.js').catch(function () {});
+  });
+}
