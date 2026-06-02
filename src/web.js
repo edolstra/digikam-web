@@ -245,6 +245,9 @@ function initLightbox() {
   var suppressClick = false; // swallow the synthetic click a touch tap produces
   var infoEl = document.getElementById('lb-info');
   var infoOpen = false; // image-info panel visible (then controls don't auto-hide)
+  var slideBtn = lb.querySelector('.slideshow-btn');
+  var slideshowOn = false; // auto-advancing to a random item
+  var slideTimer = 0;      // pending image advance (videos advance on 'ended')
 
   function isOpen() { return lb.classList.contains('open'); }
   function activeEl() { return vid.classList.contains('active') ? vid : img; }
@@ -335,6 +338,27 @@ function initLightbox() {
   }
   function toggleInfo() { setInfo(!infoOpen); }
 
+  // Slideshow: auto-advance to a random item. Images advance after 5s; a video
+  // plays in full and advances when it ends (the 'ended' listener below) — so its
+  // loop is turned off while a slideshow runs.
+  function clearSlide() { clearTimeout(slideTimer); slideTimer = 0; }
+  function scheduleSlide() {
+    clearSlide();
+    if (!slideshowOn) return;
+    var it = items[idx];
+    if (it && !it.video) slideTimer = setTimeout(goRandom, 5000);
+  }
+  function setSlideshow(on) {
+    slideshowOn = on;
+    lb.classList.toggle('slideshow', on);
+    slideBtn.textContent = on ? '⏸' : '▶';
+    slideBtn.title = (on ? 'Stop slideshow' : 'Slideshow') + ' (s)';
+    if (activeEl() === vid) vid.loop = !on;
+    scheduleSlide();
+  }
+  function toggleSlideshow() { setSlideshow(!slideshowOn); }
+  vid.addEventListener('ended', function () { if (slideshowOn) goRandom(); });
+
   // Jump from the info panel's album link to that album. The lightbox pushed a
   // URL-less history entry on open; repurpose it (replaceState) as the target so
   // Back still returns to where we were, then close the lightbox and re-render.
@@ -378,10 +402,17 @@ function initLightbox() {
     vid.pause(); // stop any previously-playing video before switching
     if (it.video) {
       vid.src = it.src;
+      vid.loop = !slideshowOn; // in a slideshow, play once then advance on 'ended'
       vid.classList.add('active');
       img.classList.remove('active');
       img.removeAttribute('src');
-      if (play) { var p = vid.play(); if (p && p.catch) p.catch(function () {}); }
+      if (play) {
+        var p = vid.play();
+        if (p && p.catch) p.catch(function () {
+          // Couldn't play (e.g. an unsupported codec) — don't stall the slideshow.
+          if (slideshowOn) { clearSlide(); slideTimer = setTimeout(goRandom, 1500); }
+        });
+      }
     } else {
       img.src = it.src;
       img.alt = it.alt;
@@ -395,6 +426,7 @@ function initLightbox() {
     lb.classList.add('open');
     document.body.classList.add('modal-open');
     if (infoOpen) renderInfo(); // keep the panel in sync while navigating
+    scheduleSlide();            // (re)arm the slideshow advance for this item
     preload(i + 1);
     preload(i - 1);
   }
@@ -430,6 +462,12 @@ function initLightbox() {
   function dismiss() {
     closing = false;
     clearTimeout(idleTimer);
+    // Stop any running slideshow and restore the default video looping.
+    clearSlide();
+    slideshowOn = false;
+    lb.classList.remove('slideshow');
+    slideBtn.textContent = '▶';
+    vid.loop = true;
     lb.classList.remove('idle');
     lb.classList.remove('open');
     document.body.classList.remove('modal-open');
@@ -527,6 +565,11 @@ function initLightbox() {
     if (suppressClick) { suppressClick = false; return; }
     toggleInfo();
   });
+  slideBtn.addEventListener('click', function (e) {
+    e.stopPropagation();
+    if (suppressClick) { suppressClick = false; return; }
+    toggleSlideshow();
+  });
   prev.addEventListener('click', function (e) { e.stopPropagation(); go(-1); });
   next.addEventListener('click', function (e) { e.stopPropagation(); go(1); });
 
@@ -550,6 +593,7 @@ function initLightbox() {
       vid.muted = !vid.muted;
     }
     else if (e.key === 'i' || e.key === 'I') { e.preventDefault(); toggleInfo(); }
+    else if (e.key === 's' || e.key === 'S') { e.preventDefault(); toggleSlideshow(); }
   });
 
   // Swipe (over the whole lightbox, including videos): up -> random item,
@@ -575,6 +619,7 @@ function initLightbox() {
     // A tap on the info button toggles the panel; a tap on its album link jumps to
     // that album; a tap on the panel itself just keeps it (none count as an
     // off-media letterbox close). The synthetic click is swallowed below.
+    if (e.target.closest('.slideshow-btn')) { toggleSlideshow(); suppressClick = true; return; }
     if (e.target.closest('.info')) { toggleInfo(); suppressClick = true; return; }
     if (e.target.closest('#lb-info')) {
       var link = e.target.closest('a.album-link');

@@ -93,6 +93,9 @@ body.modal-open { overflow: hidden; }
 /* "i" info toggle, top-left corner. */
 .lightbox .info { position: absolute; top: 0.5rem; left: 0.75rem; font-size: 1.9rem; line-height: 1; }
 .lightbox.info-open .info { opacity: 1; color: #f5c518; }
+/* Slideshow toggle, bottom-left (▶ start / ⏸ stop; gold while running). */
+.lightbox .slideshow-btn { position: absolute; bottom: 0.5rem; left: 0.75rem; font-size: 1.9rem; line-height: 1; }
+.lightbox.slideshow .slideshow-btn { opacity: 1; color: #f5c518; }
 .lightbox .nav { position: absolute; top: 50%; transform: translateY(-50%);
                  font-size: 3rem; padding: 0 1rem; }
 .lightbox .prev { left: 0; }
@@ -123,8 +126,8 @@ body.modal-open { overflow: hidden; }
 @media (hover: hover) { #lb-info a:hover { text-decoration: underline; } }
 /* Auto-hide the controls after inactivity (web.js toggles `.idle`); they fade
    back on any pointer move / touch / key. */
-.lightbox .close, .lightbox .info, .lightbox .nav { transition: opacity 0.25s ease; }
+.lightbox .close, .lightbox .info, .lightbox .slideshow-btn, .lightbox .nav { transition: opacity 0.25s ease; }
 /* Hidden controls don't capture taps — a tap there reveals them (and pauses a
    video / closes on the letterbox) rather than navigating/closing via the button. */
-.lightbox.idle .close, .lightbox.idle .info, .lightbox.idle .nav { opacity: 0; pointer-events: none; }
+.lightbox.idle .close, .lightbox.idle .info, .lightbox.idle .slideshow-btn, .lightbox.idle .nav { opacity: 0; pointer-events: none; }
 .lightbox.idle { cursor: none; }

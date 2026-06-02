@@ -148,7 +148,11 @@ reused across navigations; only the DOM is rebuilt (`render()` per navigation). 
   modification date, MIME — built client-side from the tile's `PhotoSummary` (stashed on the
   grid tile as `_photo`, no extra fetch), updating as you navigate. The album link
   `replaceState`s the lightbox's URL-less history entry as the target album, closes the
-  lightbox, and re-renders in place (so Back still returns to the originating album). **While the info panel is open the controls stay pinned**
+  lightbox, and re-renders in place (so Back still returns to the originating album).
+  A **slideshow** toggle — the `s` key or a ▶/⏸ button (bottom-left) — auto-advances to a
+  **random** item (like `r`): an image after **5s**, a video after it **plays in full** (its
+  `loop` is turned off so `ended` fires; an unplayable one advances after 1.5s). Dismissing the
+  lightbox stops it. **While the info panel is open the controls stay pinned**
   (no auto-hide). Perf: preloads the
   prev/next images, `decoding="async"`, and `touch-action: manipulation` to cut mobile tap latency.
 
