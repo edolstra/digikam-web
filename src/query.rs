@@ -52,6 +52,44 @@ impl<'de> Deserialize<'de> for Rating {
     }
 }
 
+/// The aspect-ratio filter. `Portrait` is `height >= width`, `Landscape` is
+/// `width >= height`, so a square matches both. Modeled as an enum (rather than
+/// two booleans) so it can grow to exact ratios (e.g. 16:9) later. The default,
+/// `All`, applies no constraint.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Aspect {
+    #[default]
+    All,
+    Portrait,
+    Landscape,
+}
+
+impl Aspect {
+    /// The SQL `AND` fragment restricting `ImageInformation` dimensions. Items
+    /// with a NULL width/height make the comparison NULL → excluded from
+    /// portrait/landscape, but kept under `All` (no clause).
+    pub fn sql_filter(self) -> &'static str {
+        match self {
+            Aspect::All => "",
+            Aspect::Portrait => " AND ii.height >= ii.width",
+            Aspect::Landscape => " AND ii.width >= ii.height",
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for Aspect {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        match String::deserialize(d)?.as_str() {
+            "all" => Ok(Aspect::All),
+            "portrait" => Ok(Aspect::Portrait),
+            "landscape" => Ok(Aspect::Landscape),
+            _ => Err(de::Error::custom(
+                "aspect must be all, portrait, or landscape",
+            )),
+        }
+    }
+}
+
 /// Parsed query parameters for `GET /photos`.
 #[derive(Debug)]
 pub struct PhotoQuery {
@@ -72,6 +110,8 @@ pub struct PhotoQuery {
     /// images when cleared (see [`media_filter_sql`]).
     pub include_images: bool,
     pub include_video: bool,
+    /// Aspect-ratio filter; the default `All` applies no constraint.
+    pub aspect: Aspect,
     pub limit: u64,
     pub offset: u64,
 }
@@ -87,6 +127,7 @@ impl Default for PhotoQuery {
             min_rating: Rating::default(),
             include_images: true,
             include_video: true,
+            aspect: Aspect::All,
             limit: 0,
             offset: 0,
         }
@@ -105,6 +146,8 @@ pub struct Filters {
     /// Media-type filter; both `true` by default (see [`PhotoQuery`]).
     pub include_images: bool,
     pub include_video: bool,
+    /// Aspect-ratio filter; the default `All` applies no constraint.
+    pub aspect: Aspect,
 }
 
 impl Default for Filters {
@@ -113,6 +156,7 @@ impl Default for Filters {
             min_rating: Rating::default(),
             include_images: true,
             include_video: true,
+            aspect: Aspect::All,
         }
     }
 }
@@ -223,8 +267,9 @@ fn build_filter(conn: &Connection, q: &PhotoQuery) -> AppResult<(String, Vec<Val
         params.push(Value::Integer(q.min_rating.get()));
     }
 
-    // Media-type filter (a constant fragment, no bound params).
+    // Media-type and aspect-ratio filters (constant fragments, no bound params).
     sql.push_str(media_filter_sql(q.include_images, q.include_video));
+    sql.push_str(q.aspect.sql_filter());
 
     Ok((sql, params))
 }
@@ -347,9 +392,10 @@ pub fn list_subalbums(
 ) -> AppResult<Vec<SubAlbum>> {
     // 0 makes the rating clause `max(...,0) >= 0` always true (i.e. no filter).
     let min = filters.min_rating.get();
-    // Constant media-type fragment, appended to each `matched` WHERE so the
-    // sub-album counts, covers, and visibility all respect the filter.
+    // Constant media-type + aspect fragments, appended to each `matched` WHERE so
+    // the sub-album counts, covers, and visibility all respect the filters.
     let media = media_filter_sql(filters.include_images, filters.include_video);
+    let aspect = filters.aspect.sql_filter();
     // Display path of `album`, used to build each child's `path` ("" at the root).
     let parent = if album.is_empty() {
         String::new()
@@ -368,7 +414,7 @@ pub fn list_subalbums(
                  FROM Images i JOIN Albums a ON a.id = i.album \
                  JOIN AlbumRoots r ON r.id = a.albumRoot \
                  LEFT JOIN ImageInformation ii ON ii.imageid = i.id \
-                 WHERE i.status = 1 AND max(ifnull(ii.rating, 0), 0) >= :min{media}"
+                 WHERE i.status = 1 AND max(ifnull(ii.rating, 0), 0) >= :min{media}{aspect}"
             ),
             vec![(":min", Value::Integer(min))],
         ),
@@ -399,7 +445,7 @@ pub fn list_subalbums(
                        WHERE i.status = 1 AND a.albumRoot = :root \
                          AND a.relativePath LIKE :like ESCAPE '\\' \
                          AND length(a.relativePath) > length(:prefix) \
-                         AND max(ifnull(ii.rating, 0), 0) >= :min{media} \
+                         AND max(ifnull(ii.rating, 0), 0) >= :min{media}{aspect} \
                      )"
                 ),
                 vec![
@@ -504,5 +550,13 @@ mod tests {
         assert_eq!(media_filter_sql(true, false), " AND i.category != 2"); // images only
         assert_eq!(media_filter_sql(false, true), " AND i.category = 2"); // video only
         assert_eq!(media_filter_sql(false, false), " AND 1 = 0"); // neither
+    }
+
+    #[test]
+    fn aspect_filter_fragments() {
+        assert_eq!(Aspect::All.sql_filter(), "");
+        // Inclusive >= on both sides, so a square matches portrait and landscape.
+        assert_eq!(Aspect::Portrait.sql_filter(), " AND ii.height >= ii.width");
+        assert_eq!(Aspect::Landscape.sql_filter(), " AND ii.width >= ii.height");
     }
 }

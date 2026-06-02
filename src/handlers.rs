@@ -13,7 +13,7 @@ use tower_http::services::ServeFile;
 use crate::db::{album_display_path, image_abs_path, AppState, PooledConn};
 use crate::error::{AppError, AppResult};
 use crate::models::{AlbumNode, Page, PhotoDetail, PhotoSummary, SubAlbum, TagNode};
-use crate::query::{self, Filters, PhotoQuery, Rating, DEFAULT_LIMIT, MAX_LIMIT};
+use crate::query::{self, Aspect, Filters, PhotoQuery, Rating, DEFAULT_LIMIT, MAX_LIMIT};
 
 /// `GET /health`
 pub async fn health() -> impl IntoResponse {
@@ -39,6 +39,9 @@ pub struct PhotoParams {
     images: bool,
     #[serde(default = "yes")]
     video: bool,
+    /// Aspect-ratio filter (`all` (default) / `portrait` / `landscape`).
+    #[serde(default)]
+    aspect: Aspect,
     limit: Option<u64>,
     offset: Option<u64>,
 }
@@ -67,6 +70,7 @@ pub async fn list_photos(
         min_rating: params.min_rating,
         include_images: params.images,
         include_video: params.video,
+        aspect: params.aspect,
         limit: params.limit.unwrap_or(DEFAULT_LIMIT).clamp(1, MAX_LIMIT),
         offset: params.offset.unwrap_or(0),
     };
@@ -343,6 +347,9 @@ pub struct SubalbumParams {
     images: bool,
     #[serde(default = "yes")]
     video: bool,
+    /// Aspect-ratio filter (`all` (default) / `portrait` / `landscape`).
+    #[serde(default)]
+    aspect: Aspect,
 }
 
 /// `GET /subalbums?album=/Root/rel&min_rating=&images=&video=` — direct sub-albums
@@ -360,6 +367,7 @@ pub async fn list_subalbums(
         min_rating: params.min_rating,
         include_images: params.images,
         include_video: params.video,
+        aspect: params.aspect,
     };
 
     let subalbums = run_blocking(&state, move |conn, state| {

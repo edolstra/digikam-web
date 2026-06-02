@@ -13,8 +13,9 @@
 // navigation. `album` is the decoded display segments (e.g. ["Photos","Lego"];
 // [] is the virtual root); `minRating` is 0 (no filter) or 1..=5; the media-type
 // filter is two booleans, both true by default (include images / include video);
-// `recursive` extends the grid to all sub-albums' items.
-var state = { album: [], minRating: 0, includeImages: true, includeVideo: true, recursive: false };
+// `recursive` extends the grid to all sub-albums' items; `aspect` is the
+// aspect-ratio filter ('all' | 'portrait' | 'landscape').
+var state = { album: [], minRating: 0, includeImages: true, includeVideo: true, recursive: false, aspect: 'all' };
 // Bumped on every render(); a fetch that resolves after a newer navigation
 // compares against it and bails before touching the DOM (see render/buildGrid).
 var renderToken = 0;
@@ -31,6 +32,8 @@ function readUrl() {
   state.includeImages = q.get('images') !== 'false';
   state.includeVideo = q.get('video') !== 'false';
   state.recursive = q.get('recursive') === 'true';
+  var a = q.get('aspect');
+  state.aspect = (a === 'portrait' || a === 'landscape') ? a : 'all';
 }
 
 // The current filters as a plain object, optionally with some keys overridden —
@@ -40,7 +43,8 @@ function filters(over) {
     minRating: state.minRating,
     includeImages: state.includeImages,
     includeVideo: state.includeVideo,
-    recursive: state.recursive
+    recursive: state.recursive,
+    aspect: state.aspect
   };
   if (over) for (var k in over) f[k] = over[k];
   return f;
@@ -56,6 +60,7 @@ function photosUrl(segments, f) {
   if (!f.includeImages) qs.set('images', 'false');
   if (!f.includeVideo) qs.set('video', 'false');
   if (f.recursive) qs.set('recursive', 'true');
+  if (f.aspect && f.aspect !== 'all') qs.set('aspect', f.aspect);
   var q = qs.toString();
   return '/photos' + (p.length ? '/' + p.join('/') : '') + (q ? '?' + q : '');
 }
@@ -101,6 +106,32 @@ function renderMedia(host) {
   host.replaceChildren(frag);
 }
 
+// The aspect-ratio filter as a 3-state radio (segmented control), same style as
+// the media one: "▯ ▭" (all), "▯" (portrait), "▭" (landscape). The option whose
+// value matches state.aspect is the active inert <span>; the others are links.
+var ASPECT_OPTIONS = [
+  { label: '▯ ▭', value: 'all', title: 'All aspect ratios' },
+  { label: '▯', value: 'portrait', title: 'Portrait (height ≥ width)' },
+  { label: '▭', value: 'landscape', title: 'Landscape (width ≥ height)' }
+];
+function renderAspect(host) {
+  var frag = document.createDocumentFragment();
+  ASPECT_OPTIONS.forEach(function (o) {
+    var el;
+    if (state.aspect === o.value) {
+      el = document.createElement('span');
+      el.className = 'on';
+    } else {
+      el = document.createElement('a');
+      el.href = photosUrl(state.album, filters({ aspect: o.value }));
+    }
+    el.textContent = o.label;
+    el.title = o.title;
+    frag.appendChild(el);
+  });
+  host.replaceChildren(frag);
+}
+
 // The shared query for both API fetches: the album display path (empty for the
 // root) plus the active filters.
 function apiParams() {
@@ -112,6 +143,7 @@ function apiParams() {
   // Sent to /api/photos (extends the grid to all sub-albums); /api/subalbums
   // ignores it (its counts are already recursive).
   if (state.recursive) p.set('recursive', 'true');
+  if (state.aspect !== 'all') p.set('aspect', state.aspect);
   return p;
 }
 
@@ -151,6 +183,9 @@ function renderNavbar() {
 
   // Media-type filter: a 3-state radio (all media / images only / videos only).
   renderMedia(document.querySelector('.media'));
+
+  // Aspect-ratio filter: a 3-state radio (all / portrait / landscape).
+  renderAspect(document.querySelector('.aspect'));
 
   var rating = document.createDocumentFragment();
   for (var k = 1; k <= 5; k++) {

@@ -190,6 +190,7 @@ fn page_html(title: &str, body: Markup) -> Markup {
                     span.crumb {}
                     span.recursive {}
                     span.media {}
+                    span.aspect {}
                     span.rating {}
                 }
                 (body)

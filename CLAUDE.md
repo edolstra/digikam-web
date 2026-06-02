@@ -42,12 +42,12 @@ All endpoints are served under the `/api` prefix.
 
 | Route | Notes |
 |-------|-------|
-| `GET /api/photos?album=&tags=&recursive=&min_rating=&images=&video=&limit=&offset=` | Filtered, paginated list. `Page<PhotoSummary>` = `{incomplete, limit, offset, items}` (`incomplete` = more rows exist beyond this page — one extra row is fetched to detect it). `PhotoSummary.is_video` is true for videos (Digikam `category=2`). `images`/`video` are the media-type filter (both default `true`; `=false` excludes that type). An empty/absent `album` (non-recursive) returns `items: []`. |
+| `GET /api/photos?album=&tags=&recursive=&min_rating=&images=&video=&aspect=&limit=&offset=` | Filtered, paginated list. `Page<PhotoSummary>` = `{incomplete, limit, offset, items}` (`incomplete` = more rows exist beyond this page — one extra row is fetched to detect it). `PhotoSummary.is_video` is true for videos (Digikam `category=2`). `images`/`video` are the media-type filter (both default `true`; `=false` excludes that type). `aspect` is `all` (default) / `portrait` (`height>=width`) / `landscape` (`width>=height`); squares match both. An empty/absent `album` (non-recursive) returns `items: []`. |
 | `GET /api/photos/:id` | `PhotoDetail` (summary + tag names + lat/long). |
 | `GET /api/photos/:id/file` | Original bytes, range-aware (via `tower_http::services::ServeFile`). Sends a strong `ETag` from the image's `uniqueHash`; a matching `If-None-Match` (or `*`) returns `304`. |
 | `GET /api/photos/:id/thumbnail` | Digikam's stored thumbnail as-is: the **raw PGF blob** from `thumbnails-digikam.db` (looked up by `uniqueHash`+`fileSize`), for the client to decode in wasm (see [nix/webpgf.nix](nix/webpgf.nix)). Strong `ETag` (+ `If-None-Match`→`304`) and a 1-year `immutable` `Cache-Control`; `X-Orientation` header carries Digikam's `orientationHint` (EXIF orientation) for client-side rotation. `404` when the thumbnails DB is absent / the image has no cached thumbnail → client falls back to `/file`. |
 | `GET /api/albums` | Flat list of all albums (`{id, path, root}`). |
-| `GET /api/subalbums?album=/Root/rel&min_rating=&images=&video=` | Direct sub-albums of an album as `[{name, path, photo_count, cover: {id, name} \| null}]`, sorted by most recent photo (newest first). An absent/empty `album` lists the album roots. Cover = newest item (image **or** video — videos have stored thumbnails the client renders) in the sub-album's whole subtree; `Cover.is_video` flags a video cover (the client then omits its `data-full`). `photo_count` is the recursive count incl. videos. `min_rating` (0..=5) and the `images`/`video` media-type filter constrain the cover, count, and which sub-albums appear alike. One query; albums with no matching photos anywhere are omitted. |
+| `GET /api/subalbums?album=/Root/rel&min_rating=&images=&video=&aspect=` | Direct sub-albums of an album as `[{name, path, photo_count, cover: {id, name} \| null}]`, sorted by most recent photo (newest first). An absent/empty `album` lists the album roots. Cover = newest item (image **or** video — videos have stored thumbnails the client renders) in the sub-album's whole subtree; `Cover.is_video` flags a video cover (the client then omits its `data-full`). `photo_count` is the recursive count incl. videos. `min_rating` (0..=5), the `images`/`video` media-type filter, and the `aspect` filter (`all`/`portrait`/`landscape`) constrain the cover, count, and which sub-albums appear alike. One query; albums with no matching photos anywhere are omitted. |
 | `GET /api/tags` | Tag **tree** (`{id, name, children}`), internal tags excluded. |
 | `GET /api/health` | Liveness. |
 
@@ -92,9 +92,13 @@ reused across navigations; only the DOM is rebuilt (`render()` per navigation). 
   state is highlighted and inert (a `<span>`); the other two are links that switch to it.
   Underlying state is still two booleans `{includeImages, includeVideo}` ⇄ URL
   `images=/video=false` (the radio just maps the three valid pairs to three options).
+- **Aspect-ratio filter** (navbar, right of the media radio, same segmented style): a 3-state
+  radio — `▯ ▭` (all), `▯` (portrait), `▭` (landscape). Single enum `state.aspect` ⇄ URL
+  `aspect=portrait|landscape` (omitted for `all`); the active option is the inert highlighted
+  `<span>`, the others are links.
 - **Rating selector** (navbar, far right): five `★` links. Clicking star K filters to
   `?min_rating=K` (≥K stars); clicking the active threshold clears it.
-- **Filters / state**: the album (path) + `min_rating` + media toggles + `recursive` (query) are
+- **Filters / state**: the album (path) + `min_rating` + media toggles + `aspect` + `recursive` (query) are
   the SPA's state, read from the URL on load and written back on each navigation. Every client-built
   breadcrumb / sub-album / star / toggle link carries the current filters so they persist while
   browsing; they also constrain the sub-album tile covers/counts. The server-side `Filters`
@@ -181,6 +185,11 @@ content-hash `ETag`) so updates propagate; icons are `immutable`.
   `true`/`false`). `video=false` → only images (`category != 2`); `images=false` → only
   videos (`category = 2`); both false → empty. Like `min_rating`, it constrains the photo
   grid and the sub-album count/cover/visibility alike.
+- **`aspect=`** — aspect-ratio filter, an enum (so it can grow to exact ratios like `16:9`):
+  `all` (default, no constraint) / `portrait` (`ii.height >= ii.width`) / `landscape`
+  (`ii.width >= ii.height`); a **square** matches both (inclusive `>=`), an invalid value is a
+  `400`. Items with NULL dimensions are excluded from `portrait`/`landscape` (the comparison is
+  NULL) but kept under `all`. Constrains the grid and the sub-album count/cover/visibility alike.
 - **Ordering / dates** — newest first by **`Images.modificationDate`** (`ORDER BY
   i.modificationDate DESC, i.id DESC`); the same column drives the day-grouping and the
   sub-album cover/sort. We deliberately use the file modification date, **not**
