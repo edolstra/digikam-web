@@ -95,7 +95,9 @@ body.modal-open { overflow: hidden; }
 .lightbox .prev { left: 0; }
 .lightbox .next { right: 0; }
 .lightbox button { background: none; border: 0; color: #fff; cursor: pointer;
-                   user-select: none; opacity: 0.8; touch-action: manipulation; }
+                   user-select: none; opacity: 0.8; touch-action: manipulation;
+                   /* Dark glow so the white glyphs stay visible over a light image. */
+                   text-shadow: 0 0 6px rgba(0, 0, 0, 0.9), 0 0 2px rgba(0, 0, 0, 0.9); }
 .lightbox button:hover { opacity: 1; }
 .lightbox button[disabled] { opacity: 0.15; cursor: default; }
 /* Auto-hide the controls after inactivity (web.js toggles `.idle`); they fade
