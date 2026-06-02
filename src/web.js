@@ -132,6 +132,26 @@ function renderAspect(host) {
   host.replaceChildren(frag);
 }
 
+// The filter state reset to its defaults (everything off / included). Used by the
+// "clear filters" button and to detect whether any filter is active.
+var DEFAULT_FILTERS = { minRating: 0, includeImages: true, includeVideo: true, recursive: false, aspect: 'all' };
+
+function filtersActive() {
+  return state.minRating || !state.includeImages || !state.includeVideo || state.recursive || state.aspect !== 'all';
+}
+
+// A "clear all filters" button (far right): a link to the current album with every
+// filter reset (the album path is kept). Dimmed and inert when nothing is active.
+function renderReset(host) {
+  var a = document.createElement('a');
+  var active = filtersActive();
+  a.className = active ? 'reset' : 'reset disabled';
+  a.href = photosUrl(state.album, DEFAULT_FILTERS);
+  a.title = 'Clear all filters';
+  a.textContent = '↺';
+  host.replaceChildren(a);
+}
+
 // The shared query for both API fetches: the album display path (empty for the
 // root) plus the active filters.
 function apiParams() {
@@ -198,6 +218,9 @@ function renderNavbar() {
     rating.appendChild(star);
   }
   document.querySelector('.rating').replaceChildren(rating);
+
+  // Clear-all-filters button (far right).
+  renderReset(document.querySelector('.reset'));
 
   document.title = state.album.length ? '/' + state.album.join('/') : 'Photos';
 }

@@ -192,6 +192,7 @@ fn page_html(title: &str, body: Markup) -> Markup {
                     span.media {}
                     span.aspect {}
                     span.rating {}
+                    span.reset {}
                 }
                 (body)
                 div.lightbox id="lightbox" {

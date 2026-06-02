@@ -96,8 +96,11 @@ reused across navigations; only the DOM is rebuilt (`render()` per navigation). 
   radio — `▯ ▭` (all), `▯` (portrait), `▭` (landscape). Single enum `state.aspect` ⇄ URL
   `aspect=portrait|landscape` (omitted for `all`); the active option is the inert highlighted
   `<span>`, the others are links.
-- **Rating selector** (navbar, far right): five `★` links. Clicking star K filters to
+- **Rating selector** (navbar, right): five `★` links. Clicking star K filters to
   `?min_rating=K` (≥K stars); clicking the active threshold clears it.
+- **Clear-filters button** (navbar, far right corner): a `↺` link to the current album with
+  **every** filter reset (rating, media, aspect, recursive) — keeping the album path. Dimmed and
+  inert when no filter is active.
 - **Filters / state**: the album (path) + `min_rating` + media toggles + `aspect` + `recursive` (query) are
   the SPA's state, read from the URL on load and written back on each navigation. Every client-built
   breadcrumb / sub-album / star / toggle link carries the current filters so they persist while
