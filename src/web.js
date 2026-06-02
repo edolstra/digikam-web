@@ -243,6 +243,8 @@ function initLightbox() {
   var idx = -1;
   var closing = false; // guards against issuing history.back() twice per open
   var suppressClick = false; // swallow the synthetic click a touch tap produces
+  var infoEl = document.getElementById('lb-info');
+  var infoOpen = false; // image-info panel visible (then controls don't auto-hide)
 
   function isOpen() { return lb.classList.contains('open'); }
   function activeEl() { return vid.classList.contains('active') ? vid : img; }
@@ -254,8 +256,14 @@ function initLightbox() {
     items = tiles.map(function (el) {
       var video = el.classList.contains('vtile');
       // Photos display a decoded thumbnail in the grid; the lightbox always shows
-      // the full-size original from `data-full`.
-      return { src: video ? el.dataset.src : (el.dataset.full || el.src), alt: el.getAttribute('alt') || '', video: video };
+      // the full-size original from `data-full`. `photo` is the PhotoSummary for
+      // the info panel.
+      return {
+        src: video ? el.dataset.src : (el.dataset.full || el.src),
+        alt: el.getAttribute('alt') || '',
+        video: video,
+        photo: el._photo
+      };
     });
     idx = -1;
   }
@@ -267,10 +275,57 @@ function initLightbox() {
   function wake() {
     lb.classList.remove('idle');
     clearTimeout(idleTimer);
-    if (isOpen()) idleTimer = setTimeout(function () {
-      if (isOpen()) lb.classList.add('idle');
+    // While the info panel is open the controls stay pinned (no auto-hide).
+    if (isOpen() && !infoOpen) idleTimer = setTimeout(function () {
+      if (isOpen() && !infoOpen) lb.classList.add('idle');
     }, 2000);
   }
+
+  // Human-readable file size and a tidied modification date for the info panel.
+  function fmtBytes(n) {
+    if (n == null) return null;
+    var u = ['B', 'KB', 'MB', 'GB', 'TB'], i = 0, x = n;
+    while (x >= 1024 && i < u.length - 1) { x /= 1024; i++; }
+    return (i === 0 ? x : x.toFixed(1)) + ' ' + u[i];
+  }
+  function fmtDate(s) { return s ? s.replace('T', ' ').replace(/\.\d+$/, '') : null; }
+
+  // Fill the info panel from the current item's PhotoSummary (skipping any
+  // missing field). Called when the panel is open, including while navigating.
+  function renderInfo() {
+    var p = items[idx] && items[idx].photo;
+    if (!p) { infoEl.replaceChildren(); return; }
+    var rows = [
+      ['File', p.name],
+      ['Album', p.album_path],
+      ['Format', p.format],
+      ['Size', fmtBytes(p.file_size)],
+      ['Resolution', (p.width && p.height) ? (p.width + ' × ' + p.height) : null],
+      ['Rating', p.rating != null ? '★'.repeat(p.rating) + '☆'.repeat(5 - p.rating) : null],
+      ['Modified', fmtDate(p.modification_date)],
+      ['MIME', p.mime]
+    ];
+    var frag = document.createDocumentFragment();
+    rows.forEach(function (r) {
+      if (r[1] == null || r[1] === '') return;
+      var row = document.createElement('div'); row.className = 'row';
+      var k = document.createElement('span'); k.className = 'k'; k.textContent = r[0];
+      var v = document.createElement('span'); v.className = 'v'; v.textContent = r[1];
+      row.appendChild(k); row.appendChild(v);
+      frag.appendChild(row);
+    });
+    infoEl.replaceChildren(frag);
+  }
+
+  function setInfo(on) {
+    infoOpen = on;
+    lb.classList.toggle('info-open', on);
+    if (on) renderInfo();
+    wake(); // re-arm or suspend the auto-hide, and reveal the controls
+  }
+  function toggleInfo() { setInfo(!infoOpen); }
+  // Clicking the info panel itself must not bubble to the letterbox-close handler.
+  infoEl.addEventListener('click', function (e) { e.stopPropagation(); });
   // Mouse/pen movement reveals the controls; touch is handled by the gestures
   // below (a tap reveals; a swipe doesn't).
   lb.addEventListener('pointermove', function (e) { if (e.pointerType !== 'touch') wake(); });
@@ -308,6 +363,7 @@ function initLightbox() {
     next.disabled = (i === items.length - 1);
     lb.classList.add('open');
     document.body.classList.add('modal-open');
+    if (infoOpen) renderInfo(); // keep the panel in sync while navigating
     preload(i + 1);
     preload(i - 1);
   }
@@ -320,7 +376,8 @@ function initLightbox() {
   function open(i) {
     if (!isOpen()) history.pushState({ lightbox: true }, '');
     show(i, true);
-    lb.classList.add('idle'); // controls start hidden until a mouse move / tap
+    // Controls start hidden — unless the info panel is open, which pins them.
+    if (!infoOpen) lb.classList.add('idle');
     // Must be requested inside the click gesture. Unsupported on iPhone Safari
     // (guarded), where the full-viewport overlay alone is used.
     if (!document.fullscreenElement && lb.requestFullscreen) {
@@ -434,6 +491,7 @@ function initLightbox() {
     if (!onMedia(e.clientX, e.clientY) && !hidden) close();
   });
   lb.querySelector('.close').addEventListener('click', function (e) { e.stopPropagation(); close(); });
+  lb.querySelector('.info').addEventListener('click', function (e) { e.stopPropagation(); toggleInfo(); });
   prev.addEventListener('click', function (e) { e.stopPropagation(); go(-1); });
   next.addEventListener('click', function (e) { e.stopPropagation(); go(1); });
 
@@ -456,6 +514,7 @@ function initLightbox() {
       e.preventDefault();
       vid.muted = !vid.muted;
     }
+    else if (e.key === 'i' || e.key === 'I') { e.preventDefault(); toggleInfo(); }
   });
 
   // Swipe (over the whole lightbox, including videos): up -> random item,
@@ -478,6 +537,10 @@ function initLightbox() {
       return;
     }
     if (adx > 50 && adx > ady) { go(dx < 0 ? 1 : -1); return; }     // swipe left/right
+    // A tap on the info button toggles the panel; a tap on the panel itself just
+    // keeps it (neither counts as an off-media letterbox close).
+    if (e.target.closest('.info')) { toggleInfo(); suppressClick = true; return; }
+    if (e.target.closest('#lb-info')) { wake(); suppressClick = true; return; }
     // Tap: reveal the controls, then pause a video / close on the letterbox.
     // Handled here (not via click) because the native video controls swallow the
     // click on a video; swallow the synthetic click so the mouse handler doesn't
@@ -785,6 +848,7 @@ function buildTile(p) {
     poster.dataset.id = p.id;
     poster.alt = '';
     btn.appendChild(poster);
+    btn._photo = p; // the PhotoSummary, for the lightbox info panel
     return btn;
   }
   // Photo tile: src-less <img>; the pipeline paints the decoded thumbnail, and
@@ -796,6 +860,7 @@ function buildTile(p) {
   img.alt = '';
   img.title = p.name || '';
   if (reserve) img.style.cssText = reserve;
+  img._photo = p; // the PhotoSummary, for the lightbox info panel
   return img;
 }
 

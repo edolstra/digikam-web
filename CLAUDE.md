@@ -142,7 +142,12 @@ reused across navigations; only the DOM is rebuilt (`render()` per navigation). 
   `scroll-margin-top` set to the sticky navbar's height so it isn't tucked underneath). The close/`‹ ›` controls (and the mouse cursor) **start hidden**
   (web.js `.idle` class) and are revealed by a **mouse/pen move or a tap** — *not* by
   keyboard navigation or swipes — then auto-hide again after 2s of inactivity; a tap that
-  only reveals them is consumed so it doesn't also dismiss/navigate. Perf: preloads the
+  only reveals them is consumed so it doesn't also dismiss/navigate. An **ⓘ info button**
+  (top-left) and the **`i` key** toggle a metadata overlay (`#lb-info`): file
+  name, album path, format, size, resolution, rating, modification date, MIME — built
+  client-side from the tile's `PhotoSummary` (stashed on the grid tile as `_photo`, no extra
+  fetch), updating as you navigate. **While the info panel is open the controls stay pinned**
+  (no auto-hide). Perf: preloads the
   prev/next images, `decoding="async"`, and `touch-action: manipulation` to cut mobile tap latency.
 
 #### Installable PWA

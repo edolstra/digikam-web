@@ -90,6 +90,9 @@ body.modal-open { overflow: hidden; }
 .lightbox .full.active { display: block; }
 .lightbox .close { position: absolute; top: 0.25rem; right: 0.75rem;
                    font-size: 2.5rem; line-height: 1; }
+/* "i" info toggle, top-left corner. */
+.lightbox .info { position: absolute; top: 0.5rem; left: 0.75rem; font-size: 1.9rem; line-height: 1; }
+.lightbox.info-open .info { opacity: 1; color: #f5c518; }
 .lightbox .nav { position: absolute; top: 50%; transform: translateY(-50%);
                  font-size: 3rem; padding: 0 1rem; }
 .lightbox .prev { left: 0; }
@@ -100,10 +103,26 @@ body.modal-open { overflow: hidden; }
                    text-shadow: 0 0 6px rgba(0, 0, 0, 0.9), 0 0 2px rgba(0, 0, 0, 0.9); }
 .lightbox button:hover { opacity: 1; }
 .lightbox button[disabled] { opacity: 0.15; cursor: default; }
+/* Image-info overlay (top-left), filled + shown by web.js when `.info-open`. */
+/* `width: max-content` makes the box hug its longest line (so a filename stays on
+   one line) up to the cap; the cap then forces wrapping. A grid with a `display:
+   contents` row sizes the label/value columns predictably (flex's intrinsic width
+   collapsed the box, breaking the filename at its hyphens). */
+#lb-info { position: absolute; top: 3.5rem; left: 0.75rem; display: none;
+           grid-template-columns: auto 1fr; column-gap: 0.6rem;
+           width: max-content; max-width: min(92vw, 40rem);
+           padding: 0.6rem 0.85rem; border-radius: 6px;
+           background: rgba(0, 0, 0, 0.6); color: #fff; font-size: 0.85rem;
+           line-height: 1.5; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
+           overflow-wrap: anywhere; }
+.lightbox.info-open #lb-info { display: grid; }
+#lb-info .row { display: contents; }
+#lb-info .k { color: #aaa; }
+#lb-info .v { min-width: 0; }
 /* Auto-hide the controls after inactivity (web.js toggles `.idle`); they fade
    back on any pointer move / touch / key. */
-.lightbox .close, .lightbox .nav { transition: opacity 0.25s ease; }
+.lightbox .close, .lightbox .info, .lightbox .nav { transition: opacity 0.25s ease; }
 /* Hidden controls don't capture taps — a tap there reveals them (and pauses a
    video / closes on the letterbox) rather than navigating/closing via the button. */
-.lightbox.idle .close, .lightbox.idle .nav { opacity: 0; pointer-events: none; }
+.lightbox.idle .close, .lightbox.idle .info, .lightbox.idle .nav { opacity: 0; pointer-events: none; }
 .lightbox.idle { cursor: none; }

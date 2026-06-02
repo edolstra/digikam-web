@@ -197,10 +197,13 @@ fn page_html(title: &str, body: Markup) -> Markup {
                 (body)
                 div.lightbox id="lightbox" {
                     button.close aria-label="Close" { "×" }
+                    button.info aria-label="Image info" title="Image info (i)" { "ⓘ" }
                     button.nav.prev aria-label="Previous" { "‹" }
                     img.full id="lb-img" alt="" decoding="async";
                     video.full id="lb-video" playsinline loop controls {}
                     button.nav.next aria-label="Next" { "›" }
+                    // Metadata overlay, filled + toggled by web.js (hidden by default).
+                    div id="lb-info" {}
                 }
                 script { (PreEscaped(SCRIPT)) }
             }
