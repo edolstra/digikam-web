@@ -144,9 +144,11 @@ reused across navigations; only the DOM is rebuilt (`render()` per navigation). 
   keyboard navigation or swipes — then auto-hide again after 2s of inactivity; a tap that
   only reveals them is consumed so it doesn't also dismiss/navigate. An **ⓘ info button**
   (top-left) and the **`i` key** toggle a metadata overlay (`#lb-info`): file
-  name, album path, format, size, resolution, rating, modification date, MIME — built
-  client-side from the tile's `PhotoSummary` (stashed on the grid tile as `_photo`, no extra
-  fetch), updating as you navigate. **While the info panel is open the controls stay pinned**
+  name, album path (a **link** that jumps to that album), format, size, resolution, rating,
+  modification date, MIME — built client-side from the tile's `PhotoSummary` (stashed on the
+  grid tile as `_photo`, no extra fetch), updating as you navigate. The album link
+  `replaceState`s the lightbox's URL-less history entry as the target album, closes the
+  lightbox, and re-renders in place (so Back still returns to the originating album). **While the info panel is open the controls stay pinned**
   (no auto-hide). Perf: preloads the
   prev/next images, `decoding="async"`, and `touch-action: manipulation` to cut mobile tap latency.
 

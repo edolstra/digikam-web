@@ -119,6 +119,8 @@ body.modal-open { overflow: hidden; }
 #lb-info .row { display: contents; }
 #lb-info .k { color: #aaa; }
 #lb-info .v { min-width: 0; }
+#lb-info a { color: #6cf; text-decoration: none; }
+@media (hover: hover) { #lb-info a:hover { text-decoration: underline; } }
 /* Auto-hide the controls after inactivity (web.js toggles `.idle`); they fade
    back on any pointer move / touch / key. */
 .lightbox .close, .lightbox .info, .lightbox .nav { transition: opacity 0.25s ease; }

@@ -295,9 +295,17 @@ function initLightbox() {
   function renderInfo() {
     var p = items[idx] && items[idx].photo;
     if (!p) { infoEl.replaceChildren(); return; }
+    // The album is a link that jumps to that album (carrying the active filters).
+    var album = null;
+    if (p.album_path) {
+      album = document.createElement('a');
+      album.className = 'album-link';
+      album.href = albumHref(p.album_path);
+      album.textContent = p.album_path;
+    }
     var rows = [
       ['File', p.name],
-      ['Album', p.album_path],
+      ['Album', album],
       ['Format', p.format],
       ['Size', fmtBytes(p.file_size)],
       ['Resolution', (p.width && p.height) ? (p.width + ' × ' + p.height) : null],
@@ -307,10 +315,12 @@ function initLightbox() {
     ];
     var frag = document.createDocumentFragment();
     rows.forEach(function (r) {
-      if (r[1] == null || r[1] === '') return;
+      var val = r[1];
+      if (val == null || val === '') return;
       var row = document.createElement('div'); row.className = 'row';
       var k = document.createElement('span'); k.className = 'k'; k.textContent = r[0];
-      var v = document.createElement('span'); v.className = 'v'; v.textContent = r[1];
+      var v = document.createElement('span'); v.className = 'v';
+      if (val instanceof Node) v.appendChild(val); else v.textContent = val;
       row.appendChild(k); row.appendChild(v);
       frag.appendChild(row);
     });
@@ -324,8 +334,29 @@ function initLightbox() {
     wake(); // re-arm or suspend the auto-hide, and reveal the controls
   }
   function toggleInfo() { setInfo(!infoOpen); }
-  // Clicking the info panel itself must not bubble to the letterbox-close handler.
-  infoEl.addEventListener('click', function (e) { e.stopPropagation(); });
+
+  // Jump from the info panel's album link to that album. The lightbox pushed a
+  // URL-less history entry on open; repurpose it (replaceState) as the target so
+  // Back still returns to where we were, then close the lightbox and re-render.
+  function jumpToAlbum(url) {
+    if (!url) return;
+    history.replaceState({}, '', url);
+    dismiss();
+    readUrl();
+    window.scrollTo(0, 0);
+    render();
+  }
+
+  // Panel clicks must not bubble to the letterbox-close handler; the album link
+  // navigates in-page instead of doing a full document load. (`suppressClick`
+  // swallows the synthetic click from a touch tap, which the touch handler below
+  // already acted on.)
+  infoEl.addEventListener('click', function (e) {
+    e.stopPropagation();
+    if (suppressClick) { suppressClick = false; return; }
+    var a = e.target.closest('a.album-link');
+    if (a) { e.preventDefault(); jumpToAlbum(a.getAttribute('href')); }
+  });
   // Mouse/pen movement reveals the controls; touch is handled by the gestures
   // below (a tap reveals; a swipe doesn't).
   lb.addEventListener('pointermove', function (e) { if (e.pointerType !== 'touch') wake(); });
@@ -491,7 +522,11 @@ function initLightbox() {
     if (!onMedia(e.clientX, e.clientY) && !hidden) close();
   });
   lb.querySelector('.close').addEventListener('click', function (e) { e.stopPropagation(); close(); });
-  lb.querySelector('.info').addEventListener('click', function (e) { e.stopPropagation(); toggleInfo(); });
+  lb.querySelector('.info').addEventListener('click', function (e) {
+    e.stopPropagation();
+    if (suppressClick) { suppressClick = false; return; }
+    toggleInfo();
+  });
   prev.addEventListener('click', function (e) { e.stopPropagation(); go(-1); });
   next.addEventListener('click', function (e) { e.stopPropagation(); go(1); });
 
@@ -537,10 +572,15 @@ function initLightbox() {
       return;
     }
     if (adx > 50 && adx > ady) { go(dx < 0 ? 1 : -1); return; }     // swipe left/right
-    // A tap on the info button toggles the panel; a tap on the panel itself just
-    // keeps it (neither counts as an off-media letterbox close).
+    // A tap on the info button toggles the panel; a tap on its album link jumps to
+    // that album; a tap on the panel itself just keeps it (none count as an
+    // off-media letterbox close). The synthetic click is swallowed below.
     if (e.target.closest('.info')) { toggleInfo(); suppressClick = true; return; }
-    if (e.target.closest('#lb-info')) { wake(); suppressClick = true; return; }
+    if (e.target.closest('#lb-info')) {
+      var link = e.target.closest('a.album-link');
+      if (link) jumpToAlbum(link.getAttribute('href')); else wake();
+      suppressClick = true; return;
+    }
     // Tap: reveal the controls, then pause a video / close on the letterbox.
     // Handled here (not via click) because the native video controls swallow the
     // click on a video; swallow the synthetic click so the mouse handler doesn't
