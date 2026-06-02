@@ -42,12 +42,12 @@ All endpoints are served under the `/api` prefix.
 
 | Route | Notes |
 |-------|-------|
-| `GET /api/photos?album=&tags=&recursive=&min_rating=&limit=&offset=` | Filtered, paginated list. `Page<PhotoSummary>` = `{incomplete, limit, offset, items}` (`incomplete` = more rows exist beyond this page — one extra row is fetched to detect it). `PhotoSummary.is_video` is true for videos (Digikam `category=2`). An empty/absent `album` (non-recursive) returns `items: []`. |
+| `GET /api/photos?album=&tags=&recursive=&min_rating=&images=&video=&limit=&offset=` | Filtered, paginated list. `Page<PhotoSummary>` = `{incomplete, limit, offset, items}` (`incomplete` = more rows exist beyond this page — one extra row is fetched to detect it). `PhotoSummary.is_video` is true for videos (Digikam `category=2`). `images`/`video` are the media-type filter (both default `true`; `=false` excludes that type). An empty/absent `album` (non-recursive) returns `items: []`. |
 | `GET /api/photos/:id` | `PhotoDetail` (summary + tag names + lat/long). |
 | `GET /api/photos/:id/file` | Original bytes, range-aware (via `tower_http::services::ServeFile`). Sends a strong `ETag` from the image's `uniqueHash`; a matching `If-None-Match` (or `*`) returns `304`. |
 | `GET /api/photos/:id/thumbnail` | Digikam's stored thumbnail as-is: the **raw PGF blob** from `thumbnails-digikam.db` (looked up by `uniqueHash`+`fileSize`), for the client to decode in wasm (see [nix/webpgf.nix](nix/webpgf.nix)). Strong `ETag` (+ `If-None-Match`→`304`) and a 1-year `immutable` `Cache-Control`; `X-Orientation` header carries Digikam's `orientationHint` (EXIF orientation) for client-side rotation. `404` when the thumbnails DB is absent / the image has no cached thumbnail → client falls back to `/file`. |
 | `GET /api/albums` | Flat list of all albums (`{id, path, root}`). |
-| `GET /api/subalbums?album=/Root/rel&min_rating=` | Direct sub-albums of an album as `[{name, path, photo_count, cover: {id, name} \| null}]`, sorted by most recent photo (newest first). An absent/empty `album` lists the album roots. Cover = newest **image** in the sub-album's whole subtree (videos, `category=2`, are never covers; a video-only sub-album has `cover: null`); `photo_count` is the recursive count incl. videos. `min_rating` (0..=5) filters the cover, count, and which sub-albums appear alike. One query; albums with no matching photos anywhere are omitted. |
+| `GET /api/subalbums?album=/Root/rel&min_rating=&images=&video=` | Direct sub-albums of an album as `[{name, path, photo_count, cover: {id, name} \| null}]`, sorted by most recent photo (newest first). An absent/empty `album` lists the album roots. Cover = newest **image** in the sub-album's whole subtree (videos, `category=2`, are never covers; a video-only sub-album has `cover: null`); `photo_count` is the recursive count incl. videos. `min_rating` (0..=5) and the `images`/`video` media-type filter constrain the cover, count, and which sub-albums appear alike. One query; albums with no matching photos anywhere are omitted. |
 | `GET /api/tags` | Tag **tree** (`{id, name, children}`), internal tags excluded. |
 | `GET /api/health` | Liveness. |
 
@@ -83,13 +83,18 @@ reused across navigations; only the DOM is rebuilt (`render()` per navigation). 
 - **Navbar (sticky** — pinned to the top, the page scrolls underneath**)**: a client-built
   breadcrumb starting with a `⌂` home icon (→ the root) then `› Photos › Lego › Porsche911`,
   each segment a link to that ancestor album. **Alt+↑** navigates to the parent album.
-- **Rating selector** (navbar, right side): five `★` links. Clicking star K filters to
+- **Media-type filter** (navbar, right side, left of the stars): a 3-state horizontal radio
+  (segmented control) — `📷 🎥` (all media), `📷` (images only), `🎥` (videos only). The active
+  state is highlighted and inert (a `<span>`); the other two are links that switch to it.
+  Underlying state is still two booleans `{includeImages, includeVideo}` ⇄ URL
+  `images=/video=false` (the radio just maps the three valid pairs to three options).
+- **Rating selector** (navbar, far right): five `★` links. Clicking star K filters to
   `?min_rating=K` (≥K stars); clicking the active threshold clears it.
-- **Filters / state**: the album (path) + `min_rating` (query) are the SPA's state, read
-  from the URL on load and written back on each navigation. Every client-built breadcrumb /
-  sub-album / star link carries the current `min_rating` so it persists while browsing; it
-  also constrains the sub-album tile covers/counts. The server-side `Filters` struct
-  ([src/query.rs](src/query.rs)) is now used only by the JSON API handlers.
+- **Filters / state**: the album (path) + `min_rating` + media toggles (query) are the SPA's
+  state, read from the URL on load and written back on each navigation. Every client-built
+  breadcrumb / sub-album / star / toggle link carries the current filters so they persist while
+  browsing; they also constrain the sub-album tile covers/counts. The server-side `Filters`
+  struct ([src/query.rs](src/query.rs)) is now used only by the JSON API handlers.
 - **Sub-album grid** (below the breadcrumb): direct sub-albums (newest-first, from
   `/api/subalbums`); each tile is the cover image with the bold sub-album name and
   `(count)` centered on top, linking to that sub-album. Covers use the same lazy
@@ -167,6 +172,11 @@ content-hash `ETag`) so updates propagate; icons are `immutable`.
 - **`min_rating=N`** — minimum rating, `0..=5` (else `400`). Unrated images
   (Digikam stores `-1`) count as `0`, so `min_rating=0` includes everything and
   `min_rating>=1` excludes the unrated. Implemented as `max(ifnull(ii.rating,0),0) >= N`.
+- **`images=` / `video=`** — the media-type filter, two independent booleans, **both
+  default `true`** (`=false` excludes that type; stock bool parsing, so the value is
+  `true`/`false`). `video=false` → only images (`category != 2`); `images=false` → only
+  videos (`category = 2`); both false → empty. Like `min_rating`, it constrains the photo
+  grid and the sub-album count/cover/visibility alike.
 - **Ordering / dates** — newest first by **`Images.modificationDate`** (`ORDER BY
   i.modificationDate DESC, i.id DESC`); the same column drives the day-grouping and the
   sub-album cover/sort. We deliberately use the file modification date, **not**

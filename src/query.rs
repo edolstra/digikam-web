@@ -53,7 +53,7 @@ impl<'de> Deserialize<'de> for Rating {
 }
 
 /// Parsed query parameters for `GET /photos`.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct PhotoQuery {
     /// Album path as segments (`["Photos", "Lego"]` for `/Photos/Lego`); empty
     /// means no album filter. The first segment is the `AlbumRoots.label`.
@@ -67,8 +67,30 @@ pub struct PhotoQuery {
     /// images (rating `-1`/NULL) count as 0, so `0` includes everything and `>= 1`
     /// excludes the unrated.
     pub min_rating: Rating,
+    /// Media-type filter as two independent booleans, both `true` by default.
+    /// `include_images` excludes videos when cleared; `include_video` excludes
+    /// images when cleared (see [`media_filter_sql`]).
+    pub include_images: bool,
+    pub include_video: bool,
     pub limit: u64,
     pub offset: u64,
+}
+
+impl Default for PhotoQuery {
+    fn default() -> Self {
+        // The media-type booleans default to including everything; the rest are
+        // their natural zero/empty defaults.
+        PhotoQuery {
+            album: Vec::new(),
+            recursive: false,
+            tags: Vec::new(),
+            min_rating: Rating::default(),
+            include_images: true,
+            include_video: true,
+            limit: 0,
+            offset: 0,
+        }
+    }
 }
 
 /// The set of view filters active on an album page. Held separately from
@@ -76,10 +98,35 @@ pub struct PhotoQuery {
 /// photo grid. Designed to grow (tags, date range, …). The frontend now builds
 /// its links and parses the query string client-side (see [web.js](web.js)), so
 /// this is consumed only by the JSON API handlers.
-#[derive(Debug, Clone, Default, Serialize)]
+#[derive(Debug, Clone)]
 pub struct Filters {
     /// Minimum rating; the default `Rating(0)` means no rating filter.
     pub min_rating: Rating,
+    /// Media-type filter; both `true` by default (see [`PhotoQuery`]).
+    pub include_images: bool,
+    pub include_video: bool,
+}
+
+impl Default for Filters {
+    fn default() -> Self {
+        Filters {
+            min_rating: Rating::default(),
+            include_images: true,
+            include_video: true,
+        }
+    }
+}
+
+/// The SQL `AND` fragment restricting `Images.category` for the media-type
+/// filter. Videos are `category = 2`; anything else is treated as an image.
+/// Both booleans true → no restriction; both false → match nothing.
+pub fn media_filter_sql(include_images: bool, include_video: bool) -> &'static str {
+    match (include_images, include_video) {
+        (true, true) => "",
+        (true, false) => " AND i.category != 2",
+        (false, true) => " AND i.category = 2",
+        (false, false) => " AND 1 = 0",
+    }
 }
 
 /// Escape `%`, `_` and `\` for use in a `LIKE ... ESCAPE '\'` pattern.
@@ -175,6 +222,9 @@ fn build_filter(conn: &Connection, q: &PhotoQuery) -> AppResult<(String, Vec<Val
         sql.push_str(" AND max(ifnull(ii.rating, 0), 0) >= ?");
         params.push(Value::Integer(q.min_rating.get()));
     }
+
+    // Media-type filter (a constant fragment, no bound params).
+    sql.push_str(media_filter_sql(q.include_images, q.include_video));
 
     Ok((sql, params))
 }
@@ -297,6 +347,9 @@ pub fn list_subalbums(
 ) -> AppResult<Vec<SubAlbum>> {
     // 0 makes the rating clause `max(...,0) >= 0` always true (i.e. no filter).
     let min = filters.min_rating.get();
+    // Constant media-type fragment, appended to each `matched` WHERE so the
+    // sub-album counts, covers, and visibility all respect the filter.
+    let media = media_filter_sql(filters.include_images, filters.include_video);
     // Display path of `album`, used to build each child's `path` ("" at the root).
     let parent = if album.is_empty() {
         String::new()
@@ -306,15 +359,17 @@ pub fn list_subalbums(
 
     // Each mode produces the `matched` rows (image_id, image_name, category,
     // cdate, bucket); only the bucketing/scope differs.
-    let (matched, params): (&str, Vec<(&str, Value)>) = match album_root_and_rel(album) {
+    let (matched, params): (String, Vec<(&str, Value)>) = match album_root_and_rel(album) {
         // Virtual top level: one bucket per album root (its label).
         None => (
-            "SELECT i.id AS image_id, i.name AS image_name, i.category AS category, \
-                    i.modificationDate AS cdate, r.label AS bucket \
-             FROM Images i JOIN Albums a ON a.id = i.album \
-             JOIN AlbumRoots r ON r.id = a.albumRoot \
-             LEFT JOIN ImageInformation ii ON ii.imageid = i.id \
-             WHERE i.status = 1 AND max(ifnull(ii.rating, 0), 0) >= :min",
+            format!(
+                "SELECT i.id AS image_id, i.name AS image_name, i.category AS category, \
+                        i.modificationDate AS cdate, r.label AS bucket \
+                 FROM Images i JOIN Albums a ON a.id = i.album \
+                 JOIN AlbumRoots r ON r.id = a.albumRoot \
+                 LEFT JOIN ImageInformation ii ON ii.imageid = i.id \
+                 WHERE i.status = 1 AND max(ifnull(ii.rating, 0), 0) >= :min{media}"
+            ),
             vec![(":min", Value::Integer(min))],
         ),
         Some((label, rel)) => {
@@ -331,20 +386,22 @@ pub fn list_subalbums(
             // of the relativePath after the prefix, up to the next '/'). Filtering
             // by `albumRoot` id lets the `(albumRoot, relativePath)` index serve it.
             (
-                "SELECT image_id, image_name, category, cdate, \
-                        CASE WHEN instr(rest, '/') > 0 \
-                             THEN substr(rest, 1, instr(rest, '/') - 1) ELSE rest END AS bucket \
-                 FROM ( \
-                   SELECT i.id AS image_id, i.name AS image_name, i.category AS category, \
-                          i.modificationDate AS cdate, \
-                          substr(a.relativePath, length(:prefix) + 1) AS rest \
-                   FROM Images i JOIN Albums a ON a.id = i.album \
-                   LEFT JOIN ImageInformation ii ON ii.imageid = i.id \
-                   WHERE i.status = 1 AND a.albumRoot = :root \
-                     AND a.relativePath LIKE :like ESCAPE '\\' \
-                     AND length(a.relativePath) > length(:prefix) \
-                     AND max(ifnull(ii.rating, 0), 0) >= :min \
-                 )",
+                format!(
+                    "SELECT image_id, image_name, category, cdate, \
+                            CASE WHEN instr(rest, '/') > 0 \
+                                 THEN substr(rest, 1, instr(rest, '/') - 1) ELSE rest END AS bucket \
+                     FROM ( \
+                       SELECT i.id AS image_id, i.name AS image_name, i.category AS category, \
+                              i.modificationDate AS cdate, \
+                              substr(a.relativePath, length(:prefix) + 1) AS rest \
+                       FROM Images i JOIN Albums a ON a.id = i.album \
+                       LEFT JOIN ImageInformation ii ON ii.imageid = i.id \
+                       WHERE i.status = 1 AND a.albumRoot = :root \
+                         AND a.relativePath LIKE :like ESCAPE '\\' \
+                         AND length(a.relativePath) > length(:prefix) \
+                         AND max(ifnull(ii.rating, 0), 0) >= :min{media} \
+                     )"
+                ),
                 vec![
                     (":prefix", Value::Text(prefix)),
                     (":root", Value::Integer(root_id)),
@@ -435,5 +492,13 @@ mod tests {
             album_root_and_rel(&["Photos".to_string(), "Lego".to_string(), "X".to_string()]),
             Some(("Photos", Some("/Lego/X".to_string())))
         );
+    }
+
+    #[test]
+    fn media_filter_fragments() {
+        assert_eq!(media_filter_sql(true, true), ""); // all media
+        assert_eq!(media_filter_sql(true, false), " AND i.category != 2"); // images only
+        assert_eq!(media_filter_sql(false, true), " AND i.category = 2"); // video only
+        assert_eq!(media_filter_sql(false, false), " AND 1 = 0"); // neither
     }
 }

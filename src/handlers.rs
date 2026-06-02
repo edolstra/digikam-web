@@ -20,6 +20,11 @@ pub async fn health() -> impl IntoResponse {
     Json(json!({ "status": "ok" }))
 }
 
+/// Serde default for the media-type booleans: both media types included.
+fn yes() -> bool {
+    true
+}
+
 /// Raw query parameters for `GET /photos`.
 #[derive(Debug, Deserialize)]
 pub struct PhotoParams {
@@ -29,6 +34,11 @@ pub struct PhotoParams {
     recursive: bool,
     #[serde(default)]
     min_rating: Rating,
+    /// Media-type filter (both default on; `=false` excludes that type).
+    #[serde(default = "yes")]
+    images: bool,
+    #[serde(default = "yes")]
+    video: bool,
     limit: Option<u64>,
     offset: Option<u64>,
 }
@@ -55,6 +65,8 @@ pub async fn list_photos(
         recursive: params.recursive,
         tags,
         min_rating: params.min_rating,
+        include_images: params.images,
+        include_video: params.video,
         limit: params.limit.unwrap_or(DEFAULT_LIMIT).clamp(1, MAX_LIMIT),
         offset: params.offset.unwrap_or(0),
     };
@@ -325,12 +337,19 @@ pub struct SubalbumParams {
     album: Option<String>,
     #[serde(default)]
     min_rating: Rating,
+    /// Media-type filter (both default on; `=false` excludes that type),
+    /// constraining the sub-album counts/covers like `min_rating`.
+    #[serde(default = "yes")]
+    images: bool,
+    #[serde(default = "yes")]
+    video: bool,
 }
 
-/// `GET /subalbums?album=/Root/rel&min_rating=` — direct sub-albums of an album,
-/// each with a cover (newest photo in its subtree) and recursive photo count,
-/// sorted by most recent photo. `min_rating` filters the cover and count alike.
-/// An absent/empty `album` lists the album roots.
+/// `GET /subalbums?album=/Root/rel&min_rating=&images=&video=` — direct sub-albums
+/// of an album, each with a cover (newest photo in its subtree) and recursive photo
+/// count, sorted by most recent photo. `min_rating` and the `images`/`video`
+/// media-type filter constrain the cover and count alike. An absent/empty `album`
+/// lists the album roots.
 pub async fn list_subalbums(
     State(state): State<AppState>,
     Query(params): Query<SubalbumParams>,
@@ -339,6 +358,8 @@ pub async fn list_subalbums(
 
     let filters = Filters {
         min_rating: params.min_rating,
+        include_images: params.images,
+        include_video: params.video,
     };
 
     let subalbums = run_blocking(&state, move |conn, state| {

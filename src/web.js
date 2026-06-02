@@ -11,58 +11,108 @@
 // ===== State + URL ===========================================================
 // The current view, initialized from the URL by readUrl() and updated on each
 // navigation. `album` is the decoded display segments (e.g. ["Photos","Lego"];
-// [] is the virtual root); `minRating` is 0 (no filter) or 1..=5.
-var state = { album: [], minRating: 0 };
+// [] is the virtual root); `minRating` is 0 (no filter) or 1..=5; the media-type
+// filter is two booleans, both true by default (include images / include video).
+var state = { album: [], minRating: 0, includeImages: true, includeVideo: true };
 // Bumped on every render(); a fetch that resolves after a newer navigation
 // compares against it and bails before touching the DOM (see render/buildGrid).
 var renderToken = 0;
 
 // The one place that reads `location`. Mirrors query::album_segments (split on
-// '/', drop empties) and clamps min_rating to 0..=5.
+// '/', drop empties), clamps min_rating to 0..=5, and reads the media-type filter
+// (a param present and equal to 'false' excludes that type).
 function readUrl() {
   var path = location.pathname.replace(/^\/photos/, '');
   state.album = path.split('/').filter(Boolean).map(decodeURIComponent);
-  var r = parseInt(new URLSearchParams(location.search).get('min_rating'), 10);
+  var q = new URLSearchParams(location.search);
+  var r = parseInt(q.get('min_rating'), 10);
   state.minRating = (r >= 1 && r <= 5) ? r : 0;
+  state.includeImages = q.get('images') !== 'false';
+  state.includeVideo = q.get('video') !== 'false';
 }
 
-// Build a frontend URL from album segments + a rating, percent-encoding each
-// segment. The single source of truth for every nav link.
-function photosUrl(segments, minRating) {
+// The current filters as a plain object, optionally with some keys overridden —
+// so a link can target "the current view but with X changed".
+function filters(over) {
+  var f = { minRating: state.minRating, includeImages: state.includeImages, includeVideo: state.includeVideo };
+  if (over) for (var k in over) f[k] = over[k];
+  return f;
+}
+
+// Build a frontend URL from album segments + a filter object, percent-encoding
+// each segment and encoding each filter at its non-default value. The single
+// source of truth for every nav link.
+function photosUrl(segments, f) {
   var p = segments.map(encodeURIComponent);
-  return '/photos' + (p.length ? '/' + p.join('/') : '') + (minRating ? '?min_rating=' + minRating : '');
+  var qs = new URLSearchParams();
+  if (f.minRating) qs.set('min_rating', f.minRating);
+  if (!f.includeImages) qs.set('images', 'false');
+  if (!f.includeVideo) qs.set('video', 'false');
+  var q = qs.toString();
+  return '/photos' + (p.length ? '/' + p.join('/') : '') + (q ? '?' + q : '');
 }
 
 // The frontend URL for a sub-album's display path (e.g. "/Photos/Lego"), carrying
 // the current filters.
 function albumHref(displayPath) {
-  return photosUrl(displayPath.split('/').filter(Boolean), state.minRating);
+  return photosUrl(displayPath.split('/').filter(Boolean), filters());
 }
 
 // The target href for rating star K: set the threshold to K, or clear it when K
-// is already the active threshold (toggle off).
+// is already the active threshold (toggle off). Keeps the media filter.
 function ratingHref(k) {
-  return photosUrl(state.album, state.minRating === k ? 0 : k);
+  return photosUrl(state.album, filters({ minRating: state.minRating === k ? 0 : k }));
+}
+
+// The media-type filter as a 3-state horizontal radio (segmented control):
+// "📷 🎥" (all media), "📷" (images only), "🎥" (videos only). The option matching
+// the current {includeImages, includeVideo} pair is the active one (an inert
+// <span>); the other two are links that switch to that pair. (The underlying
+// filter stays two booleans — this only changes how they're presented.)
+var MEDIA_OPTIONS = [
+  { label: '📷 🎥', images: true, video: true, title: 'All media' },
+  { label: '📷', images: true, video: false, title: 'Images only' },
+  { label: '🎥', images: false, video: true, title: 'Videos only' }
+];
+function renderMedia(host) {
+  var frag = document.createDocumentFragment();
+  MEDIA_OPTIONS.forEach(function (o) {
+    var active = state.includeImages === o.images && state.includeVideo === o.video;
+    var el;
+    if (active) {
+      el = document.createElement('span');
+      el.className = 'on';
+    } else {
+      el = document.createElement('a');
+      el.href = photosUrl(state.album, filters({ includeImages: o.images, includeVideo: o.video }));
+    }
+    el.textContent = o.label;
+    el.title = o.title;
+    frag.appendChild(el);
+  });
+  host.replaceChildren(frag);
 }
 
 // The shared query for both API fetches: the album display path (empty for the
-// root) plus min_rating when set.
+// root) plus the active filters.
 function apiParams() {
   var p = new URLSearchParams();
   p.set('album', state.album.length ? '/' + state.album.join('/') : '');
   if (state.minRating) p.set('min_rating', state.minRating);
+  if (!state.includeImages) p.set('images', 'false');
+  if (!state.includeVideo) p.set('video', 'false');
   return p;
 }
 
-// ===== Navbar (breadcrumb + rating selector) =================================
-// Synchronous + idempotent: rebuild the navbar shell's .crumb and .rating from
-// `state`. Runs during initial parse (before first paint, so no flash) and on
+// ===== Navbar (breadcrumb + media toggles + rating selector) =================
+// Synchronous + idempotent: rebuild the navbar shell's .crumb, .media and .rating
+// from `state`. Runs during initial parse (before first paint, so no flash) and on
 // every navigation.
 function renderNavbar() {
   var crumb = document.createDocumentFragment();
   var home = document.createElement('a');
   home.className = 'home';
-  home.href = photosUrl([], state.minRating);
+  home.href = photosUrl([], filters());
   home.setAttribute('aria-label', 'Home');
   home.textContent = '⌂';
   crumb.appendChild(home);
@@ -73,11 +123,14 @@ function renderNavbar() {
     crumb.appendChild(sep);
     var a = document.createElement('a');
     // The cumulative path up to and including segment i.
-    a.href = photosUrl(state.album.slice(0, i + 1), state.minRating);
+    a.href = photosUrl(state.album.slice(0, i + 1), filters());
     a.textContent = seg;
     crumb.appendChild(a);
   });
   document.querySelector('.crumb').replaceChildren(crumb);
+
+  // Media-type filter: a 3-state radio (all media / images only / videos only).
+  renderMedia(document.querySelector('.media'));
 
   var rating = document.createDocumentFragment();
   for (var k = 1; k <= 5; k++) {

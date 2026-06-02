@@ -188,6 +188,7 @@ fn page_html(title: &str, body: Markup) -> Markup {
             body {
                 header.navbar {
                     span.crumb {}
+                    span.media {}
                     span.rating {}
                 }
                 (body)
