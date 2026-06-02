@@ -83,6 +83,10 @@ reused across navigations; only the DOM is rebuilt (`render()` per navigation). 
 - **Navbar (sticky** — pinned to the top, the page scrolls underneath**)**: a client-built
   breadcrumb starting with a `⌂` home icon (→ the root) then `› Photos › Lego › Porsche911`,
   each segment a link to that ancestor album. **Alt+↑** navigates to the parent album.
+- **Recursive toggle** (navbar, leftmost of the filter cluster): a single `⊞` glyph, grey
+  when off / gold when on, that extends the photo grid to **all sub-albums' items** (`?recursive=true`
+  → `/api/photos?recursive=true`). The sub-album tiles still show (their counts are already
+  recursive); `/api/subalbums` ignores the param.
 - **Media-type filter** (navbar, right side, left of the stars): a 3-state horizontal radio
   (segmented control) — `📷 🎥` (all media), `📷` (images only), `🎥` (videos only). The active
   state is highlighted and inert (a `<span>`); the other two are links that switch to it.
@@ -90,8 +94,8 @@ reused across navigations; only the DOM is rebuilt (`render()` per navigation). 
   `images=/video=false` (the radio just maps the three valid pairs to three options).
 - **Rating selector** (navbar, far right): five `★` links. Clicking star K filters to
   `?min_rating=K` (≥K stars); clicking the active threshold clears it.
-- **Filters / state**: the album (path) + `min_rating` + media toggles (query) are the SPA's
-  state, read from the URL on load and written back on each navigation. Every client-built
+- **Filters / state**: the album (path) + `min_rating` + media toggles + `recursive` (query) are
+  the SPA's state, read from the URL on load and written back on each navigation. Every client-built
   breadcrumb / sub-album / star / toggle link carries the current filters so they persist while
   browsing; they also constrain the sub-album tile covers/counts. The server-side `Filters`
   struct ([src/query.rs](src/query.rs)) is now used only by the JSON API handlers.

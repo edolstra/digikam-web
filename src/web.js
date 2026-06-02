@@ -12,8 +12,9 @@
 // The current view, initialized from the URL by readUrl() and updated on each
 // navigation. `album` is the decoded display segments (e.g. ["Photos","Lego"];
 // [] is the virtual root); `minRating` is 0 (no filter) or 1..=5; the media-type
-// filter is two booleans, both true by default (include images / include video).
-var state = { album: [], minRating: 0, includeImages: true, includeVideo: true };
+// filter is two booleans, both true by default (include images / include video);
+// `recursive` extends the grid to all sub-albums' items.
+var state = { album: [], minRating: 0, includeImages: true, includeVideo: true, recursive: false };
 // Bumped on every render(); a fetch that resolves after a newer navigation
 // compares against it and bails before touching the DOM (see render/buildGrid).
 var renderToken = 0;
@@ -29,12 +30,18 @@ function readUrl() {
   state.minRating = (r >= 1 && r <= 5) ? r : 0;
   state.includeImages = q.get('images') !== 'false';
   state.includeVideo = q.get('video') !== 'false';
+  state.recursive = q.get('recursive') === 'true';
 }
 
 // The current filters as a plain object, optionally with some keys overridden —
 // so a link can target "the current view but with X changed".
 function filters(over) {
-  var f = { minRating: state.minRating, includeImages: state.includeImages, includeVideo: state.includeVideo };
+  var f = {
+    minRating: state.minRating,
+    includeImages: state.includeImages,
+    includeVideo: state.includeVideo,
+    recursive: state.recursive
+  };
   if (over) for (var k in over) f[k] = over[k];
   return f;
 }
@@ -48,6 +55,7 @@ function photosUrl(segments, f) {
   if (f.minRating) qs.set('min_rating', f.minRating);
   if (!f.includeImages) qs.set('images', 'false');
   if (!f.includeVideo) qs.set('video', 'false');
+  if (f.recursive) qs.set('recursive', 'true');
   var q = qs.toString();
   return '/photos' + (p.length ? '/' + p.join('/') : '') + (q ? '?' + q : '');
 }
@@ -101,13 +109,16 @@ function apiParams() {
   if (state.minRating) p.set('min_rating', state.minRating);
   if (!state.includeImages) p.set('images', 'false');
   if (!state.includeVideo) p.set('video', 'false');
+  // Sent to /api/photos (extends the grid to all sub-albums); /api/subalbums
+  // ignores it (its counts are already recursive).
+  if (state.recursive) p.set('recursive', 'true');
   return p;
 }
 
-// ===== Navbar (breadcrumb + media toggles + rating selector) =================
-// Synchronous + idempotent: rebuild the navbar shell's .crumb, .media and .rating
-// from `state`. Runs during initial parse (before first paint, so no flash) and on
-// every navigation.
+// ===== Navbar (breadcrumb + recursive/media/rating filters) =================
+// Synchronous + idempotent: rebuild the navbar shell's .crumb, .recursive, .media
+// and .rating from `state`. Runs during initial parse (before first paint, so no
+// flash) and on every navigation.
 function renderNavbar() {
   var crumb = document.createDocumentFragment();
   var home = document.createElement('a');
@@ -128,6 +139,15 @@ function renderNavbar() {
     crumb.appendChild(a);
   });
   document.querySelector('.crumb').replaceChildren(crumb);
+
+  // Recursive toggle: a single glyph, gold when on, that extends the grid to all
+  // sub-albums' items. Clicking flips it (keeping the other filters).
+  var rec = document.createElement('a');
+  if (state.recursive) rec.className = 'on';
+  rec.href = photosUrl(state.album, filters({ recursive: !state.recursive }));
+  rec.title = (state.recursive ? 'Showing' : 'Show') + ' items from all sub-albums';
+  rec.textContent = '⊞';
+  document.querySelector('.recursive').replaceChildren(rec);
 
   // Media-type filter: a 3-state radio (all media / images only / videos only).
   renderMedia(document.querySelector('.media'));
