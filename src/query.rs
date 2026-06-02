@@ -10,7 +10,7 @@ use crate::db::{album_display_path, AlbumRoot};
 use crate::error::AppResult;
 use crate::models::{Cover, Page, PhotoSummary, SubAlbum};
 
-pub const DEFAULT_LIMIT: u64 = 10000;
+pub const DEFAULT_LIMIT: u64 = 25000;
 pub const MAX_LIMIT: u64 = 100000;
 
 /// A photo rating constrained to 0..=5. Construction — including

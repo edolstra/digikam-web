@@ -185,7 +185,7 @@ content-hash `ETag`) so updates propagate; icons are `immutable`.
   i.modificationDate DESC, i.id DESC`); the same column drives the day-grouping and the
   sub-album cover/sort. We deliberately use the file modification date, **not**
   `ImageInformation.creationDate` (which is Digikam's import time, rarely what you want).
-- **Paging** — `limit` defaults to 200, capped at 1000; `offset` defaults to 0.
+- **Paging** — `limit` defaults to 25000, capped at 100000; `offset` defaults to 0.
 
 ## Architecture & design choices
 
