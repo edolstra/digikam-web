@@ -735,14 +735,14 @@ function buildGrid(host, token) {
         // shows its sub-albums, with no message.
         if (state.album.length) {
           var none = document.createElement('p');
-          none.textContent = 'No photos in this album.';
+          none.textContent = 'No photos or videos in this album.';
           host.appendChild(none);
         }
         return;
       }
       var count = document.createElement('p');
       count.className = 'count';
-      count.textContent = page.items.length + (page.incomplete ? '+' : '') + ' photo(s)';
+      count.textContent = page.items.length + (page.incomplete ? '+' : '') + ' photo(s) or video(s)';
       host.appendChild(count);
       // Group into contiguous runs by day (the API already orders newest-first).
       var curDay = null, grid = null;
@@ -765,7 +765,7 @@ function buildGrid(host, token) {
       if (token !== renderToken) return;
       host.textContent = '';
       var err = document.createElement('p');
-      err.textContent = 'Failed to load photos.';
+      err.textContent = 'Failed to load photos or videos.';
       host.appendChild(err);
     });
 }
