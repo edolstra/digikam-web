@@ -58,11 +58,15 @@ pub struct TagNode {
     pub children: Vec<TagNode>,
 }
 
-/// The cover image used to represent a sub-album.
+/// The cover item used to represent a sub-album — the newest image **or video**
+/// in its subtree (videos have stored thumbnails the client can render).
 #[derive(Debug, Serialize)]
 pub struct Cover {
     pub id: u64,
     pub name: String,
+    /// True for a video cover: it has a thumbnail but no still to fall back to,
+    /// so the client doesn't set `data-full` on its tile.
+    pub is_video: bool,
 }
 
 /// A direct sub-album of some album, with its cover and recursive photo count.

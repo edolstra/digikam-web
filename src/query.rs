@@ -413,18 +413,20 @@ pub fn list_subalbums(
     };
 
     // Shared: group the matched rows into one tile per bucket (count + newest
-    // non-video cover), newest bucket first.
+    // cover), newest bucket first. The cover is the newest item — image OR video
+    // (videos have stored thumbnails the client renders), so its `category` rides
+    // along to flag a video cover.
     let sql = format!(
         "WITH matched AS ( {matched} ), \
          counts AS ( \
            SELECT bucket, COUNT(*) AS cnt, max(cdate) AS recent FROM matched GROUP BY bucket \
          ), \
          covers AS ( \
-           SELECT bucket, image_id, image_name, \
+           SELECT bucket, image_id, image_name, category, \
                   ROW_NUMBER() OVER (PARTITION BY bucket ORDER BY cdate DESC, image_id DESC) AS rn \
-           FROM matched WHERE category <> 2 \
+           FROM matched \
          ) \
-         SELECT c.bucket, cv.image_id, cv.image_name, c.cnt \
+         SELECT c.bucket, cv.image_id, cv.image_name, cv.category, c.cnt \
          FROM counts c LEFT JOIN covers cv ON cv.bucket = c.bucket AND cv.rn = 1 \
          ORDER BY c.recent DESC, c.bucket COLLATE NOCASE"
     );
@@ -439,18 +441,20 @@ pub fn list_subalbums(
             row.get::<_, String>(0)?,
             row.get::<_, Option<i64>>(1)?,
             row.get::<_, Option<String>>(2)?,
-            row.get::<_, i64>(3)?,
+            row.get::<_, Option<i64>>(3)?,
+            row.get::<_, i64>(4)?,
         ))
     })?;
 
     let mut out = Vec::new();
     for row in rows {
-        let (bucket, image_id, image_name, cnt) = row?;
-        // A bucket with only videos has no cover image.
+        let (bucket, image_id, image_name, category, cnt) = row?;
+        // Every non-empty bucket now has a cover (image or video).
         let cover = match (image_id, image_name) {
             (Some(id), Some(name)) => Some(Cover {
                 id: id as u64,
                 name,
+                is_video: category == Some(2),
             }),
             _ => None,
         };

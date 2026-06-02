@@ -790,7 +790,9 @@ function buildSubalbums(host, token) {
           var img = document.createElement('img');
           img.className = 'thumb';
           img.dataset.id = s.cover.id;
-          img.dataset.full = '/api/photos/' + s.cover.id + '/file';
+          // A video cover has a stored thumbnail but no still to fall back to, so
+          // (like grid video posters) we don't set data-full on it.
+          if (!s.cover.is_video) img.dataset.full = '/api/photos/' + s.cover.id + '/file';
           img.alt = '';
           a.appendChild(img);
         }
