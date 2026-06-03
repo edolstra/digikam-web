@@ -1105,7 +1105,7 @@ function initNav() {
   document.addEventListener('keydown', function (e) {
     if (e.altKey && e.key === 'ArrowUp' && !(LB && LB.isOpen()) && state.album.length) {
       e.preventDefault();
-      navigateTo(photosUrl(state.album.slice(0, -1), state.minRating));
+      navigateTo(photosUrl(state.album.slice(0, -1), filters()));
     }
   });
 }
