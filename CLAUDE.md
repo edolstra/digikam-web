@@ -122,6 +122,22 @@ reused across navigations; only the DOM is rebuilt (`render()` per navigation). 
   `data-full`, so a missing thumbnail just leaves the ▶ placeholder; the video itself
   isn't fetched until opened). The lightbox enumerates only *direct* grid children
   (`.grid > img, .grid > .vtile`), so a poster isn't its own item. See [Thumbnails](#thumbnails).
+- **Keyboard navigation** (`initGridNav` in [web.js](src/web.js)): the **arrow keys** move a
+  highlighted selection (`.selected`, an inset gold outline) across **both** grids in one
+  sequence — `.albums > a.album` then `.grid > img.thumb, .grid > .vtile`. Left/Right step in
+  DOM (reading) order; Up/Down are *geometric* (nearest row above/below by tile center, then
+  closest column — the grids wrap with a variable column count); **Home/End** jump to the
+  first/last tile, and **PageUp/PageDown** move by about a viewport (row-by-row in the same
+  column). **Enter** activates the
+  selection via `selected.click()` (so it reuses the existing delegated handlers: open the
+  lightbox for a photo/video, SPA-navigate into a sub-album). The selection is mirrored to the
+  **URL fragment** — `#item-<photoid>` for photos, `#item-<encoded name>` for sub-albums (each
+  tile carries that `id`) — via `replaceState` (no history spam), and `restoreSelection()`
+  re-applies it after every render, so it survives reload / Back/Forward. Guards: inert while
+  the lightbox is open or a modifier is held (so **Alt+↑** parent-nav still works). The
+  **lightbox tracks the selection too**: every `show()` (arrows / Home/End / wheel / swipe /
+  random / slideshow) calls `setSelected(tiles[i])`, and `dismiss()` writes that last-viewed
+  item to the grid selection + fragment — so closing the lightbox lands on the item you were viewing.
 - **Lightbox** (click a photo/video): full-page over a dimmed grid, requesting
   **fullscreen** (Fullscreen API; guarded/no-op where unsupported, e.g. iPhone Safari).
   The media is scaled to fill the viewport (up or down, preserving aspect). Videos

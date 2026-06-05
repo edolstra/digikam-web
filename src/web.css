@@ -83,6 +83,11 @@ h2 { font-size: 1rem; margin: 1.5rem 0 0.5rem; padding-bottom: 0.25rem;
 .grid .vtile::after { content: '▶'; position: absolute; inset: 0; display: flex;
                       align-items: center; justify-content: center; font-size: 3rem;
                       color: rgba(255, 255, 255, 0.85); text-shadow: 0 0 8px rgba(0, 0, 0, 0.8); }
+/* Keyboard-navigation selection (arrow keys). Inset outline so it isn't clipped by
+   .album's overflow and doesn't reflow the packed grid; keep a selected tile
+   visible even before its thumbnail has decoded. */
+.selected { outline: 3px solid #f5c518; outline-offset: -3px; }
+.grid img.thumb.selected { visibility: visible; }
 body.modal-open { overflow: hidden; }
 /* Sized in dynamic viewport units (dvw/dvh) so it tracks the *visible* viewport
    on mobile as the toolbars show/hide — plain vh/vw refer to the large viewport
