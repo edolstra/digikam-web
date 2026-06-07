@@ -244,8 +244,11 @@ content-hash `ETag`) so updates propagate; icons are `immutable`.
   (Digikam may be modifying the file concurrently). See `build_pool` in [src/db.rs](src/db.rs).
 - **Path resolution** ([src/db.rs](src/db.rs)): an image's absolute path is
   `AlbumRoots` base + `Albums.relativePath` + `/` + `Images.name`. The root base is
-  parsed from the `path=` field of the `volumeid:?path=…&fileuuid=…` identifier
-  (percent-decoded), joined with `specificPath`. The root album has `relativePath == "/"`.
+  parsed from the album-root identifier (percent-decoded), joined with `specificPath`:
+  local volumes use `volumeid:?path=…&fileuuid=…`, network shares use
+  `networkshareid:?mountpath=…&fileuuid=…` — we accept either `path=` or `mountpath=`
+  (a root whose identifier has neither is skipped with a warning). The root album has
+  `relativePath == "/"`.
 - **Visibility filter**: only `Images.status = 1` (visible) is returned; 3 (trashed)
   and 4 (obsolete) are excluded.
 - **Ratings/dimensions**: `rating`, `width`, `height`, `file_size`, `id` are `u64`.

@@ -98,12 +98,17 @@ pub fn load_roots(conn: &PooledConn) -> Result<HashMap<i64, AlbumRoot>> {
     Ok(roots)
 }
 
-/// Extract the `path=` value from a Digikam `volumeid:?path=...&fileuuid=...`
-/// identifier, percent-decoding it.
+/// Extract the base directory from a Digikam album-root identifier, percent-decoding
+/// it. Local volumes use `volumeid:?path=/abs/dir&fileuuid=...`; network shares use
+/// `networkshareid:?mountpath=/mnt/dir&fileuuid=...`. We accept either `path=` or
+/// `mountpath=`.
 fn parse_volume_path(identifier: &str) -> Option<String> {
     let query = identifier.split_once('?').map(|(_, q)| q)?;
     for pair in query.split('&') {
-        if let Some(value) = pair.strip_prefix("path=") {
+        if let Some(value) = pair
+            .strip_prefix("path=")
+            .or_else(|| pair.strip_prefix("mountpath="))
+        {
             return Some(urlencoding::decode(value).ok()?.into_owned());
         }
     }
@@ -143,6 +148,9 @@ mod tests {
             parse_volume_path(id).as_deref(),
             Some("/home/eelco/Images/Photos")
         );
+        // Network shares use `networkshareid:?mountpath=...` instead of `path=`.
+        let net = "networkshareid:?mountpath=/data/Video&fileuuid=082745db";
+        assert_eq!(parse_volume_path(net).as_deref(), Some("/data/Video"));
     }
 
     #[test]
