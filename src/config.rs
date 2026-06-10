@@ -5,7 +5,7 @@ use clap::Parser;
 
 /// Read-only web backend for browsing a Digikam photo database.
 #[derive(Debug, Clone, Parser)]
-#[command(name = "digikam-browse", version, about)]
+#[command(name = "digikam-web", version, about)]
 pub struct Config {
     /// Path to the Digikam SQLite database (digikam4.db).
     #[arg(

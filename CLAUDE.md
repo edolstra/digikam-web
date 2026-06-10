@@ -1,4 +1,4 @@
-# digikam-browse
+# digikam-web
 
 A **read-only** web backend (Rust) that serves the photos in a [Digikam](https://www.digikam.org/)
 SQLite database over an HTTP/JSON API. A web frontend will be added later.
@@ -12,7 +12,7 @@ uses [crane](https://github.com/ipetkov/crane) + [rust-overlay](https://github.c
 nix run                              # build + run with defaults
 nix develop --command cargo run      # iterate inside the dev shell
 nix develop --command cargo test     # unit tests
-nix build                            # produce ./result/bin/digikam-browse
+nix build                            # produce ./result/bin/digikam-web
 nix flake check                      # build + clippy (-D warnings)
 ```
 
@@ -31,7 +31,7 @@ Config (CLI flags or env vars):
 - `--thumbnail-database` / `THUMBNAIL_DB` — path to `thumbnails-digikam.db` (default:
   alongside `--database`). Optional; if missing, `/thumbnail` returns `404`.
 - `--trace-sql` / `TRACE_SQL` — log every executed SQL statement (with bound values
-  inlined) at `info` under the `digikam_browse::sql` target. Off by default.
+  inlined) at `info` under the `digikam_web::sql` target. Off by default.
 
 > Nix flakes only see git-tracked files. After adding/renaming a file, `git add` it
 > before `nix build`/`nix develop`, or Nix won't find it (and crane needs `Cargo.lock` tracked).

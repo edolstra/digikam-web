@@ -55,22 +55,22 @@
 
         cargoArtifacts = craneLib.buildDepsOnly commonArgs;
 
-        digikam-browse = craneLib.buildPackage (commonArgs // {
+        digikam-web = craneLib.buildPackage (commonArgs // {
           inherit cargoArtifacts;
         });
       in
       {
-        packages.default = digikam-browse;
-        packages.digikam-browse = digikam-browse;
+        packages.default = digikam-web;
+        packages.digikam-web = digikam-web;
         packages.webpgf = webpgf;
 
         apps.default = flake-utils.lib.mkApp {
-          drv = digikam-browse;
-          name = "digikam-browse";
+          drv = digikam-web;
+          name = "digikam-web";
         };
 
         checks = {
-          inherit digikam-browse;
+          inherit digikam-web;
           clippy = craneLib.cargoClippy (commonArgs // {
             inherit cargoArtifacts;
             cargoClippyExtraArgs = "--all-targets -- --deny warnings";
@@ -78,7 +78,7 @@
         };
 
         devShells.default = pkgs.mkShell {
-          inputsFrom = [ digikam-browse ];
+          inputsFrom = [ digikam-web ];
           packages = [
             rustToolchain
             pkgs.rust-analyzer

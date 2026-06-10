@@ -261,7 +261,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "digikam-browse"
+name = "digikam-web"
 version = "0.1.0"
 dependencies = [
  "anyhow",

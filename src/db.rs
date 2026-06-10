@@ -42,9 +42,9 @@ pub fn build_pool(database: &Path, trace_sql: bool) -> Result<Pool> {
             c.pragma_update(None, "query_only", true)?;
             if trace_sql {
                 // The callback receives each statement with its bound values
-                // already expanded, logged under the `digikam_browse::sql` target.
+                // already expanded, logged under the `digikam_web::sql` target.
                 c.trace(Some(|sql| {
-                    tracing::info!(target: "digikam_browse::sql", "{sql}");
+                    tracing::info!(target: "digikam_web::sql", "{sql}");
                 }));
             }
             Ok(())
