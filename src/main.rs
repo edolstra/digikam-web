@@ -51,9 +51,25 @@ async fn main() -> Result<()> {
         }
     };
 
+    // Our own writable bookmarks DB (web.sql). If it can't be opened, bookmarks
+    // are simply unavailable; the rest of the app still works.
+    let web_db = config.web_db_path();
+    let web = match db::build_web_pool(&web_db, config.trace_sql) {
+        Ok(p) => {
+            tracing::info!(path = %web_db.display(), "opened bookmarks database (read-write)");
+            Some(p)
+        }
+        Err(e) => {
+            tracing::warn!(path = %web_db.display(), error = %e,
+                "bookmarks database unavailable; bookmark endpoints will degrade");
+            None
+        }
+    };
+
     let state = AppState {
         pool,
         thumbs,
+        web,
         roots: Arc::new(roots),
     };
 
@@ -65,7 +81,15 @@ async fn main() -> Result<()> {
         .route("/photos/:id/thumbnail", get(handlers::get_photo_thumbnail))
         .route("/albums", get(handlers::list_albums))
         .route("/subalbums", get(handlers::list_subalbums))
-        .route("/tags", get(handlers::list_tags));
+        .route("/tags", get(handlers::list_tags))
+        .route(
+            "/bookmarks",
+            get(handlers::list_bookmarks).post(handlers::create_bookmark),
+        )
+        .route(
+            "/bookmarks/:name",
+            axum::routing::delete(handlers::delete_bookmark),
+        );
 
     let app = Router::new()
         .nest("/api", api)

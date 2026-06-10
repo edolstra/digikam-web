@@ -187,6 +187,7 @@ fn page_html(title: &str, body: Markup) -> Markup {
             }
             body {
                 header.navbar {
+                    span.menu {}
                     span.crumb {}
                     span.recursive {}
                     span.media {}

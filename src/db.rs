@@ -23,6 +23,8 @@ pub struct AppState {
     pub pool: Pool,
     /// Read-only pool for Digikam's `thumbnails-digikam.db`, if it was found.
     pub thumbs: Option<Pool>,
+    /// Writable pool for our own `web.sql` (bookmarks), if it could be opened.
+    pub web: Option<Pool>,
     pub roots: Arc<HashMap<i64, AlbumRoot>>,
 }
 
@@ -53,6 +55,47 @@ pub fn build_pool(database: &Path, trace_sql: bool) -> Result<Pool> {
         .max_size(8)
         .build(manager)
         .context("failed to open database pool")?;
+    Ok(pool)
+}
+
+/// Open (creating if missing) a **writable** pool for our own `web.sql` and run
+/// the bookmarks migration.
+///
+/// This is the deliberate exception to the otherwise strictly read-only design:
+/// `web.sql` is *our* data file (never a Digikam DB), so it's opened with
+/// `SQLITE_OPEN_READ_WRITE | SQLITE_OPEN_CREATE` and **without** `query_only`.
+pub fn build_web_pool(database: &Path, trace_sql: bool) -> Result<Pool> {
+    let manager = SqliteConnectionManager::file(database)
+        .with_flags(OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_CREATE)
+        .with_init(move |c| {
+            c.busy_timeout(std::time::Duration::from_secs(5))?;
+            if trace_sql {
+                c.trace(Some(|sql| {
+                    tracing::info!(target: "digikam_web::sql", "{sql}");
+                }));
+            }
+            Ok(())
+        });
+    let pool = r2d2::Pool::builder()
+        .max_size(4)
+        .build(manager)
+        .context("failed to open bookmarks database pool")?;
+
+    pool.get()
+        .context("failed to get bookmarks connection")?
+        .execute_batch(
+            "CREATE TABLE IF NOT EXISTS bookmarks ( \
+               name       TEXT PRIMARY KEY, \
+               album      TEXT    NOT NULL, \
+               recursive  INTEGER NOT NULL, \
+               min_rating INTEGER NOT NULL, \
+               images     INTEGER NOT NULL, \
+               video      INTEGER NOT NULL, \
+               aspect     TEXT    NOT NULL \
+             )",
+        )
+        .context("failed to create bookmarks table")?;
+
     Ok(pool)
 }
 

@@ -21,6 +21,11 @@ pub struct Config {
     #[arg(long, env = "THUMBNAIL_DB")]
     pub thumbnail_database: Option<PathBuf>,
 
+    /// Path to the writable bookmarks DB (`web.sql`). Defaults to a `web.sql`
+    /// next to `--database`; created if absent. This is the only DB we write.
+    #[arg(long, env = "WEB_DB")]
+    pub web_database: Option<PathBuf>,
+
     /// Address to listen on.
     #[arg(long, env = "LISTEN_ADDR", default_value = "127.0.0.1:8080")]
     pub listen: SocketAddr,
@@ -39,6 +44,17 @@ impl Config {
                 .parent()
                 .unwrap_or_else(|| std::path::Path::new("."))
                 .join("thumbnails-digikam.db")
+        })
+    }
+
+    /// The bookmarks DB path: the `--web-database` override, else a `web.sql`
+    /// alongside `--database`.
+    pub fn web_db_path(&self) -> PathBuf {
+        self.web_database.clone().unwrap_or_else(|| {
+            self.database
+                .parent()
+                .unwrap_or_else(|| std::path::Path::new("."))
+                .join("web.sql")
         })
     }
 }

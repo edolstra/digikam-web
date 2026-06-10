@@ -1,4 +1,33 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+
+use crate::query::{Aspect, Rating};
+
+/// The set of view filters active on an album page. Held separately from
+/// `PhotoQuery` so it can be passed to `list_subalbums` and applied to the
+/// photo grid, and embedded in a saved [`Bookmark`]. Designed to grow (tags,
+/// date range, …). Note `recursive` is deliberately *not* here — it's a
+/// `PhotoQuery`-only concern that `/subalbums` ignores.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Filters {
+    /// Minimum rating; the default `Rating(0)` means no rating filter.
+    pub min_rating: Rating,
+    /// Media-type filter; both `true` by default.
+    pub include_images: bool,
+    pub include_video: bool,
+    /// Aspect-ratio filter; the default `All` applies no constraint.
+    pub aspect: Aspect,
+}
+
+impl Default for Filters {
+    fn default() -> Self {
+        Filters {
+            min_rating: Rating::default(),
+            include_images: true,
+            include_video: true,
+            aspect: Aspect::All,
+        }
+    }
+}
 
 /// A paginated response envelope.
 #[derive(Debug, Serialize)]
@@ -80,4 +109,31 @@ pub struct SubAlbum {
     pub photo_count: u64,
     /// Most recent image in the subtree, or `None` if it contains only videos.
     pub cover: Option<Cover>,
+}
+
+/// A saved view: a name plus the album + filter settings to jump back to.
+/// Stored in the writable `web.sql` database (see [crate::db::build_web_pool]).
+#[derive(Debug, Clone, Serialize)]
+pub struct Bookmark {
+    pub name: String,
+    /// Album display path, e.g. `/Photos/Lego` (empty string = the virtual root).
+    pub album: String,
+    /// Whether the recursive (include sub-albums) toggle was on.
+    pub recursive: bool,
+    #[serde(flatten)]
+    pub filters: Filters,
+}
+
+/// Request body for `POST /api/bookmarks`.
+#[derive(Debug, Deserialize)]
+pub struct CreateBookmark {
+    pub name: String,
+    pub album: String,
+    pub recursive: bool,
+    #[serde(flatten)]
+    pub filters: Filters,
+    /// When true, replace an existing bookmark of the same name instead of
+    /// failing with a conflict.
+    #[serde(default)]
+    pub overwrite: bool,
 }

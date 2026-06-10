@@ -8,7 +8,7 @@ use serde::{Serialize, Serializer};
 
 use crate::db::{album_display_path, AlbumRoot};
 use crate::error::AppResult;
-use crate::models::{Cover, Page, PhotoSummary, SubAlbum};
+use crate::models::{Cover, Filters, Page, PhotoSummary, SubAlbum};
 
 pub const DEFAULT_LIMIT: u64 = 25000;
 pub const MAX_LIMIT: u64 = 100000;
@@ -75,18 +75,37 @@ impl Aspect {
             Aspect::Landscape => " AND ii.width >= ii.height",
         }
     }
+
+    /// The canonical string form (matches the query-string / JSON values).
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Aspect::All => "all",
+            Aspect::Portrait => "portrait",
+            Aspect::Landscape => "landscape",
+        }
+    }
+
+    /// Parse the canonical string form, e.g. when reading a stored bookmark.
+    pub fn parse(s: &str) -> Option<Aspect> {
+        match s {
+            "all" => Some(Aspect::All),
+            "portrait" => Some(Aspect::Portrait),
+            "landscape" => Some(Aspect::Landscape),
+            _ => None,
+        }
+    }
+}
+
+impl Serialize for Aspect {
+    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(self.as_str())
+    }
 }
 
 impl<'de> Deserialize<'de> for Aspect {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        match String::deserialize(d)?.as_str() {
-            "all" => Ok(Aspect::All),
-            "portrait" => Ok(Aspect::Portrait),
-            "landscape" => Ok(Aspect::Landscape),
-            _ => Err(de::Error::custom(
-                "aspect must be all, portrait, or landscape",
-            )),
-        }
+        Aspect::parse(&String::deserialize(d)?)
+            .ok_or_else(|| de::Error::custom("aspect must be all, portrait, or landscape"))
     }
 }
 
@@ -130,33 +149,6 @@ impl Default for PhotoQuery {
             aspect: Aspect::All,
             limit: 0,
             offset: 0,
-        }
-    }
-}
-
-/// The set of view filters active on an album page. Held separately from
-/// [`PhotoQuery`] so it can be passed to [`list_subalbums`] and applied to the
-/// photo grid. Designed to grow (tags, date range, …). The frontend now builds
-/// its links and parses the query string client-side (see [web.js](web.js)), so
-/// this is consumed only by the JSON API handlers.
-#[derive(Debug, Clone)]
-pub struct Filters {
-    /// Minimum rating; the default `Rating(0)` means no rating filter.
-    pub min_rating: Rating,
-    /// Media-type filter; both `true` by default (see [`PhotoQuery`]).
-    pub include_images: bool,
-    pub include_video: bool,
-    /// Aspect-ratio filter; the default `All` applies no constraint.
-    pub aspect: Aspect,
-}
-
-impl Default for Filters {
-    fn default() -> Self {
-        Filters {
-            min_rating: Rating::default(),
-            include_images: true,
-            include_video: true,
-            aspect: Aspect::All,
         }
     }
 }

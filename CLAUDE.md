@@ -28,6 +28,8 @@ Config (CLI flags or env vars):
   alongside `--database`). Optional; if missing, `/thumbnail` returns `404`.
 - `--trace-sql` / `TRACE_SQL` — log every executed SQL statement (with bound values
   inlined) at `info` under the `digikam_web::sql` target. Off by default.
+- `--web-database` / `WEB_DB` — path to the **writable** bookmarks DB (`web.sql`, default:
+  alongside `--database`; created if missing). This is the *only* DB we write to.
 
 > Nix flakes only see git-tracked files. After adding/renaming a file, `git add` it
 > before `nix build`/`nix develop`, or Nix won't find it (and crane needs `Cargo.lock` tracked).
@@ -45,6 +47,9 @@ All endpoints are served under the `/api` prefix.
 | `GET /api/albums` | Flat list of all albums (`{id, path, root}`). |
 | `GET /api/subalbums?album=/Root/rel&min_rating=&images=&video=&aspect=` | Direct sub-albums of an album as `[{name, path, photo_count, cover: {id, name} \| null}]`, sorted by most recent photo (newest first). An absent/empty `album` lists the album roots. Cover = newest item (image **or** video — videos have stored thumbnails the client renders) in the sub-album's whole subtree; `Cover.is_video` flags a video cover (the client then omits its `data-full`). `photo_count` is the recursive count incl. videos. `min_rating` (0..=5), the `images`/`video` media-type filter, and the `aspect` filter (`all`/`portrait`/`landscape`) constrain the cover, count, and which sub-albums appear alike. One query; albums with no matching photos anywhere are omitted. |
 | `GET /api/tags` | Tag **tree** (`{id, name, children}`), internal tags excluded. |
+| `GET /api/bookmarks` | Saved bookmarks `[{name, album, recursive, min_rating, include_images, include_video, aspect}]`, sorted by name (`COLLATE NOCASE`). `[]` if the bookmarks DB is unavailable. Each bookmark is a named album + filter snapshot (the filter fields are the flattened [`Filters`](src/models.rs); `recursive` is separate, as `Filters` excludes it). |
+| `POST /api/bookmarks` | Create a bookmark from the same JSON shape (+ optional `overwrite`). Empty/over-long name → `400`; bad `min_rating`/`aspect` → `422` (typed body validation); duplicate name without `overwrite` → `409`; `overwrite:true` does `INSERT OR REPLACE`. |
+| `DELETE /api/bookmarks/:name` | Remove a bookmark (idempotent → `204`). |
 | `GET /api/health` | Liveness. |
 
 ### Frontend (HTML)
@@ -79,6 +84,13 @@ reused across navigations; only the DOM is rebuilt (`render()` per navigation). 
 - **Navbar (sticky** — pinned to the top, the page scrolls underneath**)**: a client-built
   breadcrumb starting with a `⌂` home icon (→ the root) then `› Photos › Lego › Porsche911`,
   each segment a link to that ancestor album. **Alt+↑** navigates to the parent album.
+- **Bookmarks menu** (navbar far left, the `☰` hamburger): built once by `initMenu` into the
+  static `.menu` span (so it survives in-place re-renders). Opening it fetches
+  `/api/bookmarks`; the dropdown has a **“➕ New bookmark…”** item (prompts for a name,
+  snapshots the current album + filters via `state`, `POST`s it; if the name exists it
+  `confirm()`s and sends `overwrite`) plus one row per bookmark — a name link (a normal
+  `/photos` href built with `photosUrl`, so `initNav` does the navigation; the menu just
+  closes) and a `✕` delete (`confirm` → `DELETE`). Sorted by name.
 - **Recursive toggle** (navbar, leftmost of the filter cluster): a single `⊞` glyph, grey
   when off / gold when on, that extends the photo grid to **all sub-albums' items** (`?recursive=true`
   → `/api/photos?recursive=true`). The sub-album tiles still show (their counts are already
@@ -101,7 +113,8 @@ reused across navigations; only the DOM is rebuilt (`render()` per navigation). 
   the SPA's state, read from the URL on load and written back on each navigation. Every client-built
   breadcrumb / sub-album / star / toggle link carries the current filters so they persist while
   browsing; they also constrain the sub-album tile covers/counts. The server-side `Filters`
-  struct ([src/query.rs](src/query.rs)) is now used only by the JSON API handlers.
+  struct ([src/models.rs](src/models.rs)) is used by the JSON API handlers and embedded in
+  saved bookmarks.
 - **Sub-album grid** (below the breadcrumb): direct sub-albums (newest-first, from
   `/api/subalbums`); each tile is the cover image with the bold sub-album name and
   `(count)` centered on top, linking to that sub-album. Covers use the same lazy
@@ -238,6 +251,12 @@ content-hash `ETag`) so updates propagate; icons are `immutable`.
   `SQLITE_OPEN_READ_ONLY`, set `PRAGMA query_only=ON`, and a 5s `busy_timeout` so
   reads don't fail while Digikam writes. We deliberately do **not** use `immutable=1`
   (Digikam may be modifying the file concurrently). See `build_pool` in [src/db.rs](src/db.rs).
+- **One writable DB — `web.sql`** (bookmarks): the sole exception to read-only.
+  `build_web_pool` in [src/db.rs](src/db.rs) opens *our own* `web.sql` with
+  `SQLITE_OPEN_READ_WRITE | SQLITE_OPEN_CREATE` and **no** `query_only`, then runs a
+  `CREATE TABLE IF NOT EXISTS bookmarks(...)` migration. It's optional (`AppState.web:
+  Option<Pool>`, graceful like `thumbs`); the bookmark handlers run via a `run_web`
+  helper. Never points at a Digikam DB.
 - **Path resolution** ([src/db.rs](src/db.rs)): an image's absolute path is
   `AlbumRoots` base + `Albums.relativePath` + `/` + `Images.name`. The root base is
   parsed from the album-root identifier (percent-decoded), joined with `specificPath`:
@@ -330,10 +349,10 @@ queued/new tiles do too.
 src/
   main.rs      router, startup, graceful shutdown
   config.rs    clap config (database path, listen addr)
-  db.rs        read-only pool, album-root loading, path resolution  (+ unit tests)
-  models.rs    serde response types (PhotoSummary, PhotoDetail, AlbumNode, SubAlbum, TagNode, Page<T>)
-  query.rs     /photos + /subalbums SQL + param building              (+ unit tests)
-  handlers.rs  axum JSON API handlers, run_blocking DB helper
+  db.rs        read-only pools + writable web.sql pool, album-root loading, path resolution  (+ unit tests)
+  models.rs    serde types (PhotoSummary, PhotoDetail, AlbumNode, SubAlbum, TagNode, Page<T>, Filters, Bookmark)
+  query.rs     /photos + /subalbums SQL + param building; Rating/Aspect types (+ unit tests)
+  handlers.rs  axum JSON API handlers (incl. bookmarks), run_blocking/run_web DB helpers
   web.rs       static SPA shell (navbar + empty containers) + static asset handlers, maud
   web.css      frontend stylesheet, inlined via include_str!  (STYLE)
   web.js       SPA: state/URL routing, navbar, grid + sub-album tiles, thumbnails, lightbox, SW (SCRIPT)

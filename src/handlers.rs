@@ -12,8 +12,11 @@ use tower_http::services::ServeFile;
 
 use crate::db::{album_display_path, image_abs_path, AppState, PooledConn};
 use crate::error::{AppError, AppResult};
-use crate::models::{AlbumNode, Page, PhotoDetail, PhotoSummary, SubAlbum, TagNode};
-use crate::query::{self, Aspect, Filters, PhotoQuery, Rating, DEFAULT_LIMIT, MAX_LIMIT};
+use crate::models::{
+    AlbumNode, Bookmark, CreateBookmark, Filters, Page, PhotoDetail, PhotoSummary, SubAlbum,
+    TagNode,
+};
+use crate::query::{self, Aspect, PhotoQuery, Rating, DEFAULT_LIMIT, MAX_LIMIT};
 
 /// `GET /health`
 pub async fn health() -> impl IntoResponse {
@@ -482,4 +485,133 @@ where
     })
     .await
     .map_err(|e| AppError::Internal(anyhow::anyhow!("task join error: {e}")))?
+}
+
+/// Like [`run_blocking`], but against the writable bookmarks pool (`web.sql`).
+/// Errors if that DB couldn't be opened.
+async fn run_web<F, T>(state: &AppState, f: F) -> AppResult<T>
+where
+    F: FnOnce(&PooledConn) -> AppResult<T> + Send + 'static,
+    T: Send + 'static,
+{
+    let pool = state
+        .web
+        .clone()
+        .ok_or_else(|| AppError::Internal(anyhow::anyhow!("bookmarks database unavailable")))?;
+    tokio::task::spawn_blocking(move || {
+        let conn = pool.get()?;
+        f(&conn)
+    })
+    .await
+    .map_err(|e| AppError::Internal(anyhow::anyhow!("task join error: {e}")))?
+}
+
+/// Map a row of the `bookmarks` table to a [`Bookmark`].
+fn row_to_bookmark(row: &rusqlite::Row) -> rusqlite::Result<Bookmark> {
+    Ok(Bookmark {
+        name: row.get(0)?,
+        album: row.get(1)?,
+        recursive: row.get::<_, i64>(2)? != 0,
+        filters: Filters {
+            min_rating: Rating::new(row.get::<_, i64>(3)?).unwrap_or_default(),
+            include_images: row.get::<_, i64>(4)? != 0,
+            include_video: row.get::<_, i64>(5)? != 0,
+            aspect: Aspect::parse(&row.get::<_, String>(6)?).unwrap_or_default(),
+        },
+    })
+}
+
+/// `GET /bookmarks` — all saved bookmarks, sorted by name (case-insensitive).
+/// Returns `[]` when the bookmarks DB is unavailable.
+pub async fn list_bookmarks(State(state): State<AppState>) -> AppResult<Json<Vec<Bookmark>>> {
+    if state.web.is_none() {
+        return Ok(Json(Vec::new()));
+    }
+    let bookmarks = run_web(&state, |conn| {
+        let mut stmt = conn.prepare(
+            "SELECT name, album, recursive, min_rating, images, video, aspect \
+             FROM bookmarks ORDER BY name COLLATE NOCASE",
+        )?;
+        let rows = stmt
+            .query_map([], row_to_bookmark)?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
+    })
+    .await?;
+    Ok(Json(bookmarks))
+}
+
+/// `POST /bookmarks` — create a bookmark, or overwrite a same-named one when
+/// `overwrite` is set. A duplicate name without `overwrite` is a `409`.
+pub async fn create_bookmark(
+    State(state): State<AppState>,
+    Json(req): Json<CreateBookmark>,
+) -> AppResult<Json<Bookmark>> {
+    let name = req.name.trim().to_string();
+    if name.is_empty() {
+        return Err(AppError::BadRequest(
+            "bookmark name must not be empty".into(),
+        ));
+    }
+    if name.chars().count() > 100 {
+        return Err(AppError::BadRequest("bookmark name is too long".into()));
+    }
+
+    let bookmark = Bookmark {
+        name,
+        album: req.album,
+        recursive: req.recursive,
+        filters: req.filters,
+    };
+    let overwrite = req.overwrite;
+    let b = bookmark.clone();
+
+    run_web(&state, move |conn| {
+        let sql = if overwrite {
+            "INSERT OR REPLACE INTO bookmarks \
+               (name, album, recursive, min_rating, images, video, aspect) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)"
+        } else {
+            "INSERT INTO bookmarks \
+               (name, album, recursive, min_rating, images, video, aspect) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)"
+        };
+        conn.execute(
+            sql,
+            rusqlite::params![
+                b.name,
+                b.album,
+                b.recursive as i64,
+                b.filters.min_rating.get(),
+                b.filters.include_images as i64,
+                b.filters.include_video as i64,
+                b.filters.aspect.as_str(),
+            ],
+        )
+        .map_err(|e| match &e {
+            rusqlite::Error::SqliteFailure(f, _)
+                if f.code == rusqlite::ErrorCode::ConstraintViolation =>
+            {
+                AppError::Conflict(format!("a bookmark named \"{}\" already exists", b.name))
+            }
+            _ => AppError::from(e),
+        })?;
+        Ok(())
+    })
+    .await?;
+
+    Ok(Json(bookmark))
+}
+
+/// `DELETE /bookmarks/:name` — remove a bookmark (idempotent).
+pub async fn delete_bookmark(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+) -> AppResult<StatusCode> {
+    run_web(&state, move |conn| {
+        conn.execute("DELETE FROM bookmarks WHERE name = ?1", [name])?;
+        Ok(())
+    })
+    .await?;
+    Ok(StatusCode::NO_CONTENT)
 }

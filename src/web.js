@@ -1236,6 +1236,134 @@ function initGridNav() {
   });
 }
 
+// ===== Bookmarks menu ========================================================
+// A hamburger (☰) at the navbar's far left, in the static `.menu` span (so it
+// survives in-place re-renders). It lists saved bookmarks — name + album +
+// filters, stored server-side in web.sql — and lets you snapshot the current
+// view as a new one. Bookmark links are plain /photos hrefs, so the global nav
+// handler (initNav) does the actual navigation; we just close the menu.
+function initMenu() {
+  var host = document.querySelector('.menu');
+  if (!host) return;
+
+  var btn = document.createElement('button');
+  btn.className = 'menu-btn';
+  btn.type = 'button';
+  btn.title = 'Bookmarks';
+  btn.setAttribute('aria-label', 'Bookmarks');
+  btn.textContent = '☰';
+
+  var dd = document.createElement('div');
+  dd.className = 'menu-dropdown';
+  host.append(btn, dd);
+
+  var bookmarks = [];
+
+  function close() { dd.classList.remove('open'); }
+  function load() {
+    fetch('/api/bookmarks')
+      .then(function (r) { return r.json(); })
+      .then(function (list) { bookmarks = Array.isArray(list) ? list : []; build(); })
+      .catch(function () { bookmarks = []; build(); });
+  }
+
+  function build() {
+    var frag = document.createDocumentFragment();
+
+    var add = document.createElement('a');
+    add.className = 'menu-item menu-new';
+    add.href = '#';
+    add.textContent = '➕ New bookmark…';
+    add.addEventListener('click', function (e) { e.preventDefault(); createBookmark(); });
+    frag.appendChild(add);
+
+    bookmarks.forEach(function (bm) {
+      var row = document.createElement('div');
+      row.className = 'menu-item';
+
+      var link = document.createElement('a');
+      link.className = 'bm-link';
+      link.textContent = bm.name;
+      var segs = bm.album.split('/').filter(Boolean);
+      link.href = photosUrl(segs, {
+        minRating: bm.min_rating,
+        includeImages: bm.include_images,
+        includeVideo: bm.include_video,
+        recursive: bm.recursive,
+        aspect: bm.aspect
+      });
+      // Navigation is handled by initNav's delegated handler; just close the menu.
+      link.addEventListener('click', close);
+      row.appendChild(link);
+
+      var del = document.createElement('button');
+      del.className = 'bm-del';
+      del.type = 'button';
+      del.title = 'Delete bookmark';
+      del.setAttribute('aria-label', 'Delete bookmark');
+      del.textContent = '✕';
+      del.addEventListener('click', function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        deleteBookmark(bm.name);
+      });
+      row.appendChild(del);
+
+      frag.appendChild(row);
+    });
+
+    dd.replaceChildren(frag);
+  }
+
+  function createBookmark() {
+    var name = prompt('Bookmark name:');
+    if (name === null) return;
+    name = name.trim();
+    if (!name) return;
+
+    var overwrite = bookmarks.some(function (b) { return b.name.toLowerCase() === name.toLowerCase(); });
+    if (overwrite && !confirm('A bookmark named "' + name + '" already exists. Overwrite?')) return;
+
+    var body = {
+      name: name,
+      album: state.album.length ? '/' + state.album.join('/') : '',
+      recursive: state.recursive,
+      min_rating: state.minRating,
+      include_images: state.includeImages,
+      include_video: state.includeVideo,
+      aspect: state.aspect,
+      overwrite: overwrite
+    };
+    fetch('/api/bookmarks', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body)
+    }).then(function (r) {
+      if (!r.ok) { alert('Could not save bookmark.'); return; }
+      load();
+    }).catch(function () { alert('Could not save bookmark.'); });
+  }
+
+  function deleteBookmark(name) {
+    if (!confirm('Delete bookmark "' + name + '"?')) return;
+    fetch('/api/bookmarks/' + encodeURIComponent(name), { method: 'DELETE' })
+      .then(function () { load(); })
+      .catch(function () {});
+  }
+
+  btn.addEventListener('click', function (e) {
+    e.stopPropagation();
+    if (dd.classList.contains('open')) { close(); } else { dd.classList.add('open'); load(); }
+  });
+  // Dismiss on outside click / Esc.
+  document.addEventListener('click', function (e) {
+    if (dd.classList.contains('open') && !host.contains(e.target)) close();
+  });
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape') close();
+  });
+}
+
 // ===== Bootstrap =============================================================
 (function () {
   // We rebuild the grid asynchronously on Back/Forward, so the browser's own
@@ -1244,6 +1372,7 @@ function initGridNav() {
   readUrl();
   initLightbox();
   initNav();
+  initMenu();
   initGridNav();
   render();
 })();
