@@ -92,82 +92,12 @@ async fn main() -> Result<()> {
         .await
         .with_context(|| format!("failed to bind {}", config.listen))?;
 
-    if config.tls {
-        tracing::info!(addr = %config.listen, "listening (HTTPS + HTTP/2, self-signed cert)");
-        serve_tls(listener, app).await?;
-    } else {
-        tracing::info!(addr = %config.listen, "listening (HTTP/1.1)");
-        axum::serve(listener, app)
-            .with_graceful_shutdown(shutdown_signal())
-            .await
-            .context("server error")?;
-    }
+    tracing::info!(addr = %config.listen, "listening");
+    axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown_signal())
+        .await
+        .context("server error")?;
     Ok(())
-}
-
-/// Serve over TLS with an auto-generated self-signed certificate, negotiating
-/// HTTP/2 (ALPN `h2`, falling back to HTTP/1.1) via hyper's auto builder.
-async fn serve_tls(listener: tokio::net::TcpListener, app: Router) -> Result<()> {
-    use hyper_util::rt::{TokioExecutor, TokioIo};
-    use hyper_util::server::conn::auto::Builder;
-
-    let tls = Arc::new(self_signed_tls_config().context("building TLS config")?);
-    let acceptor = tokio_rustls::TlsAcceptor::from(tls);
-
-    let mut shutdown = std::pin::pin!(shutdown_signal());
-    loop {
-        let (stream, _peer) = tokio::select! {
-            _ = &mut shutdown => break,
-            accepted = listener.accept() => match accepted {
-                Ok(s) => s,
-                Err(e) => { tracing::warn!(error = %e, "accept failed"); continue; }
-            },
-        };
-        let acceptor = acceptor.clone();
-        let app = app.clone();
-        tokio::spawn(async move {
-            // A failed handshake (e.g. a plain-HTTP probe) just drops the conn.
-            let Ok(stream) = acceptor.accept(stream).await else {
-                return;
-            };
-            let io = TokioIo::new(stream);
-            let service =
-                hyper::service::service_fn(move |req: hyper::Request<hyper::body::Incoming>| {
-                    use tower::Service;
-                    app.clone().call(req.map(axum::body::Body::new))
-                });
-            if let Err(e) = Builder::new(TokioExecutor::new())
-                .serve_connection(io, service)
-                .await
-            {
-                tracing::debug!(error = %e, "connection closed with error");
-            }
-        });
-    }
-    Ok(())
-}
-
-/// Build a rustls server config with a freshly generated self-signed certificate
-/// (for `localhost`/loopback) and ALPN advertising HTTP/2 then HTTP/1.1.
-fn self_signed_tls_config() -> Result<rustls::ServerConfig> {
-    // Install the ring crypto provider once (ignored if already set).
-    let _ = rustls::crypto::ring::default_provider().install_default();
-
-    let cert = rcgen::generate_simple_self_signed(vec![
-        "localhost".to_string(),
-        "127.0.0.1".to_string(),
-        "::1".to_string(),
-    ])
-    .context("generating self-signed certificate")?;
-    let cert_der = cert.cert.der().clone();
-    let key_der = rustls::pki_types::PrivateKeyDer::Pkcs8(cert.key_pair.serialize_der().into());
-
-    let mut config = rustls::ServerConfig::builder()
-        .with_no_client_auth()
-        .with_single_cert(vec![cert_der], key_der)
-        .context("loading self-signed certificate")?;
-    config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
-    Ok(config)
 }
 
 async fn shutdown_signal() {
