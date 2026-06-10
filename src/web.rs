@@ -189,11 +189,6 @@ fn page_html(title: &str, body: Markup) -> Markup {
                 header.navbar {
                     span.menu {}
                     span.crumb {}
-                    span.recursive {}
-                    span.media {}
-                    span.aspect {}
-                    span.rating {}
-                    span.reset {}
                 }
                 (body)
                 div.lightbox id="lightbox" {

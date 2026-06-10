@@ -16,55 +16,59 @@ body { font-family: sans-serif; margin: 1rem; background: #111; color: #eee; }
 .crumb a { color: #6cf; text-decoration: none; }
 .crumb .home { font-size: 1.3rem; }
 .crumb .sep { color: #666; margin: 0 0.2rem; }
-/* Recursive toggle: a single glyph, grey when off / gold when on, that extends
-   the grid to all sub-albums' items. */
-.recursive a { color: #555; text-decoration: none; font-size: 1.25rem; padding: 0 0.3rem; }
-.recursive a.on { color: #f5c518; }
-/* Segmented 3-state radios: the media-type filter (📷🎥 all / 📷 images / 🎥 video)
-   and the aspect-ratio filter (▯▭ all / ▯ portrait / ▭ landscape). The active
-   segment is highlighted and inert; the others are plain (not dimmed — the icons
-   are small enough that greying them out hurts legibility). */
-.media, .aspect { display: inline-flex; white-space: nowrap; border: 1px solid #444;
-                  border-radius: 5px; overflow: hidden; }
-.media > *, .aspect > * { padding: 0.1rem 0.45rem; font-size: 0.95rem; line-height: 1.4;
-                          text-decoration: none; cursor: pointer; }
-.media > * + *, .aspect > * + * { border-left: 1px solid #444; }
-.media .on, .aspect .on { background: #3a3a3a; cursor: default; }
+/* Segmented radios used in the Filters menu: the media-type filter (📷🎥/📷/🎥),
+   the aspect-ratio filter (▯▭/▯/▭) and the recursive [On|Off] toggle. The active
+   segment is highlighted and inert; the others are plain links. */
+.media, .aspect, .seg { display: inline-flex; white-space: nowrap; border: 1px solid #444;
+                        border-radius: 5px; overflow: hidden; }
+.media > *, .aspect > *, .seg > * { padding: 0.1rem 0.45rem; font-size: 0.95rem;
+                                    line-height: 1.4; text-decoration: none; cursor: pointer; }
+.media > * + *, .aspect > * + *, .seg > * + * { border-left: 1px solid #444; }
+.media .on, .aspect .on, .seg .on { background: #3a3a3a; cursor: default; }
 .rating { white-space: nowrap; }
 .rating a { color: #555; text-decoration: none; font-size: 1.2rem; padding: 0 1px; }
 .rating a.on { color: #f5c518; }
-/* Clear-all-filters button (far right): a reset glyph, dimmed + inert when no
-   filter is active. */
-.reset a { color: #888; text-decoration: none; font-size: 1.3rem; padding: 0 0.2rem; }
-.reset a.disabled { opacity: 0.3; pointer-events: none; }
-/* Hamburger bookmarks menu (navbar far left). The `☰` button lives in the static
-   shell so it persists across re-renders; the dropdown is rebuilt when opened. */
+/* Hamburger menu (navbar far left): a Filters panel + Bookmarks. The `☰` button
+   lives in the static shell so it persists across re-renders; the dropdown's
+   filter rows are rebuilt every render, its bookmark rows when opened. */
 .menu { position: relative; display: flex; }
 .menu-btn { background: none; border: 0; color: #ccc; cursor: pointer;
             font-size: 1.3rem; line-height: 1; padding: 0 0.2rem; }
 .menu-dropdown { position: absolute; top: 100%; left: 0; margin-top: 0.4rem;
-                 min-width: 12rem; max-height: 70vh; overflow-y: auto;
+                 min-width: 16rem; max-height: 80vh; overflow-y: auto;
                  background: #1a1a1a; border: 1px solid #444; border-radius: 5px;
                  padding: 0.25rem 0; display: none; z-index: 200;
                  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5); }
 .menu-dropdown.open { display: block; }
+/* Section headers: "Filters" carries the ↺ clear-all, "Bookmarks" the + add. */
+.menu-title { display: flex; align-items: center; justify-content: space-between;
+              padding: 0.4rem 0.7rem 0.15rem; color: #888; font-size: 0.72rem;
+              text-transform: uppercase; letter-spacing: 0.06em; }
+.menu-title .reset { color: #888; text-decoration: none; font-size: 1.1rem; }
+.menu-title .reset.disabled { opacity: 0.3; pointer-events: none; }
+.menu-add { background: none; border: 0; color: #6cf; cursor: pointer;
+            font-size: 1.2rem; line-height: 1; padding: 0 0.2rem; }
+.menu-sep { border-top: 1px solid #333; margin: 0.45rem 0; }
+/* Filter rows: a label on the left, the control on the right. */
+.filter-row { display: flex; align-items: center; justify-content: space-between;
+              gap: 1rem; padding: 0.25rem 0.7rem; }
+.filter-label { color: #bbb; font-size: 0.9rem; }
+/* Bookmark rows. */
 .menu-item { display: flex; align-items: center; justify-content: space-between;
              gap: 0.5rem; padding: 0.3rem 0.7rem; white-space: nowrap;
              font-size: 0.95rem; font-weight: normal; }
 .menu-dropdown .bm-link { color: #ddd; text-decoration: none; flex: 1; }
-.menu-dropdown .menu-new { color: #6cf; text-decoration: none;
-                           border-bottom: 1px solid #333; margin-bottom: 0.25rem; }
 .bm-del { background: none; border: 0; color: #a55; cursor: pointer;
           font-size: 0.9rem; padding: 0 0.2rem; }
 /* Only react to a real pointer: on touch, `:hover` sticks to the last-tapped
-   spot, lighting up the rightmost star after closing the lightbox via the X
-   (both sit in the top-right corner). Same for the breadcrumb underline. */
+   spot. Same for the breadcrumb underline. */
 @media (hover: hover) {
   .crumb a:hover { text-decoration: underline; }
   .rating a:hover { color: #f5c518; }
-  .recursive a:hover { color: #f5c518; }
-  .media a:hover, .aspect a:hover { background: rgba(255, 255, 255, 0.12); }
-  .reset a:hover { color: #fff; }
+  .media a:hover, .aspect a:hover, .seg a:hover { background: rgba(255, 255, 255, 0.12); }
+  .menu-title .reset:hover { color: #fff; }
+  .menu-add:hover { color: #9df; }
+  .menu-item:hover { background: #3a3a3a; }
 }
 h2 { font-size: 1rem; margin: 1.5rem 0 0.5rem; padding-bottom: 0.25rem;
      border-bottom: 1px solid #333; color: #aaa; }

@@ -140,18 +140,6 @@ function filtersActive() {
   return state.minRating || !state.includeImages || !state.includeVideo || state.recursive || state.aspect !== 'all';
 }
 
-// A "clear all filters" button (far right): a link to the current album with every
-// filter reset (the album path is kept). Dimmed and inert when nothing is active.
-function renderReset(host) {
-  var a = document.createElement('a');
-  var active = filtersActive();
-  a.className = active ? 'reset' : 'reset disabled';
-  a.href = photosUrl(state.album, DEFAULT_FILTERS);
-  a.title = 'Clear all filters';
-  a.textContent = '↺';
-  host.replaceChildren(a);
-}
-
 // The shared query for both API fetches: the album display path (empty for the
 // root) plus the active filters.
 function apiParams() {
@@ -167,10 +155,10 @@ function apiParams() {
   return p;
 }
 
-// ===== Navbar (breadcrumb + recursive/media/rating filters) =================
-// Synchronous + idempotent: rebuild the navbar shell's .crumb, .recursive, .media
-// and .rating from `state`. Runs during initial parse (before first paint, so no
-// flash) and on every navigation.
+// ===== Navbar (breadcrumb) ===================================================
+// Synchronous + idempotent: rebuild the navbar shell's .crumb from `state`. Runs
+// during initial parse (before first paint, so no flash) and on every navigation.
+// The filter controls live in the hamburger menu now (see renderMenuFilters).
 function renderNavbar() {
   var crumb = document.createDocumentFragment();
   var home = document.createElement('a');
@@ -192,22 +180,63 @@ function renderNavbar() {
   });
   document.querySelector('.crumb').replaceChildren(crumb);
 
-  // Recursive toggle: a single glyph, gold when on, that extends the grid to all
-  // sub-albums' items. Clicking flips it (keeping the other filters).
-  var rec = document.createElement('a');
-  if (state.recursive) rec.className = 'on';
-  rec.href = photosUrl(state.album, filters({ recursive: !state.recursive }));
-  rec.title = (state.recursive ? 'Showing' : 'Show') + ' items from all sub-albums';
-  rec.textContent = '⊞';
-  document.querySelector('.recursive').replaceChildren(rec);
+  document.title = state.album.length ? '/' + state.album.join('/') : 'Photos';
+}
 
-  // Media-type filter: a 3-state radio (all media / images only / videos only).
-  renderMedia(document.querySelector('.media'));
+// Build one "label: control" row for the Filters panel.
+function filterRow(label, control) {
+  var row = document.createElement('div');
+  row.className = 'filter-row';
+  var l = document.createElement('span');
+  l.className = 'filter-label';
+  l.textContent = label;
+  row.append(l, control);
+  return row;
+}
 
-  // Aspect-ratio filter: a 3-state radio (all / portrait / landscape).
-  renderAspect(document.querySelector('.aspect'));
+// Rebuild the Filters section of the hamburger menu from `state`. Called from
+// render() (so the active states track navigation). The controls are the same
+// state-reflecting /photos links as before — initNav navigates on click, and the
+// menu deliberately stays open so several filters can be tweaked in a row.
+function renderMenuFilters() {
+  var host = document.querySelector('.menu-filters');
+  if (!host) return;
+  var frag = document.createDocumentFragment();
 
-  var rating = document.createDocumentFragment();
+  // "Filters" section header with a ↺ clear-all action on the right.
+  var title = document.createElement('div');
+  title.className = 'menu-title';
+  var titleText = document.createElement('span');
+  titleText.textContent = 'Filters';
+  var reset = document.createElement('a');
+  var active = filtersActive();
+  reset.className = active ? 'reset' : 'reset disabled';
+  reset.href = photosUrl(state.album, DEFAULT_FILTERS);
+  reset.title = 'Clear all filters';
+  reset.textContent = '↺';
+  title.append(titleText, reset);
+  frag.appendChild(title);
+
+  // Recursive: a 2-option [On|Off] segmented control.
+  var rec = document.createElement('span');
+  rec.className = 'seg recursive-toggle';
+  [['On', true], ['Off', false]].forEach(function (o) {
+    var el;
+    if (state.recursive === o[1]) {
+      el = document.createElement('span');
+      el.className = 'on';
+    } else {
+      el = document.createElement('a');
+      el.href = photosUrl(state.album, filters({ recursive: o[1] }));
+    }
+    el.textContent = o[0];
+    rec.appendChild(el);
+  });
+  frag.appendChild(filterRow('Recursive', rec));
+
+  // Stars: the 5-star rating selector.
+  var rating = document.createElement('span');
+  rating.className = 'rating';
   for (var k = 1; k <= 5; k++) {
     var on = k <= state.minRating;
     var star = document.createElement('a');
@@ -217,12 +246,21 @@ function renderNavbar() {
     star.textContent = on ? '★' : '☆';
     rating.appendChild(star);
   }
-  document.querySelector('.rating').replaceChildren(rating);
+  frag.appendChild(filterRow('Stars', rating));
 
-  // Clear-all-filters button (far right).
-  renderReset(document.querySelector('.reset'));
+  // Media-type: a 3-state radio (all media / images only / videos only).
+  var media = document.createElement('span');
+  media.className = 'media';
+  renderMedia(media);
+  frag.appendChild(filterRow('Media', media));
 
-  document.title = state.album.length ? '/' + state.album.join('/') : 'Photos';
+  // Aspect-ratio: a 3-state radio (all / portrait / landscape).
+  var aspect = document.createElement('span');
+  aspect.className = 'aspect';
+  renderAspect(aspect);
+  frag.appendChild(filterRow('Aspect ratio', aspect));
+
+  host.replaceChildren(frag);
 }
 
 // ===== Lightbox ==============================================================
@@ -1057,6 +1095,7 @@ function buildSubalbums(host, token) {
 // nav clicks, and on Back/Forward.
 function render() {
   renderNavbar();
+  renderMenuFilters();
   var token = ++renderToken;
   var subsHost = document.getElementById('subalbums');
   var photosHost = document.getElementById('photos');
@@ -1249,12 +1288,40 @@ function initMenu() {
   var btn = document.createElement('button');
   btn.className = 'menu-btn';
   btn.type = 'button';
-  btn.title = 'Bookmarks';
-  btn.setAttribute('aria-label', 'Bookmarks');
+  btn.title = 'Filters and bookmarks';
+  btn.setAttribute('aria-label', 'Filters and bookmarks');
   btn.textContent = '☰';
 
+  // Stable dropdown skeleton: a Filters section (populated by renderMenuFilters,
+  // which runs on every render) + a Bookmarks section (fetched on open). The
+  // `.menu-filters` / `.menu-bookmarks` containers persist; only their contents
+  // are rebuilt.
   var dd = document.createElement('div');
   dd.className = 'menu-dropdown';
+
+  var filtersHost = document.createElement('div');
+  filtersHost.className = 'menu-filters';
+
+  var sep = document.createElement('div');
+  sep.className = 'menu-sep';
+
+  var bmTitle = document.createElement('div');
+  bmTitle.className = 'menu-title';
+  var bmTitleText = document.createElement('span');
+  bmTitleText.textContent = 'Bookmarks';
+  var addBtn = document.createElement('button');
+  addBtn.className = 'menu-add';
+  addBtn.type = 'button';
+  addBtn.title = 'New bookmark';
+  addBtn.setAttribute('aria-label', 'New bookmark');
+  addBtn.textContent = '+';
+  addBtn.addEventListener('click', function (e) { e.stopPropagation(); createBookmark(); });
+  bmTitle.append(bmTitleText, addBtn);
+
+  var bookmarksHost = document.createElement('div');
+  bookmarksHost.className = 'menu-bookmarks';
+
+  dd.append(filtersHost, sep, bmTitle, bookmarksHost);
   host.append(btn, dd);
 
   var bookmarks = [];
@@ -1269,13 +1336,6 @@ function initMenu() {
 
   function build() {
     var frag = document.createDocumentFragment();
-
-    var add = document.createElement('a');
-    add.className = 'menu-item menu-new';
-    add.href = '#';
-    add.textContent = '➕ New bookmark…';
-    add.addEventListener('click', function (e) { e.preventDefault(); createBookmark(); });
-    frag.appendChild(add);
 
     bookmarks.forEach(function (bm) {
       var row = document.createElement('div');
@@ -1292,8 +1352,8 @@ function initMenu() {
         recursive: bm.recursive,
         aspect: bm.aspect
       });
-      // Navigation is handled by initNav's delegated handler; just close the menu.
-      link.addEventListener('click', close);
+      // Navigation is handled by initNav's delegated handler; the menu stays open
+      // (a panel, like the filters) so you can keep browsing bookmarks.
       row.appendChild(link);
 
       var del = document.createElement('button');
@@ -1312,7 +1372,7 @@ function initMenu() {
       frag.appendChild(row);
     });
 
-    dd.replaceChildren(frag);
+    bookmarksHost.replaceChildren(frag);
   }
 
   function createBookmark() {
@@ -1355,9 +1415,13 @@ function initMenu() {
     e.stopPropagation();
     if (dd.classList.contains('open')) { close(); } else { dd.classList.add('open'); load(); }
   });
-  // Dismiss on outside click / Esc.
+  // Dismiss on outside click / Esc. Use composedPath() (the path captured at
+  // dispatch) rather than host.contains(e.target): a filter click navigates and
+  // re-renders the menu's filter rows synchronously in initNav's handler — which
+  // runs before this one — detaching e.target, so host.contains would read an
+  // in-menu click as "outside" and wrongly close the panel.
   document.addEventListener('click', function (e) {
-    if (dd.classList.contains('open') && !host.contains(e.target)) close();
+    if (dd.classList.contains('open') && e.composedPath().indexOf(host) === -1) close();
   });
   document.addEventListener('keydown', function (e) {
     if (e.key === 'Escape') close();
