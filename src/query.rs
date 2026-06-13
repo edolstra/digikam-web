@@ -109,49 +109,22 @@ impl<'de> Deserialize<'de> for Aspect {
     }
 }
 
-/// Parsed query parameters for `GET /photos`.
-#[derive(Debug)]
+/// Parsed query parameters for `GET /photos`: an album scope plus the view
+/// [`Filters`] (shared with `/subalbums` and bookmarks) and paging.
+#[derive(Debug, Default)]
 pub struct PhotoQuery {
     /// Album path as segments (`["Photos", "Lego"]` for `/Photos/Lego`); empty
     /// means no album filter. The first segment is the `AlbumRoots.label`.
     pub album: Vec<String>,
     /// When true, the album filter also matches sub-albums; otherwise only the
-    /// named album itself. Has no effect without `album`.
+    /// named album itself. Has no effect without `album`. (Not a [`Filters`]
+    /// field — `/subalbums` ignores it.)
     pub recursive: bool,
-    /// Tag-filter tokens, AND'd; each matches a tag (and its subtree) by name or
-    /// absolute path (see [`resolve_tag_filter`]). Empty = no tag filter.
-    pub tags: Vec<String>,
-    /// Minimum rating; the default `Rating(0)` means no rating filter. Unrated
-    /// images (rating `-1`/NULL) count as 0, so `0` includes everything and `>= 1`
-    /// excludes the unrated.
-    pub min_rating: Rating,
-    /// Media-type filter as two independent booleans, both `true` by default.
-    /// `include_images` excludes videos when cleared; `include_video` excludes
-    /// images when cleared (see [`media_filter_sql`]).
-    pub include_images: bool,
-    pub include_video: bool,
-    /// Aspect-ratio filter; the default `All` applies no constraint.
-    pub aspect: Aspect,
+    /// The view filters (rating / media / aspect / tags). `Filters::default()`
+    /// includes everything (both media types on, no rating/aspect/tag filter).
+    pub filters: Filters,
     pub limit: u64,
     pub offset: u64,
-}
-
-impl Default for PhotoQuery {
-    fn default() -> Self {
-        // The media-type booleans default to including everything; the rest are
-        // their natural zero/empty defaults.
-        PhotoQuery {
-            album: Vec::new(),
-            recursive: false,
-            tags: Vec::new(),
-            min_rating: Rating::default(),
-            include_images: true,
-            include_video: true,
-            aspect: Aspect::All,
-            limit: 0,
-            offset: 0,
-        }
-    }
 }
 
 /// The SQL `AND` fragment restricting `Images.category` for the media-type
@@ -278,18 +251,21 @@ fn build_filter(q: &PhotoQuery) -> (String, Vec<Value>) {
         }
     }
 
-    sql.push_str(&tag_filter_sql(&q.tags));
+    sql.push_str(&tag_filter_sql(&q.filters.tags));
 
-    if q.min_rating.get() > 0 {
+    if q.filters.min_rating.get() > 0 {
         // Treat unrated images (rating -1, or NULL when there's no
         // ImageInformation row) as rating 0, so the threshold excludes them.
         sql.push_str(" AND max(ifnull(ii.rating, 0), 0) >= ?");
-        params.push(Value::Integer(q.min_rating.get()));
+        params.push(Value::Integer(q.filters.min_rating.get()));
     }
 
     // Media-type and aspect-ratio filters (constant fragments, no bound params).
-    sql.push_str(media_filter_sql(q.include_images, q.include_video));
-    sql.push_str(q.aspect.sql_filter());
+    sql.push_str(media_filter_sql(
+        q.filters.include_images,
+        q.filters.include_video,
+    ));
+    sql.push_str(q.filters.aspect.sql_filter());
 
     (sql, params)
 }

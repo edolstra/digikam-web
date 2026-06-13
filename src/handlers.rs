@@ -72,16 +72,16 @@ pub async fn list_photos(
     State(state): State<AppState>,
     Query(params): Query<PhotoParams>,
 ) -> AppResult<Json<Page<PhotoSummary>>> {
-    let tags = parse_tags(params.tags.as_deref());
-
     let q = PhotoQuery {
         album: query::album_segments(params.album.as_deref().unwrap_or_default()),
         recursive: params.recursive,
-        tags,
-        min_rating: params.min_rating,
-        include_images: params.images,
-        include_video: params.video,
-        aspect: params.aspect,
+        filters: Filters {
+            min_rating: params.min_rating,
+            include_images: params.images,
+            include_video: params.video,
+            aspect: params.aspect,
+            tags: parse_tags(params.tags.as_deref()),
+        },
         limit: params.limit.unwrap_or(DEFAULT_LIMIT).clamp(1, MAX_LIMIT),
         offset: params.offset.unwrap_or(0),
     };
