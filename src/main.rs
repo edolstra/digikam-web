@@ -78,7 +78,6 @@ async fn main() -> Result<()> {
         .route("/photos", get(handlers::list_photos))
         .route("/photos/:id", get(handlers::get_photo))
         .route("/photos/:id/file", get(handlers::get_photo_file))
-        .route("/photos/:id/metadata", get(handlers::get_photo_metadata))
         .route("/photos/:id/thumbnail", get(handlers::get_photo_thumbnail))
         .route("/albums", get(handlers::list_albums))
         .route("/subalbums", get(handlers::list_subalbums))

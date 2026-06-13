@@ -399,12 +399,13 @@ function initLightbox() {
     return deg + '°' + min + "'" + sec + '"' + hemi;
   }
 
-  // Extended metadata (tags, …) isn't in the PhotoSummary; fetch it lazily — only
-  // while the info panel is open — and cache it per id for the session.
+  // The PhotoDetail fields not in the PhotoSummary (creation_date, tags as absolute
+  // paths, lat/long) come from /api/photos/:id — fetched lazily, only while the info
+  // panel is open, and cached per id for the session.
   var metaCache = {};
   function loadMeta(id) {
     if (metaCache[id] !== undefined) return Promise.resolve(metaCache[id]);
-    return fetch('/api/photos/' + id + '/metadata')
+    return fetch('/api/photos/' + id)
       .then(function (r) { return r.json(); })
       .then(function (m) { metaCache[id] = m; return m; })
       .catch(function () { metaCache[id] = { tags: [] }; return metaCache[id]; });

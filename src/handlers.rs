@@ -13,8 +13,8 @@ use tower_http::services::ServeFile;
 use crate::db::{album_display_path, image_abs_path, AppState, PooledConn};
 use crate::error::{AppError, AppResult};
 use crate::models::{
-    AlbumNode, Bookmark, CreateBookmark, Filters, Page, PhotoDetail, PhotoMetadata, PhotoSummary,
-    SubAlbum, TagNode,
+    AlbumNode, Bookmark, CreateBookmark, Filters, Page, PhotoDetail, PhotoSummary, SubAlbum,
+    TagNode,
 };
 use crate::query::{self, Aspect, PhotoQuery, Rating, DEFAULT_LIMIT, MAX_LIMIT};
 
@@ -103,7 +103,7 @@ pub async fn get_photo(
         let mut stmt = conn.prepare(
             "SELECT i.id, i.name, a.albumRoot, a.relativePath, i.fileSize, \
                     ii.format, ii.width, ii.height, ii.rating, i.modificationDate, \
-                    p.latitudeNumber, p.longitudeNumber, i.category \
+                    p.latitudeNumber, p.longitudeNumber, i.category, ii.creationDate \
              FROM Images i \
              JOIN Albums a ON a.id = i.album \
              JOIN AlbumRoots r ON r.id = a.albumRoot \
@@ -139,6 +139,7 @@ pub async fn get_photo(
                         mime,
                         is_video: row.get::<_, i64>(12)? == 2,
                     },
+                    creation_date: row.get(13)?,
                     tags: Vec::new(),
                     latitude: row.get(10)?,
                     longitude: row.get(11)?,
@@ -151,54 +152,10 @@ pub async fn get_photo(
                 other => AppError::from(other),
             })?;
 
-        // Attach tag names, excluding Digikam's internal tags (Color/Pick labels …).
+        // Each tag as its absolute path (e.g. `/local/blender/todo`): walk up the
+        // `pid` chain prepending each ancestor's name to the top-level (pid 0).
+        // Excludes Digikam's internal tags (Color/Pick labels, version history).
         let mut tag_stmt = conn.prepare_cached(
-            "SELECT t.name FROM ImageTags it JOIN Tags t ON t.id = it.tagid \
-             WHERE it.imageid = ?1 AND it.tagid NOT IN (SELECT id FROM TagsTree WHERE pid = ?2) \
-             ORDER BY t.name",
-        )?;
-        let tags = tag_stmt
-            .query_map([id, INTERNAL_TAG_ROOT], |r| r.get::<_, String>(0))?
-            .collect::<Result<Vec<_>, _>>()?;
-
-        Ok(PhotoDetail { tags, ..row })
-    })
-    .await?;
-
-    Ok(Json(detail))
-}
-
-/// `GET /photos/:id/metadata` — extended per-image metadata (creation date, GPS,
-/// tags), fetched lazily by the lightbox info panel.
-pub async fn get_photo_metadata(
-    State(state): State<AppState>,
-    Path(id): Path<i64>,
-) -> AppResult<Json<PhotoMetadata>> {
-    let (creation_date, latitude, longitude, tags) = run_blocking(&state, move |conn, _state| {
-        // Creation date (import/EXIF time) + GPS, each NULL/absent -> None.
-        let (creation_date, latitude, longitude) = conn
-            .query_row(
-                "SELECT ii.creationDate, p.latitudeNumber, p.longitudeNumber FROM Images i \
-                 LEFT JOIN ImageInformation ii ON ii.imageid = i.id \
-                 LEFT JOIN ImagePositions p ON p.imageid = i.id \
-                 WHERE i.id = ?1",
-                [id],
-                |r| {
-                    Ok((
-                        r.get::<_, Option<String>>(0)?,
-                        r.get::<_, Option<f64>>(1)?,
-                        r.get::<_, Option<f64>>(2)?,
-                    ))
-                },
-            )
-            .optional()?
-            .unwrap_or((None, None, None));
-
-        // Each tag as its absolute path (e.g. `/local/blender/todo`): start from the
-        // image's tags, then walk up the `pid` chain prepending each ancestor's name
-        // until the top-level (pid 0). Excludes Digikam's internal tags (Color/Pick
-        // labels, version history) by dropping any tag under INTERNAL_TAG_ROOT.
-        let mut stmt = conn.prepare_cached(
             "WITH RECURSIVE paths(pid, path) AS ( \
                SELECT t.pid, t.name \
                FROM ImageTags it JOIN Tags t ON t.id = it.tagid \
@@ -211,19 +168,15 @@ pub async fn get_photo_metadata(
              ) \
              SELECT '/' || path FROM paths WHERE pid = 0 ORDER BY path COLLATE NOCASE",
         )?;
-        let tags = stmt
+        let tags = tag_stmt
             .query_map([id, INTERNAL_TAG_ROOT], |r| r.get::<_, String>(0))?
             .collect::<Result<Vec<_>, _>>()?;
-        Ok((creation_date, latitude, longitude, tags))
+
+        Ok(PhotoDetail { tags, ..row })
     })
     .await?;
 
-    Ok(Json(PhotoMetadata {
-        creation_date,
-        latitude,
-        longitude,
-        tags,
-    }))
+    Ok(Json(detail))
 }
 
 /// `GET /photos/:id/file` — serve the original image bytes (range-aware).

@@ -64,24 +64,18 @@ pub struct PhotoSummary {
     pub is_video: bool,
 }
 
-/// Extended per-image metadata, fetched lazily by the lightbox info panel (so it
-/// stays out of the bulk `PhotoSummary`). Designed to grow (description, …).
-#[derive(Debug, Serialize)]
-pub struct PhotoMetadata {
-    /// `ImageInformation.creationDate` (Digikam's import/EXIF time), if present.
-    pub creation_date: Option<String>,
-    /// GPS coordinates (`ImagePositions.latitudeNumber`/`longitudeNumber`), if present.
-    pub latitude: Option<f64>,
-    pub longitude: Option<f64>,
-    pub tags: Vec<String>,
-}
-
-/// Full detail for a single photo.
+/// Full detail for a single photo (the lightbox info panel fetches this lazily,
+/// for the fields not in the bulk `PhotoSummary`).
 #[derive(Debug, Serialize)]
 pub struct PhotoDetail {
     #[serde(flatten)]
     pub summary: PhotoSummary,
+    /// `ImageInformation.creationDate` (Digikam's import/EXIF time), if present —
+    /// distinct from the `modificationDate` the app sorts/groups by.
+    pub creation_date: Option<String>,
+    /// Tags as absolute paths (`/local/blender/todo`), internal tags excluded.
     pub tags: Vec<String>,
+    /// GPS coordinates (`ImagePositions.latitudeNumber`/`longitudeNumber`), if present.
     pub latitude: Option<f64>,
     pub longitude: Option<f64>,
 }
