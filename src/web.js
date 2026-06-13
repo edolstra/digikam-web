@@ -205,11 +205,17 @@ function filterRow(label, control) {
   return row;
 }
 
-// Rebuild the Filters section of the hamburger menu from `state`. Called from
-// render() (so the active states track navigation). The controls are the same
+// Rebuild the Filters menu (the funnel dropdown) from `state`. Called from
+// render() (so the active states track navigation), and also highlights the
+// funnel button whenever any filter is active. The controls are the same
 // state-reflecting /photos links as before — initNav navigates on click, and the
 // menu deliberately stays open so several filters can be tweaked in a row.
 function renderMenuFilters() {
+  var active = filtersActive();
+  // Highlight the funnel icon when filtering is in effect (visual feedback).
+  var fbtn = document.querySelector('.filter-btn');
+  if (fbtn) fbtn.classList.toggle('active', !!active);
+
   var host = document.querySelector('.menu-filters');
   if (!host) return;
   var frag = document.createDocumentFragment();
@@ -220,7 +226,6 @@ function renderMenuFilters() {
   var titleText = document.createElement('span');
   titleText.textContent = 'Filters';
   var reset = document.createElement('a');
-  var active = filtersActive();
   reset.className = active ? 'reset' : 'reset disabled';
   reset.href = photosUrl(state.album, DEFAULT_FILTERS);
   reset.title = 'Clear all filters';
@@ -1300,12 +1305,58 @@ function initGridNav() {
   });
 }
 
-// ===== Bookmarks menu ========================================================
-// A hamburger (☰) at the navbar's far left, in the static `.menu` span (so it
-// survives in-place re-renders). It lists saved bookmarks — name + album +
-// filters, stored server-side in web.sql — and lets you snapshot the current
-// view as a new one. Bookmark links are plain /photos hrefs, so the global nav
-// handler (initNav) does the actual navigation; we just close the menu.
+// ===== Menus (bookmarks + filters) ===========================================
+// Wire a dropdown: toggle on its button, dismiss on Esc or an outside click.
+// Uses composedPath() (the path captured at dispatch) rather than
+// host.contains(e.target): a click inside that navigates re-renders the panel
+// synchronously in initNav's handler (which runs first), detaching e.target, so
+// host.contains would read an in-menu click as "outside" and wrongly close it.
+// `onOpen` (optional) runs each time the panel opens.
+function wireDropdown(host, dd, btn, onOpen) {
+  function close() { dd.classList.remove('open'); }
+  btn.addEventListener('click', function (e) {
+    e.stopPropagation();
+    if (dd.classList.contains('open')) { close(); }
+    else { dd.classList.add('open'); if (onOpen) onOpen(); }
+  });
+  document.addEventListener('click', function (e) {
+    if (dd.classList.contains('open') && e.composedPath().indexOf(host) === -1) close();
+  });
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') close(); });
+}
+
+// The Filters menu: a funnel icon at the navbar's far right (the static
+// `.filter-menu` span). Its dropdown's `.menu-filters` is (re)built by
+// renderMenuFilters on every render; the funnel is highlighted while any filter
+// is active (see renderMenuFilters). A panel — changing a filter keeps it open.
+var FUNNEL_SVG = '<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">' +
+  '<path fill="currentColor" d="M4.25 5.61C6.27 8.2 10 13 10 13v6c0 .55.45 1 1 1h2c.55 0 1-.45 1-1v-6' +
+  's3.72-4.8 5.74-7.39c.51-.66.04-1.61-.79-1.61H5.04c-.83 0-1.3.95-.79 1.61z"/></svg>';
+function initFilterMenu() {
+  var host = document.querySelector('.filter-menu');
+  if (!host) return;
+
+  var btn = document.createElement('button');
+  btn.className = 'filter-btn';
+  btn.type = 'button';
+  btn.title = 'Filters';
+  btn.setAttribute('aria-label', 'Filters');
+  btn.innerHTML = FUNNEL_SVG;
+
+  var dd = document.createElement('div');
+  dd.className = 'menu-dropdown';
+  var filtersHost = document.createElement('div');
+  filtersHost.className = 'menu-filters';
+  dd.appendChild(filtersHost);
+
+  host.append(btn, dd);
+  wireDropdown(host, dd, btn);
+}
+
+// The Bookmarks menu: a hamburger (☰) at the navbar's far left (the static
+// `.menu` span, so it survives re-renders). Lists saved bookmarks and lets you
+// snapshot the current view as a new one. Bookmark links are plain /photos hrefs
+// (initNav navigates); the menu stays open (a panel) so you can keep browsing.
 function initMenu() {
   var host = document.querySelector('.menu');
   if (!host) return;
@@ -1313,22 +1364,12 @@ function initMenu() {
   var btn = document.createElement('button');
   btn.className = 'menu-btn';
   btn.type = 'button';
-  btn.title = 'Filters and bookmarks';
-  btn.setAttribute('aria-label', 'Filters and bookmarks');
+  btn.title = 'Bookmarks';
+  btn.setAttribute('aria-label', 'Bookmarks');
   btn.textContent = '☰';
 
-  // Stable dropdown skeleton: a Filters section (populated by renderMenuFilters,
-  // which runs on every render) + a Bookmarks section (fetched on open). The
-  // `.menu-filters` / `.menu-bookmarks` containers persist; only their contents
-  // are rebuilt.
   var dd = document.createElement('div');
   dd.className = 'menu-dropdown';
-
-  var filtersHost = document.createElement('div');
-  filtersHost.className = 'menu-filters';
-
-  var sep = document.createElement('div');
-  sep.className = 'menu-sep';
 
   var bmTitle = document.createElement('div');
   bmTitle.className = 'menu-title';
@@ -1346,12 +1387,12 @@ function initMenu() {
   var bookmarksHost = document.createElement('div');
   bookmarksHost.className = 'menu-bookmarks';
 
-  dd.append(filtersHost, sep, bmTitle, bookmarksHost);
+  dd.append(bmTitle, bookmarksHost);
   host.append(btn, dd);
 
   var bookmarks = [];
+  wireDropdown(host, dd, btn, load);
 
-  function close() { dd.classList.remove('open'); }
   function load() {
     fetch('/api/bookmarks')
       .then(function (r) { return r.json(); })
@@ -1435,22 +1476,6 @@ function initMenu() {
       .then(function () { load(); })
       .catch(function () {});
   }
-
-  btn.addEventListener('click', function (e) {
-    e.stopPropagation();
-    if (dd.classList.contains('open')) { close(); } else { dd.classList.add('open'); load(); }
-  });
-  // Dismiss on outside click / Esc. Use composedPath() (the path captured at
-  // dispatch) rather than host.contains(e.target): a filter click navigates and
-  // re-renders the menu's filter rows synchronously in initNav's handler — which
-  // runs before this one — detaching e.target, so host.contains would read an
-  // in-menu click as "outside" and wrongly close the panel.
-  document.addEventListener('click', function (e) {
-    if (dd.classList.contains('open') && e.composedPath().indexOf(host) === -1) close();
-  });
-  document.addEventListener('keydown', function (e) {
-    if (e.key === 'Escape') close();
-  });
 }
 
 // ===== Bootstrap =============================================================
@@ -1462,6 +1487,7 @@ function initMenu() {
   initLightbox();
   initNav();
   initMenu();
+  initFilterMenu();
   initGridNav();
   render();
 })();

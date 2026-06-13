@@ -56,9 +56,10 @@ All endpoints are served under the `/api` prefix.
 
 The `/photos` page is a **client-side SPA**. [src/web.rs](src/web.rs) serves a single
 **static shell** — byte-identical for every URL — rendered by `render` with no DB or
-album/filter logic: an empty navbar (`<span class="menu">` for the `☰` filters/bookmarks
-menu + `<span class="crumb">` for the breadcrumb) plus empty `#subalbums` / `#photos`
-containers, the lightbox, and the inlined CSS/JS.
+album/filter logic: an empty navbar (`<span class="menu">` for the `☰` bookmarks menu,
+`<span class="crumb">` for the breadcrumb, `<span class="filter-menu">` for the funnel
+filters menu) plus empty `#subalbums` / `#photos` containers, the lightbox, and the
+inlined CSS/JS.
 [web.js](src/web.js) drives everything from in-memory **state** (`{album: segments[],
 minRating}`), initialized from the URL by `readUrl()` and updated on each navigation. It
 builds the navbar, sub-album tiles, and photo grid by fetching `/api/subalbums` +
@@ -83,31 +84,36 @@ reused across navigations; only the DOM is rebuilt (`render()` per navigation). 
 `renderToken` guard drops a fetch that resolves after a newer navigation.
 
 - **Navbar (sticky** — pinned to the top, the page scrolls underneath**)**: deliberately
-  minimal (so it doesn't crowd on mobile) — just the `☰` menu button (far left) and a
+  minimal (so it doesn't crowd on mobile) — the `☰` bookmarks button (far left), a
   client-built breadcrumb starting with a `⌂` home icon (→ the root) then
-  `› Photos › Lego › Porsche911`, each segment a link to that ancestor album. **Alt+↑**
-  navigates to the parent album. **All filter controls and bookmarks live in the `☰` menu.**
-- **`☰` menu** (navbar far left): built once by `initMenu` into the static `.menu` span (so
-  it survives in-place re-renders); a dropdown with a **Filters** panel then a **Bookmarks**
-  list. The `.menu-filters` container is rebuilt every render by `renderMenuFilters()` (so the
-  controls reflect `state`); the `.menu-bookmarks` container is (re)fetched when opened / after
-  a create/delete. Every control is the same state-reflecting `/photos` link as before, so
-  `initNav` does the navigation; **clicks leave the menu open** (it's a panel — tweak several
-  filters, or jump between bookmarks, in a row). Closed via the `☰` button, Esc, or an
-  outside click (which tests `e.composedPath()`, not `contains(target)`, since a re-render
-  detaches the clicked control before the outside-click handler runs).
-  - **Filters** section (header carries the `↺` clear-all): `Recursive` `[On|Off]` (extends the
-    grid to all sub-albums' items, `?recursive=true`; sub-album tiles/counts are already
-    recursive and `/api/subalbums` ignores it), `Stars` (five `★`; star K → `?min_rating=K`,
-    clicking the active threshold clears it), `Media` (3-state segmented `📷🎥`/`📷`/`🎥` ⇄
-    `{includeImages, includeVideo}` ⇄ `images=/video=false`), `Aspect ratio` (3-state segmented
-    `▯▭`/`▯`/`▭` ⇄ `state.aspect` ⇄ `aspect=portrait|landscape`). The active segment is an inert
-    highlighted `<span>`; the others are links. `↺` links to the album with **every** filter
-    reset; dimmed + inert when none is active.
-  - **Bookmarks** section (header carries a `+` add): `+` prompts for a name, snapshots the
-    current album + filters via `state`, `POST`s it (if the name exists it `confirm()`s and
-    sends `overwrite`); each row is a name link (built with `photosUrl`) + a `✕` delete
-    (`confirm` → `DELETE`). Sorted by name; fetched from `/api/bookmarks`.
+  `› Photos › Lego › Porsche911` (each segment a link to that ancestor album), and the
+  funnel filters button (far right). **Alt+↑** navigates to the parent album.
+- **Two dropdown menus**, each `wireDropdown`-wired and built once into its static shell span
+  (so they survive in-place re-renders). Their controls are the same state-reflecting
+  `/photos` links as the rest of the UI, so `initNav` does the navigation and **clicks leave
+  the menu open** (a panel — tweak several filters, or jump between bookmarks, in a row).
+  Each closes via its button, Esc, or an outside click (tested with `e.composedPath()`, not
+  `contains(target)`, since a navigation re-render detaches the clicked control before the
+  outside-click handler runs). Only one is effectively open at a time (opening/clicking one
+  is an outside-click for the other).
+  - **`☰` bookmarks menu** (far left, `.menu`, `initMenu`): a **Bookmarks** header with a `+`
+    add (`+` prompts for a name, snapshots the current album + filters via `state`, `POST`s it;
+    if the name exists it `confirm()`s and sends `overwrite`), then one row per bookmark — a
+    name link (built with `photosUrl`) + a `✕` delete (`confirm` → `DELETE`). Sorted by name;
+    `.menu-bookmarks` is (re)fetched from `/api/bookmarks` when opened / after a create/delete.
+    (Bookmarks-only for now; other things may move in here later.)
+  - **Funnel filters menu** (far right, `.filter-menu`, `initFilterMenu`): an inline-SVG funnel
+    `.filter-btn` **highlighted gold when any filter is active** (`filtersActive()`, toggled by
+    `renderMenuFilters` each render) — at-a-glance feedback that filtering is in effect. Its
+    `.menu-filters` panel is rebuilt every render from `state`: a **Filters** header carrying
+    the `↺` clear-all (links to the album with **every** filter reset; dimmed + inert when none
+    active), then `Recursive` `[On|Off]` (extends the grid to all sub-albums' items,
+    `?recursive=true`; sub-album tiles/counts are already recursive and `/api/subalbums` ignores
+    it), `Stars` (five `★`; star K → `?min_rating=K`, clicking the active threshold clears it),
+    `Media` (3-state segmented `📷🎥`/`📷`/`🎥` ⇄ `{includeImages, includeVideo}` ⇄
+    `images=/video=false`), `Aspect ratio` (3-state segmented `▯▭`/`▯`/`▭` ⇄ `state.aspect` ⇄
+    `aspect=portrait|landscape`). The active segment is an inert highlighted `<span>`; the
+    others are links.
 - **Filters / state**: the album (path) + `min_rating` + media toggles + `aspect` + `recursive` (query) are
   the SPA's state, read from the URL on load and written back on each navigation. Every client-built
   breadcrumb / sub-album / star / toggle link carries the current filters so they persist while

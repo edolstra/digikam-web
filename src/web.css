@@ -28,17 +28,24 @@ body { font-family: sans-serif; margin: 1rem; background: #111; color: #eee; }
 .rating { white-space: nowrap; }
 .rating a { color: #555; text-decoration: none; font-size: 1.2rem; padding: 0 1px; }
 .rating a.on { color: #f5c518; }
-/* Hamburger menu (navbar far left): a Filters panel + Bookmarks. The `☰` button
-   lives in the static shell so it persists across re-renders; the dropdown's
-   filter rows are rebuilt every render, its bookmark rows when opened. */
-.menu { position: relative; display: flex; }
+/* Two navbar dropdown menus, both in static shell spans (so they persist across
+   re-renders): the ☰ bookmarks menu (far left, `.menu`) and the funnel filters
+   menu (far right, `.filter-menu`). The funnel is highlighted while any filter
+   is active — visual feedback that filtering is in effect. */
+.menu, .filter-menu { position: relative; display: flex; }
 .menu-btn { background: none; border: 0; color: #ccc; cursor: pointer;
             font-size: 1.3rem; line-height: 1; padding: 0 0.2rem; }
+.filter-btn { background: none; border: 0; color: #888; cursor: pointer;
+              padding: 0 0.2rem; display: inline-flex; align-items: center; line-height: 1; }
+.filter-btn svg { display: block; }
+.filter-btn.active { color: #f5c518; }
 .menu-dropdown { position: absolute; top: 100%; left: 0; margin-top: 0.4rem;
                  min-width: 16rem; max-height: 80vh; overflow-y: auto;
                  background: #1a1a1a; border: 1px solid #444; border-radius: 5px;
                  padding: 0.25rem 0; display: none; z-index: 200;
                  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5); }
+/* The funnel sits at the far right, so its dropdown hangs from the right edge. */
+.filter-menu .menu-dropdown { left: auto; right: 0; }
 .menu-dropdown.open { display: block; }
 /* Section headers: "Filters" carries the ↺ clear-all, "Bookmarks" the + add. */
 .menu-title { display: flex; align-items: center; justify-content: space-between;
@@ -48,7 +55,6 @@ body { font-family: sans-serif; margin: 1rem; background: #111; color: #eee; }
 .menu-title .reset.disabled { opacity: 0.3; pointer-events: none; }
 .menu-add { background: none; border: 0; color: #6cf; cursor: pointer;
             font-size: 1.2rem; line-height: 1; padding: 0 0.2rem; }
-.menu-sep { border-top: 1px solid #333; margin: 0.45rem 0; }
 /* Filter rows: a label on the left, the control on the right. */
 .filter-row { display: flex; align-items: center; justify-content: space-between;
               gap: 1rem; padding: 0.25rem 0.7rem; }
@@ -69,6 +75,7 @@ body { font-family: sans-serif; margin: 1rem; background: #111; color: #eee; }
   .menu-title .reset:hover { color: #fff; }
   .menu-add:hover { color: #9df; }
   .menu-item:hover { background: #3a3a3a; }
+  .filter-btn:not(.active):hover { color: #fff; }
 }
 h2 { font-size: 1rem; margin: 1.5rem 0 0.5rem; padding-bottom: 0.25rem;
      border-bottom: 1px solid #333; color: #aaa; }

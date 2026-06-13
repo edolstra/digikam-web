@@ -189,6 +189,7 @@ fn page_html(title: &str, body: Markup) -> Markup {
                 header.navbar {
                     span.menu {}
                     span.crumb {}
+                    span.filter-menu {}
                 }
                 (body)
                 div.lightbox id="lightbox" {
