@@ -172,6 +172,7 @@ body.modal-open { overflow: hidden; }
 #lb-info .k { color: #aaa; }
 #lb-info .v { min-width: 0; }
 #lb-info a { color: #6cf; text-decoration: none; }
+#lb-info .tag-link { display: block; }
 @media (hover: hover) { #lb-info a:hover { text-decoration: underline; } }
 /* Auto-hide the controls after inactivity (web.js toggles `.idle`); they fade
    back on any pointer move / touch / key. */

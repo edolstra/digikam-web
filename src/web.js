@@ -412,14 +412,18 @@ function initLightbox() {
       album.textContent = p.album_path;
     }
     // Tags come from the lazily-fetched metadata; the row appears once it loads,
-    // one tag (absolute path) per line.
+    // one tag (absolute path) per line. Each is a link that filters the current
+    // album by just that tag (replacing any current tag filter, keeping the other
+    // filters) — routed through jumpToAlbum like the album link.
     var meta = metaCache[p.id];
     var tags = null;
     if (meta && meta.tags && meta.tags.length) {
       tags = document.createDocumentFragment();
       meta.tags.forEach(function (name) {
-        var line = document.createElement('div');
+        var line = document.createElement('a');
+        line.className = 'tag-link';
         line.textContent = name;
+        line.href = photosUrl(state.album, filters({ tags: [name] }));
         tags.appendChild(line);
       });
     }
@@ -507,7 +511,8 @@ function initLightbox() {
   infoEl.addEventListener('click', function (e) {
     e.stopPropagation();
     if (tapConsumed()) return;
-    var a = e.target.closest('a.album-link');
+    // Any panel link (album or a tag) navigates in-page via jumpToAlbum.
+    var a = e.target.closest('a');
     if (a) { e.preventDefault(); jumpToAlbum(a.getAttribute('href')); }
   });
   // Mouse/pen movement reveals the controls; touch is handled by the gestures
@@ -868,7 +873,7 @@ function initLightbox() {
     if (e.target.closest('.slideshow-btn')) { toggleSlideshow(); suppressClick = true; return; }
     if (e.target.closest('.info')) { toggleInfo(); suppressClick = true; return; }
     if (e.target.closest('#lb-info')) {
-      var link = e.target.closest('a.album-link');
+      var link = e.target.closest('a');
       if (link) jumpToAlbum(link.getAttribute('href')); else wake();
       suppressClick = true; return;
     }
