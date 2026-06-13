@@ -592,6 +592,21 @@ function initLightbox() {
     if (i >= 0) open(i);
   });
 
+  // Middle-click a grid tile -> open the original file in a new tab (tiles aren't
+  // <a>, so the browser won't do this on its own). Middle-click fires `auxclick`,
+  // not `click`, so it doesn't also open the lightbox.
+  document.addEventListener('auxclick', function (e) {
+    if (e.button !== 1) return; // middle button only (leave right-click alone)
+    var t = e.target.closest('.grid > img.thumb, .grid > .vtile');
+    if (!t || !t._photo) return;
+    e.preventDefault();
+    window.open('/api/photos/' + t._photo.id + '/file', '_blank', 'noopener');
+  });
+  // Suppress the middle-button autoscroll so the above opens a clean new tab.
+  document.addEventListener('mousedown', function (e) {
+    if (e.button === 1 && e.target.closest('.grid > img.thumb, .grid > .vtile')) e.preventDefault();
+  });
+
   // Is (cx, cy) over the displayed media (vs the letterbox)? The media fills the
   // viewport letterboxed via object-fit: contain.
   function onMedia(cx, cy) {
