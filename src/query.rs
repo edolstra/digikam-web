@@ -150,17 +150,15 @@ fn escape_like(s: &str) -> String {
 /// matched tag(s) **plus all their descendants**. No substring matching.
 ///
 /// - A token starting with `/` is an **absolute path** (`/local/fashion`): it
-///   matches the single tag at that path (built by walking `pid` from the root).
-/// - Any other token is a **name**: it matches every tag with exactly that name,
-///   at any level.
+///   matches the single tag at that path (built by walking `pid` from the root),
+///   case-sensitively.
+/// - Any other token is a **name**: it matches every tag with that name,
+///   **case-insensitively** (`COLLATE NOCASE`), at any level.
 ///
 /// Descendants come from `TagsTree` (the ancestor closure: `pid = T` lists T's
-/// descendants). Returned for inlining into an `IN (...)` (an unmatched token
-/// yields no rows, so the `EXISTS` simply fails). The token is user input, so it
-/// goes in as an escaped SQL string literal (doubled quotes) — not a bound param,
-/// so the one fragment splices into both the positional `build_filter` and the
-/// named-param `list_subalbums` without a second query.
-fn resolve_tag_filter(token: &str) -> String {
+/// descendants). Inlined into an `IN (...)` by [`resolve_tag_filter`]; the token
+/// is user input, so it goes in as an escaped SQL string literal (doubled quotes).
+fn tag_ids_subquery(token: &str) -> String {
     // Escape for a single-quoted SQLite string literal (`'` -> `''`).
     let lit = format!("'{}'", token.trim_end_matches('/').replace('\'', "''"));
     if token.starts_with('/') {
@@ -175,24 +173,52 @@ fn resolve_tag_filter(token: &str) -> String {
         )
     } else {
         format!(
-            "WITH base(id) AS (SELECT id FROM Tags WHERE name = {lit}) \
+            "WITH base(id) AS (SELECT id FROM Tags WHERE name = {lit} COLLATE NOCASE) \
              SELECT id FROM base \
              UNION SELECT id FROM TagsTree WHERE pid IN (SELECT id FROM base)"
         )
     }
 }
 
-/// Build the `AND EXISTS (...)` SQL for a tag-filter token list (AND'd: a photo
-/// must match every token). The image table must be aliased `i`. Each token's
-/// matching ids resolve inline via [`resolve_tag_filter`], so this adds no bound
-/// params and runs as part of the single main query (no per-token round-trips).
+/// The boolean SQL predicate selecting the images one tag-filter token matches.
+/// Correlated on the image alias `i` and its album alias `a` (both in scope at
+/// every call site), so it splices into both the positional `build_filter` and
+/// the named-param `list_subalbums` without a second query.
+///
+/// A photo matches via its **tags** — the ids from [`tag_ids_subquery`] (the
+/// matched tag(s) and their subtree). For a **name** token (one not starting with
+/// `/`) it *also* matches when the photo lives in an **album named that token, or
+/// a sub-album thereof** — any `/`-delimited segment of its album's `relativePath`
+/// equals the token, case-insensitively — OR'd with the tag match. (A `/`-path
+/// token is tag-only.) So a filter like `fashion` catches both the
+/// `/local/fashion` tag tree and a `…/Fashion/…` album tree.
+fn resolve_tag_filter(token: &str) -> String {
+    let ids = tag_ids_subquery(token);
+    let tag_match = format!(
+        "EXISTS (SELECT 1 FROM ImageTags it WHERE it.imageid = i.id AND it.tagid IN ({ids}))"
+    );
+    if token.starts_with('/') {
+        return tag_match;
+    }
+    // Album-name match: a `/`-delimited segment of the album's relativePath equals
+    // the token. Appending a trailing '/' makes the leading + trailing slashes act
+    // as segment boundaries, so `fashion` matches `/Fashion` and `/X/Fashion/2020`
+    // but not `/Fashionista`. SQLite `LIKE` is case-insensitive for ASCII; the
+    // token is escaped for both LIKE wildcards and the SQL string literal.
+    let like_tok = escape_like(token).replace('\'', "''");
+    let album_match = format!("(a.relativePath || '/') LIKE '%/{like_tok}/%' ESCAPE '\\'");
+    format!("({tag_match} OR {album_match})")
+}
+
+/// Build the `AND (...)` SQL for a tag-filter token list (AND'd: a photo must
+/// match every token). The image table must be aliased `i` and its album `a`.
+/// Each token's predicate resolves inline via [`resolve_tag_filter`], so this
+/// adds no bound params and runs as part of the single main query (no per-token
+/// round-trips).
 fn tag_filter_sql(tokens: &[String]) -> String {
     let mut sql = String::new();
     for token in tokens {
-        let ids = resolve_tag_filter(token);
-        sql.push_str(&format!(
-            " AND EXISTS (SELECT 1 FROM ImageTags it WHERE it.imageid = i.id AND it.tagid IN ({ids}))"
-        ));
+        sql.push_str(&format!(" AND {}", resolve_tag_filter(token)));
     }
     sql
 }

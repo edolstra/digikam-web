@@ -233,11 +233,16 @@ content-hash `ETag`) so updates propagate; icons are `immutable`.
 - **`tags=a,b`** — comma-separated tokens, **AND'd** (a photo must match every token;
   an unmatched token yields an empty result). Each token matches a tag **and all its
   subtags** — **no substring match** (`foo` ≠ `foobar`). A token starting with `/` is an
-  **absolute path** (`/local/fashion` ⇒ that node + its subtree); any other token matches
-  **any tag with that name** at any level (+ subtree). Resolution = `resolve_tag_filter` in
-  [src/query.rs](src/query.rs) (recursive `pid`-path CTE for `/`-tokens; `TagsTree` for the
-  descendant closure); the resolved ids are inlined into an `EXISTS` per token. Also a saved
-  [`Filters`] field, so it applies to `/subalbums` and persists in bookmarks.
+  **absolute path** (`/local/fashion` ⇒ that node + its subtree), matched **case-sensitively**,
+  tag-only. Any other token is a **name**, matched **case-insensitively**, and matches either
+  (OR): **(a)** any tag with that name at any level (+ subtree), **or (b)** photos in an
+  **album named that token (or a sub-album thereof)** — any `/`-delimited segment of the
+  album's `relativePath` equals the token (so `fashion` ⇒ the `/local/fashion` tag tree **and**
+  a `…/Fashion/…` album tree). Resolution = `resolve_tag_filter` in [src/query.rs](src/query.rs)
+  (recursive `pid`-path CTE for `/`-tokens, `tag_ids_subquery` + `TagsTree` for the descendant
+  closure, an album-segment `LIKE` for name tokens); per token it emits one `EXISTS`/`OR`
+  predicate, inlined (no bound params). Also a saved [`Filters`] field, so it applies to
+  `/subalbums` and persists in bookmarks.
 - **`min_rating=N`** — minimum rating, `0..=5` (else `400`). Unrated images
   (Digikam stores `-1`) count as `0`, so `min_rating=0` includes everything and
   `min_rating>=1` excludes the unrated. Implemented as `max(ifnull(ii.rating,0),0) >= N`.
