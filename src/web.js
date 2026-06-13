@@ -333,6 +333,8 @@ function initLightbox() {
   var slideBtn = lb.querySelector('.slideshow-btn');
   var slideshowOn = false; // auto-advancing to a random item
   var slideTimer = 0;      // pending image advance (videos advance on 'ended')
+  var bag = [];            // remaining indices of the current random permutation
+                           // (popped from the end; reshuffled once exhausted)
 
   function isOpen() { return lb.classList.contains('open'); }
   function activeEl() { return vid.classList.contains('active') ? vid : img; }
@@ -363,6 +365,7 @@ function initLightbox() {
       };
     });
     idx = -1;
+    bag = []; // indices changed -> drop the stale permutation
   }
 
   // The close/nav controls start hidden (open() adds `.idle`); a mouse/pen move
@@ -599,6 +602,7 @@ function initLightbox() {
   // is the user gesture, so audio is allowed), and we enter fullscreen.
   function open(i) {
     if (!isOpen()) history.pushState({ lightbox: true }, '');
+    bag = []; // each lightbox session gets a fresh random permutation
     show(i, true);
     // Controls start hidden — unless the info panel is open, which pins them.
     if (!infoOpen) lb.classList.add('idle');
@@ -674,11 +678,22 @@ function initLightbox() {
     if (n >= 0 && n < items.length) show(n, true);
   }
 
-  // Jump to a random other item (the `r` key and a swipe-up both call this).
+  // Advance to the next item of a random permutation of all items (the `r` key, a
+  // swipe-up, and the slideshow). A shuffled bag of indices is popped one at a
+  // time and only reshuffled once exhausted, so every item is shown once before
+  // any repeats — no more re-seeing items mid-shuffle. Guards against re-showing
+  // the current item (e.g. when manual nav landed on a still-queued index).
   function goRandom() {
     if (items.length <= 1) return;
-    var n;
-    do { n = Math.floor(Math.random() * items.length); } while (n === idx);
+    if (!bag.length) {
+      bag = items.map(function (_, n) { return n; });
+      for (var k = bag.length - 1; k > 0; k--) { // Fisher-Yates
+        var j = Math.floor(Math.random() * (k + 1));
+        var t = bag[k]; bag[k] = bag[j]; bag[j] = t;
+      }
+    }
+    var n = bag.pop();
+    if (n === idx && bag.length) { bag.unshift(n); n = bag.pop(); }
     show(n, true);
   }
 

@@ -165,7 +165,9 @@ reused across navigations; only the DOM is rebuilt (`render()` per navigation). 
   suppressed while zoomed and zoom resets on navigate/close. The whole lightbox is
   `touch-action: none` so the browser doesn't fight these gestures; the image carries the
   `translate()+scale()` transform (origin `0 0`). With a keyboard, ←/→ navigate (`preventDefault` stops a focused video
-  from also seeking), Home/End jump to first/last, and `r` jumps to a random item; the
+  from also seeking), Home/End jump to first/last, and `r` jumps to a random item (it walks a
+  **shuffled permutation** of all items — a bag of indices popped one at a time, reshuffled only
+  once exhausted, so every item is seen once before any repeat); the
   on-screen ‹ › chevrons navigate too, and the **mouse wheel** goes prev/next (scroll
   down = next; throttled to one item per notch). All navigation stops at the ends. Dismiss by
   clicking the letterbox / Esc / the X / the device Back button — opening pushes a
