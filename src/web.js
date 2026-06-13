@@ -457,6 +457,7 @@ function initLightbox() {
     if (i < 0 || i >= items.length) return;
     idx = i;
     var it = items[i];
+    resetZoom(); // start each item un-zoomed
     vid.pause(); // stop any previously-playing video before switching
     if (it.video) {
       vid.src = it.src;
@@ -654,19 +655,120 @@ function initLightbox() {
     else if (e.key === 's' || e.key === 'S') { e.preventDefault(); toggleSlideshow(); }
   });
 
-  // Swipe (over the whole lightbox, including videos): up -> random item,
-  // left/right -> prev/next. A swipe fires no click, so taps (handled above) and
-  // swipes don't collide. On touch these gestures take over from the native video
-  // seek bar (which stays usable with a mouse on desktop).
-  var sx = 0, sy = 0;
+  // ----- Touch gestures -----
+  // Over the whole lightbox: one-finger swipe up -> random, left/right -> prev/next,
+  // tap -> reveal controls / pause a video / close on the letterbox. Two-finger
+  // pinch zooms the image (1×–4×); while zoomed, one finger pans and double-tap
+  // toggles zoom. A swipe/pinch fires no click, so taps and gestures don't collide;
+  // on touch these take over from the native video seek bar (mouse-usable on desktop).
+  var scale = 1, tx = 0, ty = 0, ZMAX = 4;
+  var sx = 0, sy = 0;     // one-finger gesture start (swipe / pan)
+  var gesture = null;     // active touch sequence: {mode:'swipe'|'pan'|'pinch', …}
+  var multiTouch = false; // a 2nd finger joined this sequence (suppresses swipe)
+  var lastTapTime = 0;    // for double-tap detection
+
+  // Pinch-zoom applies only to images (videos keep their native controls).
+  function zoomable() { return activeEl() === img; }
+  function applyZoom() {
+    img.style.transform = scale === 1 ? '' : 'translate(' + tx + 'px,' + ty + 'px) scale(' + scale + ')';
+    // Hide all controls (incl. the ‹ › chevrons) while zoomed — see web.css.
+    lb.classList.toggle('zoomed', scale > 1);
+  }
+  function resetZoom() { scale = 1; tx = 0; ty = 0; applyZoom(); }
+  function clampPan() {
+    // Keep the scaled image box covering the viewport (don't drift into the void).
+    var W = lb.clientWidth, H = lb.clientHeight;
+    tx = Math.max(W * (1 - scale), Math.min(0, tx));
+    ty = Math.max(H * (1 - scale), Math.min(0, ty));
+  }
+  // Zoom to `s` (clamped 1..ZMAX) keeping the point (fx, fy) fixed on screen.
+  function zoomTo(s, fx, fy) {
+    s = Math.max(1, Math.min(ZMAX, s));
+    var k = s / scale;
+    tx = fx - (fx - tx) * k;
+    ty = fy - (fy - ty) * k;
+    scale = s;
+    clampPan();
+    applyZoom();
+  }
+  function touchDist(ts) { return Math.hypot(ts[0].clientX - ts[1].clientX, ts[0].clientY - ts[1].clientY); }
+  function touchMid(ts) { return { x: (ts[0].clientX + ts[1].clientX) / 2, y: (ts[0].clientY + ts[1].clientY) / 2 }; }
+
   lb.addEventListener('touchstart', function (e) {
-    var t = e.changedTouches[0]; sx = t.clientX; sy = t.clientY;
     suppressClick = false;
+    if (e.touches.length === 2 && zoomable()) {
+      multiTouch = true;
+      gesture = { mode: 'pinch', d0: touchDist(e.touches), s0: scale, tx0: tx, ty0: ty, m0: touchMid(e.touches) };
+    } else if (e.touches.length === 1) {
+      multiTouch = false;
+      var t = e.touches[0];
+      sx = t.clientX; sy = t.clientY;
+      gesture = (scale > 1 && zoomable())
+        ? { mode: 'pan', x0: t.clientX, y0: t.clientY, tx0: tx, ty0: ty }
+        : { mode: 'swipe' };
+    }
   }, { passive: true });
+
+  // Live pinch / pan. Non-passive so it can preventDefault; touch-action:none on
+  // the lightbox already stops the browser's own pan/zoom.
+  lb.addEventListener('touchmove', function (e) {
+    if (!gesture) return;
+    if (gesture.mode === 'pinch' && e.touches.length >= 2) {
+      e.preventDefault();
+      var d = touchDist(e.touches), m = touchMid(e.touches);
+      var s = Math.max(1, Math.min(ZMAX, gesture.s0 * d / gesture.d0));
+      // Pin the content point under the start midpoint to the current midpoint,
+      // so two fingers also pan while pinching.
+      var cx = (gesture.m0.x - gesture.tx0) / gesture.s0;
+      var cy = (gesture.m0.y - gesture.ty0) / gesture.s0;
+      scale = s; tx = m.x - cx * s; ty = m.y - cy * s;
+      clampPan(); applyZoom();
+    } else if (gesture.mode === 'pan' && e.touches.length === 1) {
+      e.preventDefault();
+      var t = e.touches[0];
+      tx = gesture.tx0 + (t.clientX - gesture.x0);
+      ty = gesture.ty0 + (t.clientY - gesture.y0);
+      clampPan(); applyZoom();
+    }
+  }, { passive: false });
+
   lb.addEventListener('touchend', function (e) {
+    // A finger lifted but others remain: if a pinch dropped to one finger and
+    // we're still zoomed, continue as a pan from that finger.
+    if (e.touches.length > 0) {
+      if (gesture && gesture.mode === 'pinch' && e.touches.length === 1 && scale > 1) {
+        var pt = e.touches[0];
+        gesture = { mode: 'pan', x0: pt.clientX, y0: pt.clientY, tx0: tx, ty0: ty };
+      }
+      return;
+    }
+    // All fingers up: end the sequence.
+    var wasMulti = multiTouch, mode = gesture ? gesture.mode : 'swipe';
+    gesture = null; multiTouch = false;
+    if (scale <= 1.001) resetZoom();
+
     var t = e.changedTouches[0];
     var dx = t.clientX - sx, dy = t.clientY - sy;
     var adx = Math.abs(dx), ady = Math.abs(dy);
+    var moved = adx > 10 || ady > 10;
+
+    // Double-tap an image (directly on it — not an overlaid control like the
+    // ‹ › chevrons) toggles zoom: to 2× at the tap point, or back to fit.
+    // Detected before the zoom guard below so it works while zoomed.
+    if (!moved && !wasMulti && zoomable() && e.target === img && onMedia(t.clientX, t.clientY)) {
+      if (e.timeStamp - lastTapTime < 300) {
+        lastTapTime = 0;
+        if (scale > 1) resetZoom(); else zoomTo(2, t.clientX, t.clientY);
+        suppressClick = true;
+        return;
+      }
+      lastTapTime = e.timeStamp;
+    }
+
+    // A pinch/pan gesture, or still zoomed (one finger pans, doesn't navigate):
+    // don't swipe-navigate, close, or reveal controls (they stay hidden while zoomed).
+    if (wasMulti || mode === 'pan' || scale > 1) { suppressClick = true; return; }
+
     if (ady > 50 && ady > adx) {
       // Swipe up -> random, unless it starts in the bottom ~100px, where it
       // collides with the Android "swipe up from the bottom" system gesture.

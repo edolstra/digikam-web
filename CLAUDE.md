@@ -159,7 +159,11 @@ reused across navigations; only the DOM is rebuilt (`render()` per navigation). 
   Space toggles play/pause and `m` toggles mute. **Touch gestures take over from the
   native controls on touch** (which stay mouse-usable on desktop): tap a video to
   pause/play, swipe left/right (anywhere, incl. over a video) to go prev/next, swipe up
-  for a random item. With a keyboard, ←/→ navigate (`preventDefault` stops a focused video
+  for a random item. **Pinch-zoom (images)**: two fingers zoom 1×–4× (toward the pinch
+  point), one finger pans while zoomed, and double-tap toggles 2×/fit; navigation is
+  suppressed while zoomed and zoom resets on navigate/close. The whole lightbox is
+  `touch-action: none` so the browser doesn't fight these gestures; the image carries the
+  `translate()+scale()` transform (origin `0 0`). With a keyboard, ←/→ navigate (`preventDefault` stops a focused video
   from also seeking), Home/End jump to first/last, and `r` jumps to a random item; the
   on-screen ‹ › chevrons navigate too, and the **mouse wheel** goes prev/next (scroll
   down = next; throttled to one item per notch). All navigation stops at the ends. Dismiss by

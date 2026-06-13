@@ -125,9 +125,13 @@ body.modal-open { overflow: hidden; }
 .lightbox { position: fixed; inset: 0; width: 100dvw; height: 100dvh;
             z-index: 1000; display: none;
             align-items: center; justify-content: center;
-            background: rgba(0, 0, 0, 0.9); }
+            background: rgba(0, 0, 0, 0.9);
+            /* We own all touch gestures here (swipe / tap / pinch-zoom + pan),
+               so stop the browser from also panning/zooming. */
+            touch-action: none; }
 .lightbox.open { display: flex; }
-.lightbox .full { width: 100%; height: 100%; object-fit: contain; display: none; }
+.lightbox .full { width: 100%; height: 100%; object-fit: contain; display: none;
+                  transform-origin: 0 0; }
 .lightbox .full.active { display: block; }
 .lightbox .close { position: absolute; top: 0.25rem; right: 0.75rem;
                    font-size: 2.5rem; line-height: 1; }
@@ -169,6 +173,8 @@ body.modal-open { overflow: hidden; }
    back on any pointer move / touch / key. */
 .lightbox .close, .lightbox .info, .lightbox .slideshow-btn, .lightbox .nav { transition: opacity 0.25s ease; }
 /* Hidden controls don't capture taps — a tap there reveals them (and pauses a
-   video / closes on the letterbox) rather than navigating/closing via the button. */
-.lightbox.idle .close, .lightbox.idle .info, .lightbox.idle .slideshow-btn, .lightbox.idle .nav { opacity: 0; pointer-events: none; }
+   video / closes on the letterbox) rather than navigating/closing via the button.
+   `.zoomed` (a pinched-in image) hides them the same way, incl. the ‹ › chevrons. */
+.lightbox.idle .close, .lightbox.idle .info, .lightbox.idle .slideshow-btn, .lightbox.idle .nav,
+.lightbox.zoomed .close, .lightbox.zoomed .info, .lightbox.zoomed .slideshow-btn, .lightbox.zoomed .nav { opacity: 0; pointer-events: none; }
 .lightbox.idle { cursor: none; }
