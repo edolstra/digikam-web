@@ -13,10 +13,16 @@ use tower_http::services::ServeFile;
 use crate::db::{album_display_path, image_abs_path, AppState, PooledConn};
 use crate::error::{AppError, AppResult};
 use crate::models::{
-    AlbumNode, Bookmark, CreateBookmark, Filters, Page, PhotoDetail, PhotoSummary, SubAlbum,
-    TagNode,
+    AlbumNode, Bookmark, CreateBookmark, Filters, Page, PhotoDetail, PhotoMetadata, PhotoSummary,
+    SubAlbum, TagNode,
 };
 use crate::query::{self, Aspect, PhotoQuery, Rating, DEFAULT_LIMIT, MAX_LIMIT};
+
+/// Digikam's internal tag root (`_Digikam_Internal_Tags_`). Its subtree holds the
+/// Color-Label / Pick-Label / version-history tags — internal bookkeeping, not real
+/// user tags — so it's excluded from `/api/tags` and from per-image tag listings.
+/// (Descendants are `SELECT id FROM TagsTree WHERE pid = INTERNAL_TAG_ROOT`.)
+const INTERNAL_TAG_ROOT: i64 = 1;
 
 /// `GET /health`
 pub async fn health() -> impl IntoResponse {
@@ -143,13 +149,14 @@ pub async fn get_photo(
                 other => AppError::from(other),
             })?;
 
-        // Attach tag names.
+        // Attach tag names, excluding Digikam's internal tags (Color/Pick labels …).
         let mut tag_stmt = conn.prepare_cached(
             "SELECT t.name FROM ImageTags it JOIN Tags t ON t.id = it.tagid \
-             WHERE it.imageid = ?1 ORDER BY t.name",
+             WHERE it.imageid = ?1 AND it.tagid NOT IN (SELECT id FROM TagsTree WHERE pid = ?2) \
+             ORDER BY t.name",
         )?;
         let tags = tag_stmt
-            .query_map([id], |r| r.get::<_, String>(0))?
+            .query_map([id, INTERNAL_TAG_ROOT], |r| r.get::<_, String>(0))?
             .collect::<Result<Vec<_>, _>>()?;
 
         Ok(PhotoDetail { tags, ..row })
@@ -157,6 +164,40 @@ pub async fn get_photo(
     .await?;
 
     Ok(Json(detail))
+}
+
+/// `GET /photos/:id/metadata` — extended per-image metadata (currently just tags),
+/// fetched lazily by the lightbox info panel. Unknown / untagged ids yield `{tags: []}`.
+pub async fn get_photo_metadata(
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+) -> AppResult<Json<PhotoMetadata>> {
+    let tags = run_blocking(&state, move |conn, _state| {
+        // Each tag as its absolute path (e.g. `/local/blender/todo`): start from the
+        // image's tags, then walk up the `pid` chain prepending each ancestor's name
+        // until the top-level (pid 0). Excludes Digikam's internal tags (Color/Pick
+        // labels, version history) by dropping any tag under INTERNAL_TAG_ROOT.
+        let mut stmt = conn.prepare_cached(
+            "WITH RECURSIVE paths(pid, path) AS ( \
+               SELECT t.pid, t.name \
+               FROM ImageTags it JOIN Tags t ON t.id = it.tagid \
+               WHERE it.imageid = ?1 \
+                 AND it.tagid NOT IN (SELECT id FROM TagsTree WHERE pid = ?2) \
+               UNION ALL \
+               SELECT par.pid, par.name || '/' || p.path \
+               FROM paths p JOIN Tags par ON par.id = p.pid \
+               WHERE p.pid <> 0 \
+             ) \
+             SELECT '/' || path FROM paths WHERE pid = 0 ORDER BY path COLLATE NOCASE",
+        )?;
+        let tags = stmt
+            .query_map([id, INTERNAL_TAG_ROOT], |r| r.get::<_, String>(0))?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(tags)
+    })
+    .await?;
+
+    Ok(Json(PhotoMetadata { tags }))
 }
 
 /// `GET /photos/:id/file` — serve the original image bytes (range-aware).
@@ -442,9 +483,6 @@ pub async fn list_albums(State(state): State<AppState>) -> AppResult<Json<Vec<Al
 
 /// `GET /tags` — the tag hierarchy as a tree, excluding Digikam's internal tags.
 pub async fn list_tags(State(state): State<AppState>) -> AppResult<Json<Vec<TagNode>>> {
-    /// Digikam's internal tag root (`_Digikam_Internal_Tags_`); excluded from output.
-    const INTERNAL_TAG_ROOT: i64 = 1;
-
     let tree = run_blocking(&state, |conn, _state| {
         let mut stmt = conn.prepare("SELECT id, pid, name FROM Tags ORDER BY name")?;
         let rows = stmt

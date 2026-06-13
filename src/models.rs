@@ -59,6 +59,13 @@ pub struct PhotoSummary {
     pub is_video: bool,
 }
 
+/// Extended per-image metadata, fetched lazily by the lightbox info panel (so it
+/// stays out of the bulk `PhotoSummary`). Designed to grow (description, …).
+#[derive(Debug, Serialize)]
+pub struct PhotoMetadata {
+    pub tags: Vec<String>,
+}
+
 /// Full detail for a single photo.
 #[derive(Debug, Serialize)]
 pub struct PhotoDetail {

@@ -351,6 +351,17 @@ function initLightbox() {
   }
   function fmtDate(s) { return s ? s.replace('T', ' ').replace(/\.\d+$/, '') : null; }
 
+  // Extended metadata (tags, …) isn't in the PhotoSummary; fetch it lazily — only
+  // while the info panel is open — and cache it per id for the session.
+  var metaCache = {};
+  function loadMeta(id) {
+    if (metaCache[id] !== undefined) return Promise.resolve(metaCache[id]);
+    return fetch('/api/photos/' + id + '/metadata')
+      .then(function (r) { return r.json(); })
+      .then(function (m) { metaCache[id] = m; return m; })
+      .catch(function () { metaCache[id] = { tags: [] }; return metaCache[id]; });
+  }
+
   // Fill the info panel from the current item's PhotoSummary (skipping any
   // missing field). Called when the panel is open, including while navigating.
   function renderInfo() {
@@ -364,6 +375,18 @@ function initLightbox() {
       album.href = albumHref(p.album_path);
       album.textContent = p.album_path;
     }
+    // Tags come from the lazily-fetched metadata; the row appears once it loads,
+    // one tag (absolute path) per line.
+    var meta = metaCache[p.id];
+    var tags = null;
+    if (meta && meta.tags && meta.tags.length) {
+      tags = document.createDocumentFragment();
+      meta.tags.forEach(function (name) {
+        var line = document.createElement('div');
+        line.textContent = name;
+        tags.appendChild(line);
+      });
+    }
     var rows = [
       ['File', p.name],
       ['Album', album],
@@ -372,7 +395,8 @@ function initLightbox() {
       ['Resolution', (p.width && p.height) ? (p.width + ' × ' + p.height) : null],
       ['Rating', p.rating != null ? '★'.repeat(p.rating) + '☆'.repeat(5 - p.rating) : null],
       ['Modified', fmtDate(p.modification_date)],
-      ['MIME', p.mime]
+      ['MIME', p.mime],
+      ['Tags', tags]
     ];
     var frag = document.createDocumentFragment();
     rows.forEach(function (r) {
@@ -386,6 +410,14 @@ function initLightbox() {
       frag.appendChild(row);
     });
     infoEl.replaceChildren(frag);
+
+    // First time we show this item's panel: fetch its metadata, then re-render to
+    // add the Tags row — but only if it's still the item on screen with the panel open.
+    if (meta === undefined) {
+      loadMeta(p.id).then(function () {
+        if (infoOpen && items[idx] && items[idx].photo && items[idx].photo.id === p.id) renderInfo();
+      });
+    }
   }
 
   function setInfo(on) {
