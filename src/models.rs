@@ -63,6 +63,8 @@ pub struct PhotoSummary {
 /// stays out of the bulk `PhotoSummary`). Designed to grow (description, …).
 #[derive(Debug, Serialize)]
 pub struct PhotoMetadata {
+    /// `ImageInformation.creationDate` (Digikam's import/EXIF time), if present.
+    pub creation_date: Option<String>,
     pub tags: Vec<String>,
 }
 

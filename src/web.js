@@ -394,6 +394,7 @@ function initLightbox() {
       ['Size', fmtBytes(p.file_size)],
       ['Resolution', (p.width && p.height) ? (p.width + ' × ' + p.height) : null],
       ['Rating', p.rating != null ? '★'.repeat(p.rating) + '☆'.repeat(5 - p.rating) : null],
+      ['Created', meta ? fmtDate(meta.creation_date) : null],
       ['Modified', fmtDate(p.modification_date)],
       ['MIME', p.mime],
       ['Tags', tags]

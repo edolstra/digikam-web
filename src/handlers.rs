@@ -166,13 +166,23 @@ pub async fn get_photo(
     Ok(Json(detail))
 }
 
-/// `GET /photos/:id/metadata` — extended per-image metadata (currently just tags),
-/// fetched lazily by the lightbox info panel. Unknown / untagged ids yield `{tags: []}`.
+/// `GET /photos/:id/metadata` — extended per-image metadata (creation date + tags),
+/// fetched lazily by the lightbox info panel. Unknown id yields `{creation_date: null, tags: []}`.
 pub async fn get_photo_metadata(
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> AppResult<Json<PhotoMetadata>> {
-    let tags = run_blocking(&state, move |conn, _state| {
+    let (creation_date, tags) = run_blocking(&state, move |conn, _state| {
+        // Creation date (Digikam's import/EXIF time); NULL column or no row -> None.
+        let creation_date: Option<String> = conn
+            .query_row(
+                "SELECT creationDate FROM ImageInformation WHERE imageid = ?1",
+                [id],
+                |r| r.get::<_, Option<String>>(0),
+            )
+            .optional()?
+            .flatten();
+
         // Each tag as its absolute path (e.g. `/local/blender/todo`): start from the
         // image's tags, then walk up the `pid` chain prepending each ancestor's name
         // until the top-level (pid 0). Excludes Digikam's internal tags (Color/Pick
@@ -193,11 +203,14 @@ pub async fn get_photo_metadata(
         let tags = stmt
             .query_map([id, INTERNAL_TAG_ROOT], |r| r.get::<_, String>(0))?
             .collect::<Result<Vec<_>, _>>()?;
-        Ok(tags)
+        Ok((creation_date, tags))
     })
     .await?;
 
-    Ok(Json(PhotoMetadata { tags }))
+    Ok(Json(PhotoMetadata {
+        creation_date,
+        tags,
+    }))
 }
 
 /// `GET /photos/:id/file` — serve the original image bytes (range-aware).
