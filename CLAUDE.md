@@ -46,9 +46,9 @@ All endpoints are served under the `/api` prefix.
 | `GET /api/photos/:id/metadata` | Extended per-image metadata as `{creation_date, tags}`. `creation_date` is `ImageInformation.creationDate` (Digikam's import/EXIF time — distinct from the `modificationDate` the app sorts/groups by). Each tag is its **absolute path** (`/local/blender/todo`, built by walking the `pid` chain), sorted `COLLATE NOCASE`; Digikam's internal tags (the `_Digikam_Internal_Tags_` subtree — Color/Pick labels, version history) are excluded. Kept out of the bulk `PhotoSummary`; the lightbox info panel fetches it lazily (only while open) and caches it. Designed to grow (description, …). Unknown id → `{creation_date: null, tags: []}`. |
 | `GET /api/photos/:id/thumbnail` | Digikam's stored thumbnail as-is: the **raw PGF blob** from `thumbnails-digikam.db` (looked up by `uniqueHash`+`fileSize`), for the client to decode in wasm (see [nix/webpgf.nix](nix/webpgf.nix)). Strong `ETag` (+ `If-None-Match`→`304`) and a 1-year `immutable` `Cache-Control`; `X-Orientation` header carries Digikam's `orientationHint` (EXIF orientation) for client-side rotation. `404` when the thumbnails DB is absent / the image has no cached thumbnail → client falls back to `/file`. |
 | `GET /api/albums` | Flat list of all albums (`{id, path, root}`). |
-| `GET /api/subalbums?album=/Root/rel&min_rating=&images=&video=&aspect=` | Direct sub-albums of an album as `[{name, path, photo_count, cover: {id, name} \| null}]`, sorted by most recent photo (newest first). An absent/empty `album` lists the album roots. Cover = newest item (image **or** video — videos have stored thumbnails the client renders) in the sub-album's whole subtree; `Cover.is_video` flags a video cover (the client then omits its `data-full`). `photo_count` is the recursive count incl. videos. `min_rating` (0..=5), the `images`/`video` media-type filter, and the `aspect` filter (`all`/`portrait`/`landscape`) constrain the cover, count, and which sub-albums appear alike. One query; albums with no matching photos anywhere are omitted. |
+| `GET /api/subalbums?album=/Root/rel&min_rating=&images=&video=&aspect=&tags=` | Direct sub-albums of an album as `[{name, path, photo_count, cover: {id, name} \| null}]`, sorted by most recent photo (newest first). An absent/empty `album` lists the album roots. Cover = newest item (image **or** video — videos have stored thumbnails the client renders) in the sub-album's whole subtree; `Cover.is_video` flags a video cover (the client then omits its `data-full`). `photo_count` is the recursive count incl. videos. `min_rating` (0..=5), the `images`/`video` media-type filter, the `aspect` filter, and `tags` (same hierarchical semantics as `/photos`) constrain the cover, count, and which sub-albums appear alike. One query; albums with no matching photos anywhere are omitted. |
 | `GET /api/tags` | Tag **tree** (`{id, name, children}`), internal tags excluded. |
-| `GET /api/bookmarks` | Saved bookmarks `[{name, album, recursive, min_rating, include_images, include_video, aspect}]`, sorted by name (`COLLATE NOCASE`). `[]` if the bookmarks DB is unavailable. Each bookmark is a named album + filter snapshot (the filter fields are the flattened [`Filters`](src/models.rs); `recursive` is separate, as `Filters` excludes it). |
+| `GET /api/bookmarks` | Saved bookmarks `[{name, album, recursive, min_rating, include_images, include_video, aspect, tags}]`, sorted by name (`COLLATE NOCASE`). `[]` if the bookmarks DB is unavailable. Each bookmark is a named album + filter snapshot (the filter fields are the flattened [`Filters`](src/models.rs); `recursive` is separate, as `Filters` excludes it). |
 | `POST /api/bookmarks` | Create a bookmark from the same JSON shape (+ optional `overwrite`). Empty/over-long name → `400`; bad `min_rating`/`aspect` → `422` (typed body validation); duplicate name without `overwrite` → `409`; `overwrite:true` does `INSERT OR REPLACE`. |
 | `DELETE /api/bookmarks/:name` | Remove a bookmark (idempotent → `204`). |
 | `GET /api/health` | Liveness. |
@@ -113,9 +113,10 @@ reused across navigations; only the DOM is rebuilt (`render()` per navigation). 
     it), `Stars` (five `★`; star K → `?min_rating=K`, clicking the active threshold clears it),
     `Media` (3-state segmented `📷🎥`/`📷`/`🎥` ⇄ `{includeImages, includeVideo}` ⇄
     `images=/video=false`), `Aspect ratio` (3-state segmented `▯▭`/`▯`/`▭` ⇄ `state.aspect` ⇄
-    `aspect=portrait|landscape`). The active segment is an inert highlighted `<span>`; the
-    others are links.
-- **Filters / state**: the album (path) + `min_rating` + media toggles + `aspect` + `recursive` (query) are
+    `aspect=portrait|landscape`), and `Tags` (a free-text comma-separated `<input>` ⇄
+    `state.tags` (array) ⇄ `tags=a,b`; commits on Enter/blur, navigating when changed). The
+    active segment is an inert highlighted `<span>`; the others are links.
+- **Filters / state**: the album (path) + `min_rating` + media toggles + `aspect` + `recursive` + `tags` (query) are
   the SPA's state, read from the URL on load and written back on each navigation. Every client-built
   breadcrumb / sub-album / star / toggle link carries the current filters so they persist while
   browsing; they also constrain the sub-album tile covers/counts. The server-side `Filters`
@@ -226,9 +227,14 @@ content-hash `ETag`) so updates propagate; icons are `immutable`.
   `?recursive=false` or absence keeps the default non-recursive behavior. With
   `?recursive=true`, `/Photos` selects the whole collection — and an empty `album`
   with `recursive=true` selects **all** photos (every root).
-- **`tags=a,b`** — **AND** across the listed names, **exact** match (descendant tags
-  do *not* count). A name shared by several tag ids is OR'd within that one name.
-  An unknown tag name yields an empty result (correct AND behavior).
+- **`tags=a,b`** — comma-separated tokens, **AND'd** (a photo must match every token;
+  an unmatched token yields an empty result). Each token matches a tag **and all its
+  subtags** — **no substring match** (`foo` ≠ `foobar`). A token starting with `/` is an
+  **absolute path** (`/local/fashion` ⇒ that node + its subtree); any other token matches
+  **any tag with that name** at any level (+ subtree). Resolution = `resolve_tag_filter` in
+  [src/query.rs](src/query.rs) (recursive `pid`-path CTE for `/`-tokens; `TagsTree` for the
+  descendant closure); the resolved ids are inlined into an `EXISTS` per token. Also a saved
+  [`Filters`] field, so it applies to `/subalbums` and persists in bookmarks.
 - **`min_rating=N`** — minimum rating, `0..=5` (else `400`). Unrated images
   (Digikam stores `-1`) count as `0`, so `min_rating=0` includes everything and
   `min_rating>=1` excludes the unrated. Implemented as `max(ifnull(ii.rating,0),0) >= N`.

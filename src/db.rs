@@ -91,7 +91,8 @@ pub fn build_web_pool(database: &Path, trace_sql: bool) -> Result<Pool> {
                min_rating INTEGER NOT NULL, \
                images     INTEGER NOT NULL, \
                video      INTEGER NOT NULL, \
-               aspect     TEXT    NOT NULL \
+               aspect     TEXT    NOT NULL, \
+               tags       TEXT    NOT NULL DEFAULT '[]' \
              )",
         )
         .context("failed to create bookmarks table")?;

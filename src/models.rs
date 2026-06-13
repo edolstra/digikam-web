@@ -16,6 +16,10 @@ pub struct Filters {
     pub include_video: bool,
     /// Aspect-ratio filter; the default `All` applies no constraint.
     pub aspect: Aspect,
+    /// Tag-filter tokens, AND'd; each matches a tag (and its subtree) by name or
+    /// absolute path (see `resolve_tag_filter`). Empty = no tag filter.
+    #[serde(default)]
+    pub tags: Vec<String>,
 }
 
 impl Default for Filters {
@@ -25,6 +29,7 @@ impl Default for Filters {
             include_images: true,
             include_video: true,
             aspect: Aspect::All,
+            tags: Vec::new(),
         }
     }
 }

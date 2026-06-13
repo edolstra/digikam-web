@@ -12,7 +12,7 @@
 // The filter fields at their defaults (everything off / all media). The single
 // source of truth for the initial `state`, the "clear all" reset (the ↺ button,
 // see renderMenuFilters), and filtersActive()'s "is anything non-default?" check.
-var DEFAULT_FILTERS = { minRating: 0, includeImages: true, includeVideo: true, recursive: false, aspect: 'all' };
+var DEFAULT_FILTERS = { minRating: 0, includeImages: true, includeVideo: true, recursive: false, aspect: 'all', tags: [] };
 // The current view, initialized from the URL by readUrl() and updated on each
 // navigation. `album` is the decoded display segments (e.g. ["Photos","Lego"];
 // [] is the virtual root); `minRating` is 0 (no filter) or 1..=5; the media-type
@@ -38,6 +38,7 @@ function readUrl() {
   state.recursive = q.get('recursive') === 'true';
   var a = q.get('aspect');
   state.aspect = (a === 'portrait' || a === 'landscape') ? a : 'all';
+  state.tags = (q.get('tags') || '').split(',').map(function (s) { return s.trim(); }).filter(Boolean);
 }
 
 // The current filters as a plain object, optionally with some keys overridden —
@@ -48,7 +49,8 @@ function filters(over) {
     includeImages: state.includeImages,
     includeVideo: state.includeVideo,
     recursive: state.recursive,
-    aspect: state.aspect
+    aspect: state.aspect,
+    tags: state.tags
   };
   if (over) for (var k in over) f[k] = over[k];
   return f;
@@ -63,6 +65,7 @@ function setFilterParams(qs, f) {
   if (!f.includeVideo) qs.set('video', 'false');
   if (f.recursive) qs.set('recursive', 'true');
   if (f.aspect && f.aspect !== 'all') qs.set('aspect', f.aspect);
+  if (f.tags && f.tags.length) qs.set('tags', f.tags.join(','));
 }
 
 // Build a frontend URL from album segments + a filter object, percent-encoding
@@ -151,7 +154,8 @@ function renderAspect(host) {
 }
 
 function filtersActive() {
-  return state.minRating || !state.includeImages || !state.includeVideo || state.recursive || state.aspect !== 'all';
+  return state.minRating || !state.includeImages || !state.includeVideo || state.recursive
+    || state.aspect !== 'all' || state.tags.length;
 }
 
 // The shared query for both API fetches: the album display path (empty for the
@@ -270,6 +274,38 @@ function renderMenuFilters() {
   aspect.className = 'aspect';
   renderAspect(aspect);
   frag.appendChild(filterRow('Aspect ratio', aspect));
+
+  // Tags: a free-text, comma-separated input. A bare token matches a tag (and its
+  // subtree) by name; a "/path" token matches by absolute path. Commit on Enter or
+  // blur — navigating only when the list actually changed.
+  var tagsInput = document.createElement('input');
+  tagsInput.type = 'text';
+  tagsInput.className = 'tags-input';
+  tagsInput.value = state.tags.join(', ');
+  tagsInput.placeholder = 'tag, /local/fashion';
+  tagsInput.setAttribute('aria-label', 'Filter by tags');
+  function commitTags() {
+    var parsed = tagsInput.value.split(',').map(function (s) { return s.trim(); }).filter(Boolean);
+    if (JSON.stringify(parsed) === JSON.stringify(state.tags)) return false; // unchanged
+    navigateTo(photosUrl(state.album, filters({ tags: parsed })));
+    return true;
+  }
+  tagsInput.addEventListener('keydown', function (e) {
+    // stopPropagation: committing re-renders and detaches this input, so without it
+    // the Enter would bubble to the grid-nav handler (activeElement no longer an
+    // input by then) and open the selected tile in the lightbox.
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      e.stopPropagation();
+      if (commitTags()) {
+        // The re-render replaced this input — move focus to the fresh one (caret at end).
+        var ni = document.querySelector('.tags-input');
+        if (ni) { ni.focus(); ni.setSelectionRange(ni.value.length, ni.value.length); }
+      }
+    }
+  });
+  tagsInput.addEventListener('blur', commitTags);
+  frag.appendChild(filterRow('Tags', tagsInput));
 
   host.replaceChildren(frag);
 }
@@ -1568,7 +1604,8 @@ function initMenu() {
         includeImages: bm.include_images,
         includeVideo: bm.include_video,
         recursive: bm.recursive,
-        aspect: bm.aspect
+        aspect: bm.aspect,
+        tags: bm.tags || []
       });
       // Navigation is handled by initNav's delegated handler; the menu stays open
       // (a panel, like the filters) so you can keep browsing bookmarks.
@@ -1610,6 +1647,7 @@ function initMenu() {
       include_images: state.includeImages,
       include_video: state.includeVideo,
       aspect: state.aspect,
+      tags: state.tags,
       overwrite: overwrite
     };
     fetch('/api/bookmarks', {

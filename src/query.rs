@@ -118,7 +118,8 @@ pub struct PhotoQuery {
     /// When true, the album filter also matches sub-albums; otherwise only the
     /// named album itself. Has no effect without `album`.
     pub recursive: bool,
-    /// Tag names; an image must carry every one of them (exact match).
+    /// Tag-filter tokens, AND'd; each matches a tag (and its subtree) by name or
+    /// absolute path (see [`resolve_tag_filter`]). Empty = no tag filter.
     pub tags: Vec<String>,
     /// Minimum rating; the default `Rating(0)` means no rating filter. Unrated
     /// images (rating `-1`/NULL) count as 0, so `0` includes everything and `>= 1`
@@ -177,16 +178,61 @@ fn escape_like(s: &str) -> String {
     out
 }
 
-/// Resolve a tag name to the id(s) of tags with exactly that name.
+/// Resolve one tag-filter token to the set of matching tag ids (the matched
+/// tag(s) **plus all their descendants**). No substring matching.
 ///
-/// A name may be shared by several tags under different parents; all of them
-/// are returned and treated as alternatives for that name.
-fn resolve_tag_ids(conn: &Connection, name: &str) -> AppResult<Vec<i64>> {
-    let mut stmt = conn.prepare_cached("SELECT id FROM Tags WHERE name = ?1")?;
+/// - A token starting with `/` is an **absolute path** (`/local/fashion`): it
+///   matches the single tag at that path (built by walking `pid` from the root).
+/// - Any other token is a **name**: it matches every tag with exactly that name,
+///   at any level.
+///
+/// Descendants come from `TagsTree` (the ancestor closure: `pid = T` lists T's
+/// descendants). An unmatched token returns an empty set.
+fn resolve_tag_filter(conn: &Connection, token: &str) -> AppResult<Vec<i64>> {
+    let token = token.trim_end_matches('/');
+    let mut stmt = if token.starts_with('/') {
+        conn.prepare_cached(
+            "WITH RECURSIVE paths(id, path) AS ( \
+               SELECT id, '/' || name FROM Tags WHERE pid = 0 \
+               UNION ALL \
+               SELECT t.id, p.path || '/' || t.name FROM Tags t JOIN paths p ON t.pid = p.id \
+             ), base(id) AS (SELECT id FROM paths WHERE path = ?1) \
+             SELECT id FROM base \
+             UNION SELECT id FROM TagsTree WHERE pid IN (SELECT id FROM base)",
+        )?
+    } else {
+        conn.prepare_cached(
+            "WITH base(id) AS (SELECT id FROM Tags WHERE name = ?1) \
+             SELECT id FROM base \
+             UNION SELECT id FROM TagsTree WHERE pid IN (SELECT id FROM base)",
+        )?
+    };
     let ids = stmt
-        .query_map([name], |row| row.get::<_, i64>(0))?
+        .query_map([token], |row| row.get::<_, i64>(0))?
         .collect::<Result<Vec<_>, _>>()?;
     Ok(ids)
+}
+
+/// Build the `AND EXISTS (...)` SQL for a tag-filter token list (AND'd: a photo
+/// must match every token). The image table must be aliased `i`. Tag ids resolve
+/// from our own DB, so they're inlined as integer literals (no bound params, no
+/// injection risk) — which lets both the positional `build_filter` and the
+/// named-param `list_subalbums` splice the fragment in unchanged.
+fn tag_filter_sql(conn: &Connection, tokens: &[String]) -> AppResult<String> {
+    let mut sql = String::new();
+    for token in tokens {
+        let ids = resolve_tag_filter(conn, token)?;
+        if ids.is_empty() {
+            // Unmatched token: no photo can satisfy the AND.
+            sql.push_str(" AND 1 = 0");
+            continue;
+        }
+        let csv = ids.iter().map(i64::to_string).collect::<Vec<_>>().join(",");
+        sql.push_str(&format!(
+            " AND EXISTS (SELECT 1 FROM ImageTags it WHERE it.imageid = i.id AND it.tagid IN ({csv}))"
+        ));
+    }
+    Ok(sql)
 }
 
 /// Split a display path (`/Photos/Lego`) into album segments (`["Photos",
@@ -238,19 +284,7 @@ fn build_filter(conn: &Connection, q: &PhotoQuery) -> AppResult<(String, Vec<Val
         }
     }
 
-    for name in &q.tags {
-        let ids = resolve_tag_ids(conn, name)?;
-        if ids.is_empty() {
-            // Unknown tag: no image can satisfy the AND, so force an empty result.
-            sql.push_str(" AND 1 = 0");
-            continue;
-        }
-        let placeholders = vec!["?"; ids.len()].join(",");
-        sql.push_str(&format!(
-            " AND EXISTS (SELECT 1 FROM ImageTags it WHERE it.imageid = i.id AND it.tagid IN ({placeholders}))"
-        ));
-        params.extend(ids.into_iter().map(Value::Integer));
-    }
+    sql.push_str(&tag_filter_sql(conn, &q.tags)?);
 
     if q.min_rating.get() > 0 {
         // Treat unrated images (rating -1, or NULL when there's no
@@ -388,6 +422,8 @@ pub fn list_subalbums(
     // the sub-album counts, covers, and visibility all respect the filters.
     let media = media_filter_sql(filters.include_images, filters.include_video);
     let aspect = filters.aspect.sql_filter();
+    // Tag filter (AND of `EXISTS` clauses, ids inlined); image alias is `i` below.
+    let tags = tag_filter_sql(conn, &filters.tags)?;
     // Display path of `album`, used to build each child's `path` ("" at the root).
     let parent = if album.is_empty() {
         String::new()
@@ -406,7 +442,7 @@ pub fn list_subalbums(
                  FROM Images i JOIN Albums a ON a.id = i.album \
                  JOIN AlbumRoots r ON r.id = a.albumRoot \
                  LEFT JOIN ImageInformation ii ON ii.imageid = i.id \
-                 WHERE i.status = 1 AND max(ifnull(ii.rating, 0), 0) >= :min{media}{aspect}"
+                 WHERE i.status = 1 AND max(ifnull(ii.rating, 0), 0) >= :min{media}{aspect}{tags}"
             ),
             vec![(":min", Value::Integer(min))],
         ),
@@ -437,7 +473,7 @@ pub fn list_subalbums(
                        WHERE i.status = 1 AND a.albumRoot = :root \
                          AND a.relativePath LIKE :like ESCAPE '\\' \
                          AND length(a.relativePath) > length(:prefix) \
-                         AND max(ifnull(ii.rating, 0), 0) >= :min{media}{aspect} \
+                         AND max(ifnull(ii.rating, 0), 0) >= :min{media}{aspect}{tags} \
                      )"
                 ),
                 vec![

@@ -34,6 +34,18 @@ fn yes() -> bool {
     true
 }
 
+/// Parse a comma-separated `tags=` param into filter tokens (trimmed, no empties).
+fn parse_tags(s: Option<&str>) -> Vec<String> {
+    s.map(|s| {
+        s.split(',')
+            .map(str::trim)
+            .filter(|t| !t.is_empty())
+            .map(str::to_string)
+            .collect()
+    })
+    .unwrap_or_default()
+}
+
 /// Raw query parameters for `GET /photos`.
 #[derive(Debug, Deserialize)]
 pub struct PhotoParams {
@@ -60,17 +72,7 @@ pub async fn list_photos(
     State(state): State<AppState>,
     Query(params): Query<PhotoParams>,
 ) -> AppResult<Json<Page<PhotoSummary>>> {
-    let tags = params
-        .tags
-        .as_deref()
-        .map(|s| {
-            s.split(',')
-                .map(str::trim)
-                .filter(|t| !t.is_empty())
-                .map(str::to_string)
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
+    let tags = parse_tags(params.tags.as_deref());
 
     let q = PhotoQuery {
         album: query::album_segments(params.album.as_deref().unwrap_or_default()),
@@ -434,6 +436,8 @@ pub struct SubalbumParams {
     /// Aspect-ratio filter (`all` (default) / `portrait` / `landscape`).
     #[serde(default)]
     aspect: Aspect,
+    /// Comma-separated tag filter (same hierarchical semantics as `/photos`).
+    tags: Option<String>,
 }
 
 /// `GET /subalbums?album=/Root/rel&min_rating=&images=&video=` — direct sub-albums
@@ -452,6 +456,7 @@ pub async fn list_subalbums(
         include_images: params.images,
         include_video: params.video,
         aspect: params.aspect,
+        tags: parse_tags(params.tags.as_deref()),
     };
 
     let subalbums = run_blocking(&state, move |conn, state| {
@@ -595,6 +600,8 @@ fn row_to_bookmark(row: &rusqlite::Row) -> rusqlite::Result<Bookmark> {
             include_images: row.get::<_, i64>(4)? != 0,
             include_video: row.get::<_, i64>(5)? != 0,
             aspect: Aspect::parse(&row.get::<_, String>(6)?).unwrap_or_default(),
+            // tags stored as a JSON array; tolerate anything unexpected as empty.
+            tags: serde_json::from_str(&row.get::<_, String>(7)?).unwrap_or_default(),
         },
     })
 }
@@ -607,7 +614,7 @@ pub async fn list_bookmarks(State(state): State<AppState>) -> AppResult<Json<Vec
     }
     let bookmarks = run_web(&state, |conn| {
         let mut stmt = conn.prepare(
-            "SELECT name, album, recursive, min_rating, images, video, aspect \
+            "SELECT name, album, recursive, min_rating, images, video, aspect, tags \
              FROM bookmarks ORDER BY name COLLATE NOCASE",
         )?;
         let rows = stmt
@@ -647,13 +654,14 @@ pub async fn create_bookmark(
     run_web(&state, move |conn| {
         let sql = if overwrite {
             "INSERT OR REPLACE INTO bookmarks \
-               (name, album, recursive, min_rating, images, video, aspect) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)"
+               (name, album, recursive, min_rating, images, video, aspect, tags) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)"
         } else {
             "INSERT INTO bookmarks \
-               (name, album, recursive, min_rating, images, video, aspect) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)"
+               (name, album, recursive, min_rating, images, video, aspect, tags) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)"
         };
+        let tags_json = serde_json::to_string(&b.filters.tags).unwrap_or_else(|_| "[]".into());
         conn.execute(
             sql,
             rusqlite::params![
@@ -664,6 +672,7 @@ pub async fn create_bookmark(
                 b.filters.include_images as i64,
                 b.filters.include_video as i64,
                 b.filters.aspect.as_str(),
+                tags_json,
             ],
         )
         .map_err(|e| match &e {
