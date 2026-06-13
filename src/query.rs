@@ -178,8 +178,8 @@ fn escape_like(s: &str) -> String {
     out
 }
 
-/// Resolve one tag-filter token to the set of matching tag ids (the matched
-/// tag(s) **plus all their descendants**). No substring matching.
+/// A SQL subquery yielding the tag ids one tag-filter token matches — the
+/// matched tag(s) **plus all their descendants**. No substring matching.
 ///
 /// - A token starting with `/` is an **absolute path** (`/local/fashion`): it
 ///   matches the single tag at that path (built by walking `pid` from the root).
@@ -187,52 +187,46 @@ fn escape_like(s: &str) -> String {
 ///   at any level.
 ///
 /// Descendants come from `TagsTree` (the ancestor closure: `pid = T` lists T's
-/// descendants). An unmatched token returns an empty set.
-fn resolve_tag_filter(conn: &Connection, token: &str) -> AppResult<Vec<i64>> {
-    let token = token.trim_end_matches('/');
-    let mut stmt = if token.starts_with('/') {
-        conn.prepare_cached(
+/// descendants). Returned for inlining into an `IN (...)` (an unmatched token
+/// yields no rows, so the `EXISTS` simply fails). The token is user input, so it
+/// goes in as an escaped SQL string literal (doubled quotes) — not a bound param,
+/// so the one fragment splices into both the positional `build_filter` and the
+/// named-param `list_subalbums` without a second query.
+fn resolve_tag_filter(token: &str) -> String {
+    // Escape for a single-quoted SQLite string literal (`'` -> `''`).
+    let lit = format!("'{}'", token.trim_end_matches('/').replace('\'', "''"));
+    if token.starts_with('/') {
+        format!(
             "WITH RECURSIVE paths(id, path) AS ( \
                SELECT id, '/' || name FROM Tags WHERE pid = 0 \
                UNION ALL \
                SELECT t.id, p.path || '/' || t.name FROM Tags t JOIN paths p ON t.pid = p.id \
-             ), base(id) AS (SELECT id FROM paths WHERE path = ?1) \
+             ), base(id) AS (SELECT id FROM paths WHERE path = {lit}) \
              SELECT id FROM base \
-             UNION SELECT id FROM TagsTree WHERE pid IN (SELECT id FROM base)",
-        )?
+             UNION SELECT id FROM TagsTree WHERE pid IN (SELECT id FROM base)"
+        )
     } else {
-        conn.prepare_cached(
-            "WITH base(id) AS (SELECT id FROM Tags WHERE name = ?1) \
+        format!(
+            "WITH base(id) AS (SELECT id FROM Tags WHERE name = {lit}) \
              SELECT id FROM base \
-             UNION SELECT id FROM TagsTree WHERE pid IN (SELECT id FROM base)",
-        )?
-    };
-    let ids = stmt
-        .query_map([token], |row| row.get::<_, i64>(0))?
-        .collect::<Result<Vec<_>, _>>()?;
-    Ok(ids)
+             UNION SELECT id FROM TagsTree WHERE pid IN (SELECT id FROM base)"
+        )
+    }
 }
 
 /// Build the `AND EXISTS (...)` SQL for a tag-filter token list (AND'd: a photo
-/// must match every token). The image table must be aliased `i`. Tag ids resolve
-/// from our own DB, so they're inlined as integer literals (no bound params, no
-/// injection risk) — which lets both the positional `build_filter` and the
-/// named-param `list_subalbums` splice the fragment in unchanged.
-fn tag_filter_sql(conn: &Connection, tokens: &[String]) -> AppResult<String> {
+/// must match every token). The image table must be aliased `i`. Each token's
+/// matching ids resolve inline via [`resolve_tag_filter`], so this adds no bound
+/// params and runs as part of the single main query (no per-token round-trips).
+fn tag_filter_sql(tokens: &[String]) -> String {
     let mut sql = String::new();
     for token in tokens {
-        let ids = resolve_tag_filter(conn, token)?;
-        if ids.is_empty() {
-            // Unmatched token: no photo can satisfy the AND.
-            sql.push_str(" AND 1 = 0");
-            continue;
-        }
-        let csv = ids.iter().map(i64::to_string).collect::<Vec<_>>().join(",");
+        let ids = resolve_tag_filter(token);
         sql.push_str(&format!(
-            " AND EXISTS (SELECT 1 FROM ImageTags it WHERE it.imageid = i.id AND it.tagid IN ({csv}))"
+            " AND EXISTS (SELECT 1 FROM ImageTags it WHERE it.imageid = i.id AND it.tagid IN ({ids}))"
         ));
     }
-    Ok(sql)
+    sql
 }
 
 /// Split a display path (`/Photos/Lego`) into album segments (`["Photos",
@@ -254,7 +248,7 @@ fn album_root_and_rel(album: &[String]) -> Option<(&str, Option<String>)> {
 }
 
 /// Build the shared `FROM ... WHERE ...` fragment plus its bound parameters.
-fn build_filter(conn: &Connection, q: &PhotoQuery) -> AppResult<(String, Vec<Value>)> {
+fn build_filter(q: &PhotoQuery) -> (String, Vec<Value>) {
     let mut sql = String::from(
         " FROM Images i \
           JOIN Albums a ON a.id = i.album \
@@ -284,7 +278,7 @@ fn build_filter(conn: &Connection, q: &PhotoQuery) -> AppResult<(String, Vec<Val
         }
     }
 
-    sql.push_str(&tag_filter_sql(conn, &q.tags)?);
+    sql.push_str(&tag_filter_sql(&q.tags));
 
     if q.min_rating.get() > 0 {
         // Treat unrated images (rating -1, or NULL when there's no
@@ -297,7 +291,7 @@ fn build_filter(conn: &Connection, q: &PhotoQuery) -> AppResult<(String, Vec<Val
     sql.push_str(media_filter_sql(q.include_images, q.include_video));
     sql.push_str(q.aspect.sql_filter());
 
-    Ok((sql, params))
+    (sql, params)
 }
 
 /// Map a non-negative integer column to `Option<u64>`, treating negatives as absent.
@@ -323,7 +317,7 @@ pub fn list_photos(
         });
     }
 
-    let (filter, params) = build_filter(conn, q)?;
+    let (filter, params) = build_filter(q);
 
     // Page of results, newest first.
     let select_sql = format!(
@@ -423,7 +417,7 @@ pub fn list_subalbums(
     let media = media_filter_sql(filters.include_images, filters.include_video);
     let aspect = filters.aspect.sql_filter();
     // Tag filter (AND of `EXISTS` clauses, ids inlined); image alias is `i` below.
-    let tags = tag_filter_sql(conn, &filters.tags)?;
+    let tags = tag_filter_sql(&filters.tags);
     // Display path of `album`, used to build each child's `path` ("" at the root).
     let parent = if album.is_empty() {
         String::new()
