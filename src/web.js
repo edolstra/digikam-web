@@ -729,7 +729,8 @@ function createDecoder() {
   var idleWorkers = [];
   var live = 0;        // workers still alive
   var queue = [];      // {img, buf, o}: fetched blobs waiting for a free worker
-  var pending = {};    // id -> {img, o}: currently decoding
+  var pending = {};    // token -> {img, o}: currently decoding
+  var seq = 0;         // monotonic per-job token (NOT the photo id; see drain)
   var ditched = false; // pool unavailable -> tiles fall back to /file
 
   // Worker body, appended after webpgf.js (which defines `WebPGF`): the init
@@ -803,7 +804,11 @@ function createDecoder() {
     while (idleWorkers.length && queue.length) {
       var w = idleWorkers.pop();
       var job = queue.shift();
-      var id = job.img.dataset.id;
+      // A fresh token per job, not job.img.dataset.id: two tiles can share a
+      // photo id (a sub-album cover that also appears in the recursive grid),
+      // and keying `pending` by id would let the second clobber the first —
+      // leaving one tile permanently unpainted (a mysterious black tile).
+      var id = ++seq;
       pending[id] = { img: job.img, o: job.o };
       w.job = id;
       w.postMessage({ id: id, buf: job.buf }, [job.buf]);
