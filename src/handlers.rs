@@ -74,8 +74,8 @@ pub async fn list_photos(
 ) -> AppResult<Json<Page<PhotoSummary>>> {
     let q = PhotoQuery {
         album: query::album_segments(params.album.as_deref().unwrap_or_default()),
-        recursive: params.recursive,
         filters: Filters {
+            recursive: params.recursive,
             min_rating: params.min_rating,
             include_images: params.images,
             include_video: params.video,
@@ -416,6 +416,9 @@ pub async fn list_subalbums(
     let album = query::album_segments(params.album.as_deref().unwrap_or_default());
 
     let filters = Filters {
+        // `recursive` is irrelevant here — sub-album counts/covers are always
+        // computed over the whole subtree (`list_subalbums` ignores it).
+        recursive: false,
         min_rating: params.min_rating,
         include_images: params.images,
         include_video: params.video,
@@ -558,8 +561,8 @@ fn row_to_bookmark(row: &rusqlite::Row) -> rusqlite::Result<Bookmark> {
     Ok(Bookmark {
         name: row.get(0)?,
         album: row.get(1)?,
-        recursive: row.get::<_, i64>(2)? != 0,
         filters: Filters {
+            recursive: row.get::<_, i64>(2)? != 0,
             min_rating: Rating::new(row.get::<_, i64>(3)?).unwrap_or_default(),
             include_images: row.get::<_, i64>(4)? != 0,
             include_video: row.get::<_, i64>(5)? != 0,
@@ -609,7 +612,6 @@ pub async fn create_bookmark(
     let bookmark = Bookmark {
         name,
         album: req.album,
-        recursive: req.recursive,
         filters: req.filters,
     };
     let overwrite = req.overwrite;
@@ -631,7 +633,7 @@ pub async fn create_bookmark(
             rusqlite::params![
                 b.name,
                 b.album,
-                b.recursive as i64,
+                b.filters.recursive as i64,
                 b.filters.min_rating.get(),
                 b.filters.include_images as i64,
                 b.filters.include_video as i64,

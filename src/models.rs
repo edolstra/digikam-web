@@ -4,11 +4,16 @@ use crate::query::{Aspect, Rating};
 
 /// The set of view filters active on an album page. Held separately from
 /// `PhotoQuery` so it can be passed to `list_subalbums` and applied to the
-/// photo grid, and embedded in a saved [`Bookmark`]. Designed to grow (tags,
-/// date range, …). Note `recursive` is deliberately *not* here — it's a
-/// `PhotoQuery`-only concern that `/subalbums` ignores.
+/// photo grid, and embedded in a saved [`Bookmark`]. Designed to grow (date
+/// range, …).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Filters {
+    /// When true, the album scope also matches sub-albums (the photo grid spans
+    /// the whole subtree). Conceptually a filter — it decides whether sub-album
+    /// items are kept — but `/subalbums` ignores it (its counts/covers are
+    /// always recursive). Defaults to `false` (only the named album).
+    #[serde(default)]
+    pub recursive: bool,
     /// Minimum rating; the default `Rating(0)` means no rating filter.
     pub min_rating: Rating,
     /// Media-type filter; both `true` by default.
@@ -25,6 +30,7 @@ pub struct Filters {
 impl Default for Filters {
     fn default() -> Self {
         Filters {
+            recursive: false,
             min_rating: Rating::default(),
             include_images: true,
             include_video: true,
@@ -129,8 +135,7 @@ pub struct Bookmark {
     pub name: String,
     /// Album display path, e.g. `/Photos/Lego` (empty string = the virtual root).
     pub album: String,
-    /// Whether the recursive (include sub-albums) toggle was on.
-    pub recursive: bool,
+    /// The saved view filters (incl. `recursive`); flattened into the JSON.
     #[serde(flatten)]
     pub filters: Filters,
 }
@@ -140,7 +145,6 @@ pub struct Bookmark {
 pub struct CreateBookmark {
     pub name: String,
     pub album: String,
-    pub recursive: bool,
     #[serde(flatten)]
     pub filters: Filters,
     /// When true, replace an existing bookmark of the same name instead of

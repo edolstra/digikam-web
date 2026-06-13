@@ -116,12 +116,7 @@ pub struct PhotoQuery {
     /// Album path as segments (`["Photos", "Lego"]` for `/Photos/Lego`); empty
     /// means no album filter. The first segment is the `AlbumRoots.label`.
     pub album: Vec<String>,
-    /// When true, the album filter also matches sub-albums; otherwise only the
-    /// named album itself. Has no effect without `album`. (Not a [`Filters`]
-    /// field — `/subalbums` ignores it.)
-    pub recursive: bool,
-    /// The view filters (rating / media / aspect / tags). `Filters::default()`
-    /// includes everything (both media types on, no rating/aspect/tag filter).
+    /// The view filters. `Filters::default()` applies no constraint.
     pub filters: Filters,
     pub limit: u64,
     pub offset: u64,
@@ -235,7 +230,7 @@ fn build_filter(q: &PhotoQuery) -> (String, Vec<Value>) {
         sql.push_str(" AND r.label = ?");
         params.push(Value::Text(label.to_string()));
 
-        if q.recursive {
+        if q.filters.recursive {
             // The named album plus every album beneath it. (A root album — `rel`
             // is `None` — recursively is the whole collection, so no constraint.)
             if let Some(rel) = rel {
@@ -284,7 +279,7 @@ pub fn list_photos(
     // The virtual root (no album segments) has no photos of its own; an empty,
     // non-recursive album is simply empty. (A future recursive flag would
     // aggregate the whole collection from the root.)
-    if q.album.is_empty() && !q.recursive {
+    if q.album.is_empty() && !q.filters.recursive {
         return Ok(Page {
             incomplete: false,
             limit: q.limit,
