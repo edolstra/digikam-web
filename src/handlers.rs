@@ -169,7 +169,7 @@ pub async fn get_photo_file(
     Path(id): Path<i64>,
     request: Request<axum::body::Body>,
 ) -> AppResult<Response> {
-    let (path, etag) = run_blocking(&state, move |conn, state| {
+    let (path, etag, name) = run_blocking(&state, move |conn, state| {
         let (album_root, relative_path, name, unique_hash): (i64, String, String, Option<String>) =
             conn.query_row(
                 "SELECT a.albumRoot, a.relativePath, i.name, i.uniqueHash FROM Images i \
@@ -195,7 +195,7 @@ pub async fn get_photo_file(
             .filter(|h| !h.is_empty())
             .and_then(|h| HeaderValue::from_str(&format!("\"{h}\"")).ok());
 
-        Ok((image_abs_path(root, &relative_path, &name), etag))
+        Ok((image_abs_path(root, &relative_path, &name), etag, name))
     })
     .await?;
 
@@ -220,8 +220,35 @@ pub async fn get_photo_file(
     if let Some(etag) = etag {
         response.headers_mut().insert(header::ETAG, etag);
     }
+    // Suggest the original filename when the image is saved (kept `inline`, so the
+    // browser still displays it — the grid/lightbox load this same URL as an image).
+    if let Some(cd) = content_disposition(&name) {
+        response
+            .headers_mut()
+            .insert(header::CONTENT_DISPOSITION, cd);
+    }
 
     Ok(response)
+}
+
+/// A `Content-Disposition: inline` value carrying the original file name, with an
+/// ASCII fallback plus an RFC 5987 `filename*` for non-ASCII names.
+fn content_disposition(name: &str) -> Option<HeaderValue> {
+    let ascii: String = name
+        .chars()
+        .map(|c| {
+            if c.is_ascii() && !c.is_ascii_control() && c != '"' && c != '\\' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    let encoded = urlencoding::encode(name);
+    HeaderValue::from_str(&format!(
+        "inline; filename=\"{ascii}\"; filename*=UTF-8''{encoded}"
+    ))
+    .ok()
 }
 
 /// `Cache-Control` for content-addressed, effectively-immutable assets (the PGF
