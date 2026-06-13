@@ -9,13 +9,17 @@
 // every in-page navigation; only the DOM is rebuilt.
 
 // ===== State + URL ===========================================================
+// The filter fields at their defaults (everything off / all media). The single
+// source of truth for the initial `state`, the "clear all" reset (the ↺ button,
+// see renderMenuFilters), and filtersActive()'s "is anything non-default?" check.
+var DEFAULT_FILTERS = { minRating: 0, includeImages: true, includeVideo: true, recursive: false, aspect: 'all' };
 // The current view, initialized from the URL by readUrl() and updated on each
 // navigation. `album` is the decoded display segments (e.g. ["Photos","Lego"];
 // [] is the virtual root); `minRating` is 0 (no filter) or 1..=5; the media-type
 // filter is two booleans, both true by default (include images / include video);
 // `recursive` extends the grid to all sub-albums' items; `aspect` is the
 // aspect-ratio filter ('all' | 'portrait' | 'landscape').
-var state = { album: [], minRating: 0, includeImages: true, includeVideo: true, recursive: false, aspect: 'all' };
+var state = Object.assign({ album: [] }, DEFAULT_FILTERS);
 // Bumped on every render(); a fetch that resolves after a newer navigation
 // compares against it and bails before touching the DOM (see render/buildGrid).
 var renderToken = 0;
@@ -145,10 +149,6 @@ function renderAspect(host) {
     };
   }));
 }
-
-// The filter state reset to its defaults (everything off / included). Used by the
-// "clear filters" button and to detect whether any filter is active.
-var DEFAULT_FILTERS = { minRating: 0, includeImages: true, includeVideo: true, recursive: false, aspect: 'all' };
 
 function filtersActive() {
   return state.minRating || !state.includeImages || !state.includeVideo || state.recursive || state.aspect !== 'all';
@@ -296,6 +296,15 @@ function initLightbox() {
   function isOpen() { return lb.classList.contains('open'); }
   function activeEl() { return vid.classList.contains('active') ? vid : img; }
 
+  // A touch tap fires a synthetic click after the touchend handler already
+  // acted on it; that handler sets `suppressClick` so these click handlers
+  // swallow the stray click. Returns true (and clears the flag) when consumed.
+  function tapConsumed() {
+    if (!suppressClick) return false;
+    suppressClick = false;
+    return true;
+  }
+
   // Recompute the item list from the (just-rebuilt) grid. Direct grid children
   // only: a video tile's inner poster <img> is not its own item.
   function refresh() {
@@ -421,7 +430,7 @@ function initLightbox() {
   // already acted on.)
   infoEl.addEventListener('click', function (e) {
     e.stopPropagation();
-    if (suppressClick) { suppressClick = false; return; }
+    if (tapConsumed()) return;
     var a = e.target.closest('a.album-link');
     if (a) { e.preventDefault(); jumpToAlbum(a.getAttribute('href')); }
   });
@@ -531,14 +540,10 @@ function initLightbox() {
     // popped back to the album entry, so this writes the album's fragment).
     if (tile) { setSelected(tile); syncSelectionHash(); }
     function reveal() {
-      if (!tile) return;
-      // Reserve room for the sticky navbar (its actual height) plus a small gap,
-      // so the tile lands fully visible — not tucked under the navbar or flush
-      // against the bottom edge. scrollIntoView honors scroll-margin.
-      var nav = document.querySelector('.navbar');
-      tile.style.scrollMarginTop = ((nav ? nav.offsetHeight : 0) + 96) + 'px';
-      tile.style.scrollMarginBottom = '96px';
-      tile.scrollIntoView({ block: 'nearest' });
+      // Reserve room for the sticky navbar plus a gap top and bottom, so the
+      // tile lands fully visible — not tucked under the navbar or flush against
+      // the bottom edge.
+      if (tile) scrollTileIntoView(tile, 96, 96);
     }
     if (document.fullscreenElement) {
       // X / letterbox / Back: we trigger the exit, then scroll once it's done.
@@ -602,7 +607,7 @@ function initLightbox() {
   // native controls' job. Touch taps are handled in the touch gestures below;
   // their synthetic click is swallowed here so this doesn't re-fire.
   lb.addEventListener('click', function (e) {
-    if (suppressClick) { suppressClick = false; return; }
+    if (tapConsumed()) return;
     var hidden = lb.classList.contains('idle');
     wake();
     if (!onMedia(e.clientX, e.clientY) && !hidden) close();
@@ -610,12 +615,12 @@ function initLightbox() {
   lb.querySelector('.close').addEventListener('click', function (e) { e.stopPropagation(); close(); });
   lb.querySelector('.info').addEventListener('click', function (e) {
     e.stopPropagation();
-    if (suppressClick) { suppressClick = false; return; }
+    if (tapConsumed()) return;
     toggleInfo();
   });
   slideBtn.addEventListener('click', function (e) {
     e.stopPropagation();
-    if (suppressClick) { suppressClick = false; return; }
+    if (tapConsumed()) return;
     toggleSlideshow();
   });
   prev.addEventListener('click', function (e) { e.stopPropagation(); go(-1); });
@@ -1188,13 +1193,22 @@ function setSelected(el) {
   if (selected) selected.classList.add('selected');
 }
 
+// Scroll `el` into view (a no-op if already visible), reserving room for the
+// sticky navbar (its live height) plus `top` px so it doesn't land tucked
+// underneath; `bottom`, when given, reserves a matching gap at the bottom edge.
+// Shared by the grid selection (scrollToSelected) and the lightbox dismiss.
+function scrollTileIntoView(el, top, bottom) {
+  var nav = document.querySelector('.navbar');
+  el.style.scrollMarginTop = ((nav ? nav.offsetHeight : 0) + top) + 'px';
+  if (bottom != null) el.style.scrollMarginBottom = bottom + 'px';
+  el.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+}
+
 // Scroll the selection into view, reserving room for the sticky navbar so it
 // isn't tucked underneath.
 function scrollToSelected() {
   if (!selected) return;
-  var nav = document.querySelector('.navbar');
-  selected.style.scrollMarginTop = ((nav ? nav.offsetHeight : 0) + 8) + 'px';
-  selected.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  scrollTileIntoView(selected, 8);
 }
 
 // Mirror the selection to the URL fragment (no history entry).
