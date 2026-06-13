@@ -43,7 +43,7 @@ All endpoints are served under the `/api` prefix.
 | `GET /api/photos?album=&tags=&recursive=&min_rating=&images=&video=&aspect=&limit=&offset=` | Filtered, paginated list. `Page<PhotoSummary>` = `{incomplete, limit, offset, items}` (`incomplete` = more rows exist beyond this page — one extra row is fetched to detect it). `PhotoSummary.is_video` is true for videos (Digikam `category=2`). `images`/`video` are the media-type filter (both default `true`; `=false` excludes that type). `aspect` is `all` (default) / `portrait` (`height>=width`) / `landscape` (`width>=height`); squares match both. An empty/absent `album` (non-recursive) returns `items: []`. |
 | `GET /api/photos/:id` | `PhotoDetail` (summary + tag names + lat/long). |
 | `GET /api/photos/:id/file` | Original bytes, range-aware (via `tower_http::services::ServeFile`). Sends a strong `ETag` from the image's `uniqueHash`; a matching `If-None-Match` (or `*`) returns `304`. `Content-Disposition: inline` carries the original filename (+ RFC 5987 `filename*`) so saving from the browser keeps the real name. |
-| `GET /api/photos/:id/metadata` | Extended per-image metadata as `{creation_date, tags}`. `creation_date` is `ImageInformation.creationDate` (Digikam's import/EXIF time — distinct from the `modificationDate` the app sorts/groups by). Each tag is its **absolute path** (`/local/blender/todo`, built by walking the `pid` chain), sorted `COLLATE NOCASE`; Digikam's internal tags (the `_Digikam_Internal_Tags_` subtree — Color/Pick labels, version history) are excluded. Kept out of the bulk `PhotoSummary`; the lightbox info panel fetches it lazily (only while open) and caches it. Designed to grow (description, …). Unknown id → `{creation_date: null, tags: []}`. |
+| `GET /api/photos/:id/metadata` | Extended per-image metadata as `{creation_date, latitude, longitude, tags}`. `creation_date` is `ImageInformation.creationDate` (Digikam's import/EXIF time — distinct from the `modificationDate` the app sorts/groups by); `latitude`/`longitude` are `ImagePositions.latitudeNumber`/`longitudeNumber` (null when absent). Each tag is its **absolute path** (`/local/blender/todo`, built by walking the `pid` chain), sorted `COLLATE NOCASE`; Digikam's internal tags (the `_Digikam_Internal_Tags_` subtree — Color/Pick labels, version history) are excluded. Kept out of the bulk `PhotoSummary`; the lightbox info panel fetches it lazily (only while open) and caches it. Designed to grow (description, …). Unknown id → `{creation_date: null, tags: []}`. |
 | `GET /api/photos/:id/thumbnail` | Digikam's stored thumbnail as-is: the **raw PGF blob** from `thumbnails-digikam.db` (looked up by `uniqueHash`+`fileSize`), for the client to decode in wasm (see [nix/webpgf.nix](nix/webpgf.nix)). Strong `ETag` (+ `If-None-Match`→`304`) and a 1-year `immutable` `Cache-Control`; `X-Orientation` header carries Digikam's `orientationHint` (EXIF orientation) for client-side rotation. `404` when the thumbnails DB is absent / the image has no cached thumbnail → client falls back to `/file`. |
 | `GET /api/albums` | Flat list of all albums (`{id, path, root}`). |
 | `GET /api/subalbums?album=/Root/rel&min_rating=&images=&video=&aspect=&tags=` | Direct sub-albums of an album as `[{name, path, photo_count, cover: {id, name} \| null}]`, sorted by most recent photo (newest first). An absent/empty `album` lists the album roots. Cover = newest item (image **or** video — videos have stored thumbnails the client renders) in the sub-album's whole subtree; `Cover.is_video` flags a video cover (the client then omits its `data-full`). `photo_count` is the recursive count incl. videos. `min_rating` (0..=5), the `images`/`video` media-type filter, the `aspect` filter, and `tags` (same hierarchical semantics as `/photos`) constrain the cover, count, and which sub-albums appear alike. One query; albums with no matching photos anywhere are omitted. |
@@ -182,12 +182,16 @@ reused across navigations; only the DOM is rebuilt (`render()` per navigation). 
   (top-left) and the **`i` key** toggle a metadata overlay (`#lb-info`): file
   name, album path (a **link** that jumps to that album), format, size, resolution, rating,
   modification date, MIME — built client-side from the tile's `PhotoSummary` (stashed on the
-  grid tile as `_photo`, no extra fetch), updating as you navigate. The **creation date** and
-  **tags** (absolute paths, one per line, internal tags excluded) are added from
+  grid tile as `_photo`, no extra fetch), updating as you navigate. The **creation date**,
+  **location** (GPS, a link to Google Maps that opens in a new tab — shown only when present),
+  and **tags** (absolute paths, one per line, internal tags excluded) are added from
   `GET /api/photos/:id/metadata`, fetched lazily only while the panel is open and cached per id
-  (those rows appear once it loads). The album link
-  `replaceState`s the lightbox's URL-less history entry as the target album, closes the
-  lightbox, and re-renders in place (so Back still returns to the originating album).
+  (those rows appear once it loads). The album link and tag links
+  `replaceState` the lightbox's URL-less history entry as the target view, close the
+  lightbox, and re-render in place (so Back still returns to the originating album); the panel's
+  click/touch handlers route any internal `<a>` through that, while the external maps link
+  (`target=_blank`) opens normally. Each **tag** is a link that filters the current album by
+  just that tag (replacing the current tag filter, keeping the others).
   A **slideshow** toggle — the `s` key or a ▶/⏸ button (bottom-left) — auto-advances to a
   **random** item (like `r`): an image after **5s**, a video after it **plays in full** (its
   `loop` is turned off so `ended` fires; an unplayable one advances after 1.5s). Dismissing the

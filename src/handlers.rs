@@ -168,22 +168,31 @@ pub async fn get_photo(
     Ok(Json(detail))
 }
 
-/// `GET /photos/:id/metadata` — extended per-image metadata (creation date + tags),
-/// fetched lazily by the lightbox info panel. Unknown id yields `{creation_date: null, tags: []}`.
+/// `GET /photos/:id/metadata` — extended per-image metadata (creation date, GPS,
+/// tags), fetched lazily by the lightbox info panel.
 pub async fn get_photo_metadata(
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> AppResult<Json<PhotoMetadata>> {
-    let (creation_date, tags) = run_blocking(&state, move |conn, _state| {
-        // Creation date (Digikam's import/EXIF time); NULL column or no row -> None.
-        let creation_date: Option<String> = conn
+    let (creation_date, latitude, longitude, tags) = run_blocking(&state, move |conn, _state| {
+        // Creation date (import/EXIF time) + GPS, each NULL/absent -> None.
+        let (creation_date, latitude, longitude) = conn
             .query_row(
-                "SELECT creationDate FROM ImageInformation WHERE imageid = ?1",
+                "SELECT ii.creationDate, p.latitudeNumber, p.longitudeNumber FROM Images i \
+                 LEFT JOIN ImageInformation ii ON ii.imageid = i.id \
+                 LEFT JOIN ImagePositions p ON p.imageid = i.id \
+                 WHERE i.id = ?1",
                 [id],
-                |r| r.get::<_, Option<String>>(0),
+                |r| {
+                    Ok((
+                        r.get::<_, Option<String>>(0)?,
+                        r.get::<_, Option<f64>>(1)?,
+                        r.get::<_, Option<f64>>(2)?,
+                    ))
+                },
             )
             .optional()?
-            .flatten();
+            .unwrap_or((None, None, None));
 
         // Each tag as its absolute path (e.g. `/local/blender/todo`): start from the
         // image's tags, then walk up the `pid` chain prepending each ancestor's name
@@ -205,12 +214,14 @@ pub async fn get_photo_metadata(
         let tags = stmt
             .query_map([id, INTERNAL_TAG_ROOT], |r| r.get::<_, String>(0))?
             .collect::<Result<Vec<_>, _>>()?;
-        Ok((creation_date, tags))
+        Ok((creation_date, latitude, longitude, tags))
     })
     .await?;
 
     Ok(Json(PhotoMetadata {
         creation_date,
+        latitude,
+        longitude,
         tags,
     }))
 }

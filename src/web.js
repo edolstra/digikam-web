@@ -387,6 +387,18 @@ function initLightbox() {
   }
   function fmtDate(s) { return s ? s.replace('T', ' ').replace(/\.\d+$/, '') : null; }
 
+  // A signed decimal coordinate as degrees/minutes/seconds, e.g. 45°52'36"N.
+  function dms(value, posChar, negChar) {
+    var hemi = value >= 0 ? posChar : negChar;
+    var v = Math.abs(value);
+    var deg = Math.floor(v);
+    var min = Math.floor((v - deg) * 60);
+    var sec = Math.round((v - deg - min / 60) * 3600);
+    if (sec === 60) { sec = 0; min++; }   // carry rounding overflow
+    if (min === 60) { min = 0; deg++; }
+    return deg + '°' + min + "'" + sec + '"' + hemi;
+  }
+
   // Extended metadata (tags, …) isn't in the PhotoSummary; fetch it lazily — only
   // while the info panel is open — and cache it per id for the session.
   var metaCache = {};
@@ -427,6 +439,16 @@ function initLightbox() {
         tags.appendChild(line);
       });
     }
+    // Location: a link to the coordinates on Google Maps (opens in a new tab).
+    var loc = null;
+    if (meta && meta.latitude != null && meta.longitude != null) {
+      loc = document.createElement('a');
+      loc.target = '_blank';
+      loc.rel = 'noopener';
+      loc.href = 'https://www.google.com/maps/search/?api=1&query='
+        + encodeURIComponent(meta.latitude + ',' + meta.longitude);
+      loc.textContent = dms(meta.latitude, 'N', 'S') + ' ' + dms(meta.longitude, 'E', 'W');
+    }
     // Format + MIME on one row, e.g. "jpg (image/jpeg)".
     var fmt = p.format ? p.format.toLowerCase() : null;
     var format = (fmt && p.mime) ? (fmt + ' (' + p.mime + ')') : (fmt || p.mime || null);
@@ -439,6 +461,7 @@ function initLightbox() {
       ['Resolution', (p.width && p.height) ? (p.width + ' × ' + p.height) : null],
       ['Modified', fmtDate(p.modification_date)],
       ['Created', meta ? fmtDate(meta.creation_date) : null],
+      ['Location', loc],
       ['Tags', tags]
     ];
     var frag = document.createDocumentFragment();
@@ -511,9 +534,10 @@ function initLightbox() {
   infoEl.addEventListener('click', function (e) {
     e.stopPropagation();
     if (tapConsumed()) return;
-    // Any panel link (album or a tag) navigates in-page via jumpToAlbum.
+    // Internal panel links (album / tag) navigate in-page via jumpToAlbum; an
+    // external link (the maps link, target=_blank) falls through to open normally.
     var a = e.target.closest('a');
-    if (a) { e.preventDefault(); jumpToAlbum(a.getAttribute('href')); }
+    if (a && a.target !== '_blank') { e.preventDefault(); jumpToAlbum(a.getAttribute('href')); }
   });
   // Mouse/pen movement reveals the controls; touch is handled by the gestures
   // below (a tap reveals; a swipe doesn't).
@@ -874,6 +898,7 @@ function initLightbox() {
     if (e.target.closest('.info')) { toggleInfo(); suppressClick = true; return; }
     if (e.target.closest('#lb-info')) {
       var link = e.target.closest('a');
+      if (link && link.target === '_blank') return; // let the tap open the external link
       if (link) jumpToAlbum(link.getAttribute('href')); else wake();
       suppressClick = true; return;
     }

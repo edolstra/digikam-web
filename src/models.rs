@@ -70,6 +70,9 @@ pub struct PhotoSummary {
 pub struct PhotoMetadata {
     /// `ImageInformation.creationDate` (Digikam's import/EXIF time), if present.
     pub creation_date: Option<String>,
+    /// GPS coordinates (`ImagePositions.latitudeNumber`/`longitudeNumber`), if present.
+    pub latitude: Option<f64>,
+    pub longitude: Option<f64>,
     pub tags: Vec<String>,
 }
 
