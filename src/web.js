@@ -50,17 +50,24 @@ function filters(over) {
   return f;
 }
 
+// Encode a filter object onto a URLSearchParams, each at its non-default value.
+// The single source of truth for filter -> query, shared by the nav links
+// (photosUrl) and the API fetches (apiParams) so the two can't drift.
+function setFilterParams(qs, f) {
+  if (f.minRating) qs.set('min_rating', f.minRating);
+  if (!f.includeImages) qs.set('images', 'false');
+  if (!f.includeVideo) qs.set('video', 'false');
+  if (f.recursive) qs.set('recursive', 'true');
+  if (f.aspect && f.aspect !== 'all') qs.set('aspect', f.aspect);
+}
+
 // Build a frontend URL from album segments + a filter object, percent-encoding
 // each segment and encoding each filter at its non-default value. The single
 // source of truth for every nav link.
 function photosUrl(segments, f) {
   var p = segments.map(encodeURIComponent);
   var qs = new URLSearchParams();
-  if (f.minRating) qs.set('min_rating', f.minRating);
-  if (!f.includeImages) qs.set('images', 'false');
-  if (!f.includeVideo) qs.set('video', 'false');
-  if (f.recursive) qs.set('recursive', 'true');
-  if (f.aspect && f.aspect !== 'all') qs.set('aspect', f.aspect);
+  setFilterParams(qs, f);
   var q = qs.toString();
   return '/photos' + (p.length ? '/' + p.join('/') : '') + (q ? '?' + q : '');
 }
@@ -77,6 +84,28 @@ function ratingHref(k) {
   return photosUrl(state.album, filters({ minRating: state.minRating === k ? 0 : k }));
 }
 
+// Build a segmented control (horizontal radio) into `host`: each option is
+// either the active, inert <span class="on"> or an <a> link to its target.
+// Shared by the media / aspect / recursive filters. opts: [{label, title?,
+// active, href}].
+function segmented(host, opts) {
+  var frag = document.createDocumentFragment();
+  opts.forEach(function (o) {
+    var el;
+    if (o.active) {
+      el = document.createElement('span');
+      el.className = 'on';
+    } else {
+      el = document.createElement('a');
+      el.href = o.href;
+    }
+    el.textContent = o.label;
+    if (o.title) el.title = o.title;
+    frag.appendChild(el);
+  });
+  host.replaceChildren(frag);
+}
+
 // The media-type filter as a 3-state horizontal radio (segmented control):
 // "📷 🎥" (all media), "📷" (images only), "🎥" (videos only). The option matching
 // the current {includeImages, includeVideo} pair is the active one (an inert
@@ -88,22 +117,14 @@ var MEDIA_OPTIONS = [
   { label: '🎥', images: false, video: true, title: 'Videos only' }
 ];
 function renderMedia(host) {
-  var frag = document.createDocumentFragment();
-  MEDIA_OPTIONS.forEach(function (o) {
-    var active = state.includeImages === o.images && state.includeVideo === o.video;
-    var el;
-    if (active) {
-      el = document.createElement('span');
-      el.className = 'on';
-    } else {
-      el = document.createElement('a');
-      el.href = photosUrl(state.album, filters({ includeImages: o.images, includeVideo: o.video }));
-    }
-    el.textContent = o.label;
-    el.title = o.title;
-    frag.appendChild(el);
-  });
-  host.replaceChildren(frag);
+  segmented(host, MEDIA_OPTIONS.map(function (o) {
+    return {
+      label: o.label,
+      title: o.title,
+      active: state.includeImages === o.images && state.includeVideo === o.video,
+      href: photosUrl(state.album, filters({ includeImages: o.images, includeVideo: o.video }))
+    };
+  }));
 }
 
 // The aspect-ratio filter as a 3-state radio (segmented control), same style as
@@ -115,21 +136,14 @@ var ASPECT_OPTIONS = [
   { label: '▭', value: 'landscape', title: 'Landscape (width ≥ height)' }
 ];
 function renderAspect(host) {
-  var frag = document.createDocumentFragment();
-  ASPECT_OPTIONS.forEach(function (o) {
-    var el;
-    if (state.aspect === o.value) {
-      el = document.createElement('span');
-      el.className = 'on';
-    } else {
-      el = document.createElement('a');
-      el.href = photosUrl(state.album, filters({ aspect: o.value }));
-    }
-    el.textContent = o.label;
-    el.title = o.title;
-    frag.appendChild(el);
-  });
-  host.replaceChildren(frag);
+  segmented(host, ASPECT_OPTIONS.map(function (o) {
+    return {
+      label: o.label,
+      title: o.title,
+      active: state.aspect === o.value,
+      href: photosUrl(state.album, filters({ aspect: o.value }))
+    };
+  }));
 }
 
 // The filter state reset to its defaults (everything off / included). Used by the
@@ -145,13 +159,10 @@ function filtersActive() {
 function apiParams() {
   var p = new URLSearchParams();
   p.set('album', state.album.length ? '/' + state.album.join('/') : '');
-  if (state.minRating) p.set('min_rating', state.minRating);
-  if (!state.includeImages) p.set('images', 'false');
-  if (!state.includeVideo) p.set('video', 'false');
-  // Sent to /api/photos (extends the grid to all sub-albums); /api/subalbums
+  // `state` carries the same field names as a filter object. `recursive` is
+  // sent to /api/photos (extends the grid to all sub-albums); /api/subalbums
   // ignores it (its counts are already recursive).
-  if (state.recursive) p.set('recursive', 'true');
-  if (state.aspect !== 'all') p.set('aspect', state.aspect);
+  setFilterParams(p, state);
   return p;
 }
 
@@ -220,18 +231,13 @@ function renderMenuFilters() {
   // Recursive: a 2-option [On|Off] segmented control.
   var rec = document.createElement('span');
   rec.className = 'seg recursive-toggle';
-  [['On', true], ['Off', false]].forEach(function (o) {
-    var el;
-    if (state.recursive === o[1]) {
-      el = document.createElement('span');
-      el.className = 'on';
-    } else {
-      el = document.createElement('a');
-      el.href = photosUrl(state.album, filters({ recursive: o[1] }));
-    }
-    el.textContent = o[0];
-    rec.appendChild(el);
-  });
+  segmented(rec, [['On', true], ['Off', false]].map(function (o) {
+    return {
+      label: o[0],
+      active: state.recursive === o[1],
+      href: photosUrl(state.album, filters({ recursive: o[1] }))
+    };
+  }));
   frag.appendChild(filterRow('Recursive', rec));
 
   // Stars: the 5-star rating selector.
