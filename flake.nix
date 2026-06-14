@@ -2,7 +2,7 @@
   description = "Read-only web backend for browsing a Digikam photo database";
 
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.11";
+    nixpkgs.url = "https://flakehub.com/f/NixOS/nixpkgs/0.2605.tar.gz";
     flake-utils.url = "github:numtide/flake-utils";
     rust-overlay = {
       url = "github:oxalica/rust-overlay";
