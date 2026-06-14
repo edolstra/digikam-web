@@ -38,6 +38,17 @@ stdenv.mkDerivation (finalAttrs: {
   # the Makefile under emconfigure/emmake.
   dontConfigure = true;
 
+  # libpgf's configure must be told it's cross-compiling to wasm: emscripten 5
+  # (nixpkgs 26.05) regenerates configure with a newer autoconf whose
+  # cross-compile probe *runs* a test binary, which fails for wasm output
+  # ("cannot run C compiled programs"). Passing an explicit --host makes
+  # configure skip the run check (build → wasm32 = cross).
+  postPatch = ''
+    substituteInPlace Makefile \
+      --replace-fail "emconfigure ./configure" \
+                     "emconfigure ./configure --host=wasm32-unknown-emscripten"
+  '';
+
   # Emscripten needs a writable cache; copy the prebuilt sysroot that ships with
   # the nixpkgs emscripten package (no network in the build sandbox).
   preBuild = ''
