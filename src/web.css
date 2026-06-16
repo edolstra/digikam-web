@@ -174,9 +174,11 @@ body.modal-open { overflow: hidden; }
 #lb-info a { color: #6cf; text-decoration: none; }
 #lb-info .tag-link { display: block; }
 #lb-info .desc { white-space: pre-wrap; }
-#lb-info .copy-path { border: 0; background: none; color: #6cf; cursor: pointer;
+#lb-info .copy-path, #lb-info .yandex-search {
+                      border: 0; background: none; color: #6cf; cursor: pointer;
                       font: inherit; padding: 0; line-height: 1; }
 #lb-info .copy-path.copied { color: #6f6; }
+#lb-info .yandex-search { font-size: 0.8em; }
 @media (hover: hover) { #lb-info a:hover { text-decoration: underline; } }
 /* Auto-hide the controls after inactivity (web.js toggles `.idle`); they fade
    back on any pointer move / touch / key. */

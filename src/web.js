@@ -461,12 +461,24 @@ function initLightbox() {
         + encodeURIComponent(meta.latitude + ',' + meta.longitude);
       loc.textContent = dms(meta.latitude, 'N', 'S') + ' ' + dms(meta.longitude, 'E', 'W');
     }
-    // File name, plus a button that copies the absolute server path to the
-    // clipboard — shown once the lazily-fetched metadata provides `file_path`.
-    var fileCell = p.name;
+    // File name, plus inline icon buttons: a Yandex reverse-image-search (images
+    // only) and — once the lazily-fetched metadata provides `file_path` — a button
+    // that copies the absolute server path to the clipboard.
+    var fileCell = document.createDocumentFragment();
+    fileCell.append(p.name);
+    if (!p.is_video) {
+      fileCell.append(' ');
+      var yx = document.createElement('button');
+      yx.type = 'button';
+      yx.className = 'yandex-search';
+      yx.title = 'Reverse image search on Yandex';
+      yx.setAttribute('aria-label', 'Reverse image search on Yandex');
+      yx.textContent = '🔍';
+      yx.dataset.id = p.id;
+      fileCell.appendChild(yx);
+    }
     if (meta && meta.file_path) {
-      fileCell = document.createDocumentFragment();
-      fileCell.append(p.name + ' ');
+      fileCell.append(' ');
       var copyBtn = document.createElement('button');
       copyBtn.type = 'button';
       copyBtn.className = 'copy-path';
@@ -562,6 +574,9 @@ function initLightbox() {
   infoEl.addEventListener('click', function (e) {
     e.stopPropagation();
     if (tapConsumed()) return;
+    // The Yandex button reverse-image-searches the original on Yandex.
+    var ys = e.target.closest('.yandex-search');
+    if (ys) { e.preventDefault(); yandexSearch(ys.dataset.id); return; }
     // The copy-path button copies the absolute server path to the clipboard.
     var cp = e.target.closest('.copy-path');
     if (cp) { e.preventDefault(); copyPath(cp); return; }
@@ -570,6 +585,14 @@ function initLightbox() {
     var a = e.target.closest('a');
     if (a && a.target !== '_blank') { e.preventDefault(); jumpToAlbum(a.getAttribute('href')); }
   });
+
+  // Reverse-image-search a photo on Yandex. The browser can't reach Yandex's
+  // results directly (its upload endpoint sends no CORS headers and only a
+  // transitional page), so the server endpoint uploads the image bytes, reads the
+  // CBIR id, and 302-redirects to the results. Opening it in a new tab is enough.
+  function yandexSearch(id) {
+    window.open('/api/photos/' + id + '/reverse-search?engine=yandex', '_blank', 'noopener');
+  }
 
   // Copy a tile's absolute server path to the clipboard, with a brief ✓ flash.
   // Falls back to a hidden-textarea execCommand where the async clipboard API is
@@ -965,6 +988,8 @@ function initLightbox() {
     if (e.target.closest('.slideshow-btn')) { toggleSlideshow(); suppressClick = true; return; }
     if (e.target.closest('.info')) { toggleInfo(); suppressClick = true; return; }
     if (e.target.closest('#lb-info')) {
+      var ysb = e.target.closest('.yandex-search');
+      if (ysb) { yandexSearch(ysb.dataset.id); suppressClick = true; return; }
       var cpath = e.target.closest('.copy-path');
       if (cpath) { copyPath(cpath); suppressClick = true; return; }
       var link = e.target.closest('a');

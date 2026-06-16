@@ -15,6 +15,9 @@ pub enum AppError {
     #[error("conflict: {0}")]
     Conflict(String),
 
+    #[error("bad gateway: {0}")]
+    BadGateway(String),
+
     #[error(transparent)]
     Internal(#[from] anyhow::Error),
 }
@@ -25,6 +28,7 @@ impl IntoResponse for AppError {
             AppError::NotFound(m) => (StatusCode::NOT_FOUND, m.clone()),
             AppError::BadRequest(m) => (StatusCode::BAD_REQUEST, m.clone()),
             AppError::Conflict(m) => (StatusCode::CONFLICT, m.clone()),
+            AppError::BadGateway(m) => (StatusCode::BAD_GATEWAY, m.clone()),
             AppError::Internal(e) => {
                 tracing::error!(error = %e, "internal error");
                 (

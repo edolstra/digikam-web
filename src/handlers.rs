@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use axum::extract::{Path, Query, State};
 use axum::http::{header, HeaderMap, HeaderValue, Request, StatusCode};
-use axum::response::{IntoResponse, Response};
+use axum::response::{IntoResponse, Redirect, Response};
 use axum::Json;
 use rusqlite::OptionalExtension;
 use serde::Deserialize;
@@ -186,6 +186,120 @@ pub async fn get_photo(
     .await?;
 
     Ok(Json(detail))
+}
+
+/// Query for `GET /photos/:id/reverse-search`.
+#[derive(Debug, Deserialize)]
+pub struct ReverseSearchParams {
+    /// Search engine; only `yandex` is supported (the default).
+    engine: Option<String>,
+}
+
+/// `GET /photos/:id/reverse-search?engine=yandex` — reverse-image-search the
+/// original on Yandex, 302-redirecting to the results page.
+///
+/// The **server** does this, not the browser: this box is firewalled (so a `?url=`
+/// search Yandex would have to fetch back is impossible — we must send the image
+/// *bytes*), and Yandex's upload endpoint sends no CORS headers and returns only a
+/// transitional "candidate" page, so the browser can't read the CBIR id to build
+/// the results URL. Here we upload `upfile` to Yandex's JSON endpoint, read
+/// `cbirId`, and redirect to the canonical `…&cbir_id=…` results page.
+pub async fn reverse_search(
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+    Query(params): Query<ReverseSearchParams>,
+) -> AppResult<Response> {
+    let engine = params.engine.as_deref().unwrap_or("yandex");
+    if engine != "yandex" {
+        return Err(AppError::BadRequest(format!(
+            "unsupported engine: {engine}"
+        )));
+    }
+
+    // Resolve the original's absolute path (as `get_photo_file` does).
+    let (path, name) = run_blocking(&state, move |conn, state| {
+        let (album_root, relative_path, name): (i64, String, String) = conn
+            .query_row(
+                "SELECT a.albumRoot, a.relativePath, i.name FROM Images i \
+                 JOIN Albums a ON a.id = i.album \
+                 WHERE i.id = ?1 AND i.status = 1",
+                [id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .map_err(|e| match e {
+                rusqlite::Error::QueryReturnedNoRows => {
+                    AppError::NotFound(format!("photo {id} not found"))
+                }
+                other => AppError::from(other),
+            })?;
+        let root = state
+            .roots
+            .get(&album_root)
+            .ok_or_else(|| AppError::NotFound(format!("album root {album_root} unknown")))?;
+        Ok((image_abs_path(root, &relative_path, &name), name))
+    })
+    .await?;
+
+    let bytes = tokio::fs::read(&path)
+        .await
+        .map_err(|e| AppError::Internal(anyhow::anyhow!("reading {}: {e}", path.display())))?;
+    let mime = mime_guess::from_path(&name)
+        .first_or_octet_stream()
+        .essence_str()
+        .to_string();
+
+    let url = yandex_reverse_search_url(bytes, name, mime).await?;
+    Ok(Redirect::to(&url).into_response())
+}
+
+/// Upload image bytes to Yandex's reverse-image-search and return the canonical
+/// results-page URL (built from the `cbirId` in its JSON response).
+async fn yandex_reverse_search_url(
+    bytes: Vec<u8>,
+    name: String,
+    mime: String,
+) -> AppResult<String> {
+    let bad_gateway = |e: String| AppError::BadGateway(format!("Yandex reverse search: {e}"));
+
+    let part = reqwest::multipart::Part::bytes(bytes)
+        .file_name(name)
+        .mime_str(&mime)
+        .map_err(|e| bad_gateway(e.to_string()))?;
+    let form = reqwest::multipart::Form::new().part("upfile", part);
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        // A browser-like UA; Yandex serves bot-ish clients a captcha page.
+        .user_agent("Mozilla/5.0 (X11; Linux x86_64; rv:128.0) Gecko/20100101 Firefox/128.0")
+        .build()
+        .map_err(|e| bad_gateway(e.to_string()))?;
+
+    let resp = client
+        .post("https://yandex.com/images/search")
+        .query(&[
+            ("rpt", "imageview"),
+            ("format", "json"),
+            (
+                "request",
+                r#"{"blocks":[{"block":"b-page_type_search-by-image__link"}]}"#,
+            ),
+        ])
+        .multipart(form)
+        .send()
+        .await
+        .map_err(|e| bad_gateway(e.to_string()))?
+        .error_for_status()
+        .map_err(|e| bad_gateway(e.to_string()))?;
+
+    let json: serde_json::Value = resp.json().await.map_err(|e| bad_gateway(e.to_string()))?;
+    let cbir_id = json["blocks"][0]["params"]["cbirId"]
+        .as_str()
+        .ok_or_else(|| bad_gateway("no cbirId in response".into()))?;
+
+    Ok(format!(
+        "https://yandex.com/images/search?rpt=imageview&cbir_id={}&cbir_page=similar",
+        urlencoding::encode(cbir_id)
+    ))
 }
 
 /// `GET /photos/:id/file` — serve the original image bytes (range-aware).

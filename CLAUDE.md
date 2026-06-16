@@ -43,6 +43,7 @@ All endpoints are served under the `/api` prefix.
 | `GET /api/photos?album=&tags=&recursive=&min_rating=&images=&video=&aspect=&limit=&offset=` | Filtered, paginated list. `Page<PhotoSummary>` = `{incomplete, limit, offset, items}` (`incomplete` = more rows exist beyond this page — one extra row is fetched to detect it). `PhotoSummary.is_video` is true for videos (Digikam `category=2`). `images`/`video` are the media-type filter (both default `true`; `=false` excludes that type). `aspect` is `all` (default) / `portrait` (`height>=width`) / `landscape` (`width>=height`); squares match both. An empty/absent `album` (non-recursive) returns `items: []`. |
 | `GET /api/photos/:id` | `PhotoDetail` = the `PhotoSummary` fields plus `file_path`, `creation_date`, `description`, `latitude`/`longitude`, and `tags`. `file_path` is the **absolute path of the original on the server** (album-root base + `relativePath` + name; `null` if the root is unknown) — the info panel's copy-path button copies it. `creation_date` is `ImageInformation.creationDate` (Digikam's import/EXIF time — distinct from the `modificationDate` the app sorts/groups by); `description` is the image's `ImageComments` (caption/title/headline/imported EXIF-JFIF comments) concatenated with newlines (ordered by `type, language, id` via a `group_concat` subselect in the one query; `null` when none); `latitude`/`longitude` are `ImagePositions.latitudeNumber`/`longitudeNumber` (null when absent). `tags` are **absolute paths** (`/local/blender/todo`, built by walking the `pid` chain), sorted `COLLATE NOCASE`, with Digikam's internal tags (the `_Digikam_Internal_Tags_` subtree — Color/Pick labels, version history) excluded. The lightbox info panel fetches this lazily (only while open) and caches it per id. |
 | `GET /api/photos/:id/file` | Original bytes, range-aware (via `tower_http::services::ServeFile`). Sends a strong `ETag` from the image's `uniqueHash`; a matching `If-None-Match` (or `*`) returns `304`. `Content-Disposition: inline` carries the original filename (+ RFC 5987 `filename*`) so saving from the browser keeps the real name. |
+| `GET /api/photos/:id/reverse-search?engine=yandex` | Reverse-image-search the original on Yandex; **302-redirects** to the results page. The **server** does the upload (not the browser): the image URLs may not be world-readable, so a `?url=` search Yandex would have to fetch back is unreliable (must send the **bytes**), and Yandex sends no CORS headers + returns only a transitional "candidate" page, so the browser can't read the CBIR id. The handler POSTs the file as multipart `upfile` to Yandex's JSON endpoint (`reqwest`, rustls), reads `blocks[0].params.cbirId`, and redirects to `…/search?rpt=imageview&cbir_id=…&cbir_page=similar`. The only outbound network call this app makes. `engine` defaults to `yandex` (only value supported → else `400`); unknown id `404`; Yandex failure `502`. |
 | `GET /api/photos/:id/thumbnail` | Digikam's stored thumbnail as-is: the **raw PGF blob** from `thumbnails-digikam.db` (looked up by `uniqueHash`+`fileSize`), for the client to decode in wasm (see [nix/webpgf.nix](nix/webpgf.nix)). Strong `ETag` (+ `If-None-Match`→`304`) and a 1-year `immutable` `Cache-Control`; `X-Orientation` header carries Digikam's `orientationHint` (EXIF orientation) for client-side rotation. `404` when the thumbnails DB is absent / the image has no cached thumbnail → client falls back to `/file`. |
 | `GET /api/albums` | Flat list of all albums (`{id, path, root}`). |
 | `GET /api/subalbums?album=/Root/rel&min_rating=&images=&video=&aspect=&tags=` | Direct sub-albums of an album as `[{name, path, photo_count, cover: {id, name} \| null}]`, sorted by most recent photo (newest first). An absent/empty `album` lists the album roots. Cover = newest item (image **or** video — videos have stored thumbnails the client renders) in the sub-album's whole subtree; `Cover.is_video` flags a video cover (the client then omits its `data-full`). `photo_count` is the recursive count incl. videos. `min_rating` (0..=5), the `images`/`video` media-type filter, the `aspect` filter, and `tags` (same hierarchical semantics as `/photos`) constrain the cover, count, and which sub-albums appear alike. One query; albums with no matching photos anywhere are omitted. |
@@ -183,9 +184,12 @@ reused across navigations; only the DOM is rebuilt (`render()` per navigation). 
   (top-left) and the **`i` key** toggle a metadata overlay (`#lb-info`): file
   name, album path (a **link** that jumps to that album), format, size, resolution, rating,
   modification date, MIME — built client-side from the tile's `PhotoSummary` (stashed on the
-  grid tile as `_photo`, no extra fetch), updating as you navigate. A **⧉ copy-path button**
-  next to the file name copies the absolute server path (`file_path`, from the lazy
-  `PhotoDetail`) to the clipboard (async Clipboard API, hidden-textarea fallback; ✓ flash). The **creation date**,
+  grid tile as `_photo`, no extra fetch), updating as you navigate. Next to the file name are
+  two inline icon buttons: a **🔍 Yandex reverse-image-search** (images only — opens
+  `/api/photos/:id/reverse-search?engine=yandex` in a new tab, where the server uploads the bytes
+  and 302s to the results) and a **⧉ copy-path button** that copies the absolute server path
+  (`file_path`, from the lazy `PhotoDetail`) to the clipboard (async Clipboard API, hidden-textarea
+  fallback; ✓ flash). The **creation date**,
   **description** (the image's `ImageComments`, newlines preserved via CSS `white-space: pre-wrap`),
   **location** (GPS, a link to Google Maps that opens in a new tab — shown only when present),
   and **tags** (absolute paths, one per line, internal tags excluded) are added from
@@ -272,7 +276,10 @@ content-hash `ETag`) so updates propagate; icons are `immutable`.
 - **Stack**: `axum` + `tokio`; `rusqlite` (feature `bundled`, so SQLite is compiled
   in — no system lib / pkg-config) behind an `r2d2` connection pool. rusqlite is
   blocking, so every DB call runs inside `tokio::task::spawn_blocking` (see
-  `run_blocking` in [src/handlers.rs](src/handlers.rs)).
+  `run_blocking` in [src/handlers.rs](src/handlers.rs)). The app is otherwise
+  network-isolated except for **one outbound call**: the Yandex reverse-search upload
+  (`reqwest` with `rustls-tls` + bundled webpki roots, so no system TLS/OpenSSL dep),
+  used only by `/api/photos/:id/reverse-search`.
 - **HTML rendering**: the page **shell** uses [`maud`](https://maud.lang.rs/)
   (compile-time `html!` templates with automatic escaping). `album_page` returns
   `maud::Markup` (its axum feature makes it `IntoResponse`). The shell is static — all

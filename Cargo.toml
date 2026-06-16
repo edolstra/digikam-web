@@ -27,6 +27,9 @@ anyhow = "1"
 thiserror = "2"
 mime_guess = "2"
 urlencoding = "2"
+# Outbound HTTPS for server-side reverse-image-search uploads (Yandex). rustls
+# (bundled webpki roots) keeps it free of a system TLS/OpenSSL dependency.
+reqwest = { version = "0.12", default-features = false, features = ["multipart", "json", "rustls-tls"] }
 
 [profile.release]
 opt-level = 3
