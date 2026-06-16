@@ -119,12 +119,16 @@ pub async fn get_photo(
             .query_row([id], |row| {
                 let album_root: i64 = row.get(2)?;
                 let relative_path: String = row.get(3)?;
-                let album_path = state
-                    .roots
-                    .get(&album_root)
+                let name: String = row.get(1)?;
+                let root = state.roots.get(&album_root);
+                let album_path = root
                     .map(|r| album_display_path(r, &relative_path))
                     .unwrap_or_else(|| relative_path.clone());
-                let name: String = row.get(1)?;
+                let file_path = root.map(|r| {
+                    image_abs_path(r, &relative_path, &name)
+                        .to_string_lossy()
+                        .into_owned()
+                });
                 let mime = mime_guess::from_path(&name)
                     .first()
                     .map(|m| m.essence_str().to_string());
@@ -142,6 +146,7 @@ pub async fn get_photo(
                         mime,
                         is_video: row.get::<_, i64>(12)? == 2,
                     },
+                    file_path,
                     creation_date: row.get(13)?,
                     description: row.get(14)?,
                     tags: Vec::new(),

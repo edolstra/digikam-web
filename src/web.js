@@ -461,11 +461,26 @@ function initLightbox() {
         + encodeURIComponent(meta.latitude + ',' + meta.longitude);
       loc.textContent = dms(meta.latitude, 'N', 'S') + ' ' + dms(meta.longitude, 'E', 'W');
     }
+    // File name, plus a button that copies the absolute server path to the
+    // clipboard — shown once the lazily-fetched metadata provides `file_path`.
+    var fileCell = p.name;
+    if (meta && meta.file_path) {
+      fileCell = document.createDocumentFragment();
+      fileCell.append(p.name + ' ');
+      var copyBtn = document.createElement('button');
+      copyBtn.type = 'button';
+      copyBtn.className = 'copy-path';
+      copyBtn.title = 'Copy server path';
+      copyBtn.setAttribute('aria-label', 'Copy file path to clipboard');
+      copyBtn.textContent = '⧉';
+      copyBtn.dataset.path = meta.file_path;
+      fileCell.appendChild(copyBtn);
+    }
     // Format + MIME on one row, e.g. "jpg (image/jpeg)".
     var fmt = p.format ? p.format.toLowerCase() : null;
     var format = (fmt && p.mime) ? (fmt + ' (' + p.mime + ')') : (fmt || p.mime || null);
     var rows = [
-      ['File', p.name],
+      ['File', fileCell],
       ['Album', album],
       ['Rating', p.rating != null ? '★'.repeat(p.rating) + '☆'.repeat(5 - p.rating) : null],
       ['Format', format],
@@ -547,11 +562,39 @@ function initLightbox() {
   infoEl.addEventListener('click', function (e) {
     e.stopPropagation();
     if (tapConsumed()) return;
+    // The copy-path button copies the absolute server path to the clipboard.
+    var cp = e.target.closest('.copy-path');
+    if (cp) { e.preventDefault(); copyPath(cp); return; }
     // Internal panel links (album / tag) navigate in-page via jumpToAlbum; an
     // external link (the maps link, target=_blank) falls through to open normally.
     var a = e.target.closest('a');
     if (a && a.target !== '_blank') { e.preventDefault(); jumpToAlbum(a.getAttribute('href')); }
   });
+
+  // Copy a tile's absolute server path to the clipboard, with a brief ✓ flash.
+  // Falls back to a hidden-textarea execCommand where the async clipboard API is
+  // unavailable (e.g. a non-secure context).
+  function copyPath(btn) {
+    var path = btn.dataset.path;
+    if (!path) return;
+    var flash = function () {
+      btn.classList.add('copied');
+      btn.textContent = '✓';
+      setTimeout(function () { btn.textContent = '⧉'; btn.classList.remove('copied'); }, 1200);
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(path).then(flash, function () {});
+      return;
+    }
+    var ta = document.createElement('textarea');
+    ta.value = path;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand('copy'); flash(); } catch (err) { /* ignore */ }
+    document.body.removeChild(ta);
+  }
   // Mouse/pen movement reveals the controls; touch is handled by the gestures
   // below (a tap reveals; a swipe doesn't).
   lb.addEventListener('pointermove', function (e) { if (e.pointerType !== 'touch') wake(); });
@@ -922,6 +965,8 @@ function initLightbox() {
     if (e.target.closest('.slideshow-btn')) { toggleSlideshow(); suppressClick = true; return; }
     if (e.target.closest('.info')) { toggleInfo(); suppressClick = true; return; }
     if (e.target.closest('#lb-info')) {
+      var cpath = e.target.closest('.copy-path');
+      if (cpath) { copyPath(cpath); suppressClick = true; return; }
       var link = e.target.closest('a');
       if (link && link.target === '_blank') return; // let the tap open the external link
       if (link) jumpToAlbum(link.getAttribute('href')); else wake();

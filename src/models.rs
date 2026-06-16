@@ -76,6 +76,9 @@ pub struct PhotoSummary {
 pub struct PhotoDetail {
     #[serde(flatten)]
     pub summary: PhotoSummary,
+    /// Absolute path of the original file on the server (album-root base +
+    /// `relativePath` + name); `None` if the album root is unknown.
+    pub file_path: Option<String>,
     /// `ImageInformation.creationDate` (Digikam's import/EXIF time), if present —
     /// distinct from the `modificationDate` the app sorts/groups by.
     pub creation_date: Option<String>,
