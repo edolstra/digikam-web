@@ -103,7 +103,10 @@ pub async fn get_photo(
         let mut stmt = conn.prepare(
             "SELECT i.id, i.name, a.albumRoot, a.relativePath, i.fileSize, \
                     ii.format, ii.width, ii.height, ii.rating, i.modificationDate, \
-                    p.latitudeNumber, p.longitudeNumber, i.category, ii.creationDate \
+                    p.latitudeNumber, p.longitudeNumber, i.category, ii.creationDate, \
+                    (SELECT group_concat(c.comment, char(10) ORDER BY c.type, c.language, c.id) \
+                       FROM ImageComments c \
+                       WHERE c.imageid = i.id AND c.comment IS NOT NULL AND trim(c.comment) <> '') \
              FROM Images i \
              JOIN Albums a ON a.id = i.album \
              JOIN AlbumRoots r ON r.id = a.albumRoot \
@@ -140,6 +143,7 @@ pub async fn get_photo(
                         is_video: row.get::<_, i64>(12)? == 2,
                     },
                     creation_date: row.get(13)?,
+                    description: row.get(14)?,
                     tags: Vec::new(),
                     latitude: row.get(10)?,
                     longitude: row.get(11)?,

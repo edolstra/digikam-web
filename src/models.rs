@@ -79,6 +79,10 @@ pub struct PhotoDetail {
     /// `ImageInformation.creationDate` (Digikam's import/EXIF time), if present —
     /// distinct from the `modificationDate` the app sorts/groups by.
     pub creation_date: Option<String>,
+    /// Image description: all of the image's `ImageComments` (Digikam stores
+    /// captions/titles/imported EXIF-JFIF comments here) concatenated with
+    /// newlines; `None` when the image has none.
+    pub description: Option<String>,
     /// Tags as absolute paths (`/local/blender/todo`), internal tags excluded.
     pub tags: Vec<String>,
     /// GPS coordinates (`ImagePositions.latitudeNumber`/`longitudeNumber`), if present.

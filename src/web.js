@@ -443,6 +443,14 @@ function initLightbox() {
         tags.appendChild(line);
       });
     }
+    // Description: the image's ImageComments, concatenated (newlines preserved via
+    // CSS). From the lazily-fetched metadata, so it appears once loaded.
+    var desc = null;
+    if (meta && meta.description) {
+      desc = document.createElement('div');
+      desc.className = 'desc';
+      desc.textContent = meta.description;
+    }
     // Location: a link to the coordinates on Google Maps (opens in a new tab).
     var loc = null;
     if (meta && meta.latitude != null && meta.longitude != null) {
@@ -465,6 +473,7 @@ function initLightbox() {
       ['Resolution', (p.width && p.height) ? (p.width + ' × ' + p.height) : null],
       ['Modified', fmtDate(p.modification_date)],
       ['Created', meta ? fmtDate(meta.creation_date) : null],
+      ['Description', desc],
       ['Location', loc],
       ['Tags', tags]
     ];
