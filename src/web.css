@@ -142,6 +142,9 @@ body.modal-open { overflow: hidden; }
 /* "i" info toggle, top-left corner. */
 .lightbox .info { position: absolute; top: 0.5rem; left: 0.75rem; font-size: 1.9rem; line-height: 1; }
 .lightbox.info-open .info { opacity: 1; color: #f5c518; }
+/* Reverse-image-search (Yandex), just below the info toggle; hidden for videos. */
+.lightbox .search-btn { position: absolute; top: 3.4rem; left: 0.85rem; font-size: 1.5rem; line-height: 1; }
+.lightbox.is-video .search-btn { display: none; }
 /* Slideshow toggle, bottom-left (▶ start / ⏸ stop; gold while running). */
 .lightbox .slideshow-btn { position: absolute; bottom: 0.5rem; left: 0.75rem; font-size: 1.9rem; line-height: 1; }
 .lightbox.slideshow .slideshow-btn { opacity: 1; color: #f5c518; }
@@ -174,18 +177,16 @@ body.modal-open { overflow: hidden; }
 #lb-info a { color: #6cf; text-decoration: none; }
 #lb-info .tag-link { display: block; }
 #lb-info .desc { white-space: pre-wrap; }
-#lb-info .copy-path, #lb-info .yandex-search {
-                      border: 0; background: none; color: #6cf; cursor: pointer;
+#lb-info .copy-path { border: 0; background: none; color: #6cf; cursor: pointer;
                       font: inherit; padding: 0; line-height: 1; }
 #lb-info .copy-path.copied { color: #6f6; }
-#lb-info .yandex-search { font-size: 0.8em; }
 @media (hover: hover) { #lb-info a:hover { text-decoration: underline; } }
 /* Auto-hide the controls after inactivity (web.js toggles `.idle`); they fade
    back on any pointer move / touch / key. */
-.lightbox .close, .lightbox .info, .lightbox .slideshow-btn, .lightbox .nav { transition: opacity 0.25s ease; }
+.lightbox .close, .lightbox .info, .lightbox .search-btn, .lightbox .slideshow-btn, .lightbox .nav { transition: opacity 0.25s ease; }
 /* Hidden controls don't capture taps — a tap there reveals them (and pauses a
    video / closes on the letterbox) rather than navigating/closing via the button.
    `.zoomed` (a pinched-in image) hides them the same way, incl. the ‹ › chevrons. */
-.lightbox.idle .close, .lightbox.idle .info, .lightbox.idle .slideshow-btn, .lightbox.idle .nav,
-.lightbox.zoomed .close, .lightbox.zoomed .info, .lightbox.zoomed .slideshow-btn, .lightbox.zoomed .nav { opacity: 0; pointer-events: none; }
+.lightbox.idle .close, .lightbox.idle .info, .lightbox.idle .search-btn, .lightbox.idle .slideshow-btn, .lightbox.idle .nav,
+.lightbox.zoomed .close, .lightbox.zoomed .info, .lightbox.zoomed .search-btn, .lightbox.zoomed .slideshow-btn, .lightbox.zoomed .nav { opacity: 0; pointer-events: none; }
 .lightbox.idle { cursor: none; }

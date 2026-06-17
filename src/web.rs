@@ -195,6 +195,7 @@ fn page_html(title: &str, body: Markup) -> Markup {
                 div.lightbox id="lightbox" {
                     button.close aria-label="Close" { "×" }
                     button.info aria-label="Image info" title="Image info (i)" { "ⓘ" }
+                    button.search-btn aria-label="Reverse image search on Yandex" title="Reverse image search on Yandex" { "🔍" }
                     button.slideshow-btn aria-label="Slideshow" title="Slideshow (s)" { "▶" }
                     button.nav.prev aria-label="Previous" { "‹" }
                     img.full id="lb-img" alt="" decoding="async";

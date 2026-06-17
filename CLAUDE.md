@@ -180,16 +180,17 @@ reused across navigations; only the DOM is rebuilt (`render()` per navigation). 
   `scroll-margin-top` set to the sticky navbar's height so it isn't tucked underneath). The close/`‹ ›` controls (and the mouse cursor) **start hidden**
   (web.js `.idle` class) and are revealed by a **mouse/pen move or a tap** — *not* by
   keyboard navigation or swipes — then auto-hide again after 2s of inactivity; a tap that
-  only reveals them is consumed so it doesn't also dismiss/navigate. An **ⓘ info button**
+  only reveals them is consumed so it doesn't also dismiss/navigate. A **🔍 reverse-image-search
+  button** (top-left, just below the info button; **images only**, hidden for videos via the
+  lightbox's `.is-video` class) opens `/api/photos/:id/reverse-search?engine=yandex` in a new tab
+  after a `confirm()` (it uploads the image to a third party) — the server does the upload + 302.
+  An **ⓘ info button**
   (top-left) and the **`i` key** toggle a metadata overlay (`#lb-info`): file
   name, album path (a **link** that jumps to that album), format, size, resolution, rating,
   modification date, MIME — built client-side from the tile's `PhotoSummary` (stashed on the
-  grid tile as `_photo`, no extra fetch), updating as you navigate. Next to the file name are
-  two inline icon buttons: a **🔍 Yandex reverse-image-search** (images only — opens
-  `/api/photos/:id/reverse-search?engine=yandex` in a new tab, where the server uploads the bytes
-  and 302s to the results) and a **⧉ copy-path button** that copies the absolute server path
-  (`file_path`, from the lazy `PhotoDetail`) to the clipboard (async Clipboard API, hidden-textarea
-  fallback; ✓ flash). The **creation date**,
+  grid tile as `_photo`, no extra fetch), updating as you navigate. A **⧉ copy-path button** next
+  to the file name copies the absolute server path (`file_path`, from the lazy `PhotoDetail`) to
+  the clipboard (async Clipboard API, hidden-textarea fallback; ✓ flash). The **creation date**,
   **description** (the image's `ImageComments`, newlines preserved via CSS `white-space: pre-wrap`),
   **location** (GPS, a link to Google Maps that opens in a new tab — shown only when present),
   and **tags** (absolute paths, one per line, internal tags excluded) are added from

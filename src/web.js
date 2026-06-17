@@ -461,22 +461,10 @@ function initLightbox() {
         + encodeURIComponent(meta.latitude + ',' + meta.longitude);
       loc.textContent = dms(meta.latitude, 'N', 'S') + ' ' + dms(meta.longitude, 'E', 'W');
     }
-    // File name, plus inline icon buttons: a Yandex reverse-image-search (images
-    // only) and — once the lazily-fetched metadata provides `file_path` — a button
-    // that copies the absolute server path to the clipboard.
+    // File name, plus — once the lazily-fetched metadata provides `file_path` — a
+    // button that copies the absolute server path to the clipboard.
     var fileCell = document.createDocumentFragment();
     fileCell.append(p.name);
-    if (!p.is_video) {
-      fileCell.append(' ');
-      var yx = document.createElement('button');
-      yx.type = 'button';
-      yx.className = 'yandex-search';
-      yx.title = 'Reverse image search on Yandex';
-      yx.setAttribute('aria-label', 'Reverse image search on Yandex');
-      yx.textContent = '🔍';
-      yx.dataset.id = p.id;
-      fileCell.appendChild(yx);
-    }
     if (meta && meta.file_path) {
       fileCell.append(' ');
       var copyBtn = document.createElement('button');
@@ -574,9 +562,6 @@ function initLightbox() {
   infoEl.addEventListener('click', function (e) {
     e.stopPropagation();
     if (tapConsumed()) return;
-    // The Yandex button reverse-image-searches the original on Yandex.
-    var ys = e.target.closest('.yandex-search');
-    if (ys) { e.preventDefault(); yandexSearch(ys.dataset.id); return; }
     // The copy-path button copies the absolute server path to the clipboard.
     var cp = e.target.closest('.copy-path');
     if (cp) { e.preventDefault(); copyPath(cp); return; }
@@ -586,12 +571,16 @@ function initLightbox() {
     if (a && a.target !== '_blank') { e.preventDefault(); jumpToAlbum(a.getAttribute('href')); }
   });
 
-  // Reverse-image-search a photo on Yandex. The browser can't reach Yandex's
-  // results directly (its upload endpoint sends no CORS headers and only a
-  // transitional page), so the server endpoint uploads the image bytes, reads the
-  // CBIR id, and 302-redirects to the results. Opening it in a new tab is enough.
-  function yandexSearch(id) {
-    window.open('/api/photos/' + id + '/reverse-search?engine=yandex', '_blank', 'noopener');
+  // Reverse-image-search the current photo on Yandex (the lightbox 🔍 button). The
+  // browser can't reach Yandex's results directly (its upload endpoint sends no CORS
+  // headers and only a transitional page), so the server endpoint uploads the image
+  // bytes, reads the CBIR id, and 302-redirects to the results — opening it in a new
+  // tab is enough. Confirms first, since it uploads the image to a third party.
+  function yandexSearch() {
+    var it = items[idx];
+    if (!it || it.video || !it.photo) return;
+    if (!confirm('Reverse image search this photo on Yandex?\nThe image will be uploaded to Yandex.')) return;
+    window.open('/api/photos/' + it.photo.id + '/reverse-search?engine=yandex', '_blank', 'noopener');
   }
 
   // Copy a tile's absolute server path to the clipboard, with a brief ✓ flash.
@@ -637,6 +626,7 @@ function initLightbox() {
     idx = i;
     var it = items[i];
     resetZoom(); // start each item un-zoomed
+    lb.classList.toggle('is-video', it.video); // hides the reverse-search button
     vid.pause(); // stop any previously-playing video before switching
     if (it.video) {
       vid.src = it.src;
@@ -830,6 +820,11 @@ function initLightbox() {
     if (tapConsumed()) return;
     toggleInfo();
   });
+  lb.querySelector('.search-btn').addEventListener('click', function (e) {
+    e.stopPropagation();
+    if (tapConsumed()) return;
+    yandexSearch();
+  });
   slideBtn.addEventListener('click', function (e) {
     e.stopPropagation();
     if (tapConsumed()) return;
@@ -986,10 +981,9 @@ function initLightbox() {
     // that album; a tap on the panel itself just keeps it (none count as an
     // off-media letterbox close). The synthetic click is swallowed below.
     if (e.target.closest('.slideshow-btn')) { toggleSlideshow(); suppressClick = true; return; }
+    if (e.target.closest('.search-btn')) { yandexSearch(); suppressClick = true; return; }
     if (e.target.closest('.info')) { toggleInfo(); suppressClick = true; return; }
     if (e.target.closest('#lb-info')) {
-      var ysb = e.target.closest('.yandex-search');
-      if (ysb) { yandexSearch(ysb.dataset.id); suppressClick = true; return; }
       var cpath = e.target.closest('.copy-path');
       if (cpath) { copyPath(cpath); suppressClick = true; return; }
       var link = e.target.closest('a');
