@@ -5,7 +5,7 @@ SQLite database over an HTTP/JSON API. A web frontend will be added later.
 
 ## Build & run
 
-Everything goes through Nix (flakes). nixpkgs is pinned to **25.11**; the build
+Everything goes through Nix (flakes). nixpkgs is pinned to **26.05**; the build
 uses [crane](https://github.com/ipetkov/crane) + [rust-overlay](https://github.com/oxalica/rust-overlay).
 
 ```bash
