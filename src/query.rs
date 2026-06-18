@@ -147,7 +147,8 @@ fn escape_like(s: &str) -> String {
 }
 
 /// A SQL subquery yielding the tag ids one tag-filter token matches — the
-/// matched tag(s) **plus all their descendants**. No substring matching.
+/// matched tag(s) **plus all their descendants** — and the bound value holding the
+/// token. No substring matching.
 ///
 /// - A token starting with `/` is an **absolute path** (`/local/fashion`): it
 ///   matches the single tag at that path (built by walking `pid` from the root),
@@ -156,34 +157,28 @@ fn escape_like(s: &str) -> String {
 ///   **case-insensitively** (`COLLATE NOCASE`), at any level.
 ///
 /// Descendants come from `TagsTree` (the ancestor closure: `pid = T` lists T's
-/// descendants). Inlined into an `IN (...)` by [`resolve_tag_filter`]; the token
-/// is user input, so it goes in as an escaped SQL string literal (doubled quotes).
-fn tag_ids_subquery(token: &str) -> String {
-    // Escape for a single-quoted SQLite string literal (`'` -> `''`).
-    let lit = format!("'{}'", token.trim_end_matches('/').replace('\'', "''"));
-    if token.starts_with('/') {
-        format!(
-            "WITH RECURSIVE paths(id, path) AS ( \
-               SELECT id, '/' || name FROM Tags WHERE pid = 0 \
-               UNION ALL \
-               SELECT t.id, p.path || '/' || t.name FROM Tags t JOIN paths p ON t.pid = p.id \
-             ), base(id) AS (SELECT id FROM paths WHERE path = {lit}) \
-             SELECT id FROM base \
-             UNION SELECT id FROM TagsTree WHERE pid IN (SELECT id FROM base)"
-        )
+/// descendants). The token rides in as a bound `?` parameter (no string escaping).
+fn tag_ids_subquery(token: &str) -> (&'static str, Value) {
+    let value = Value::Text(token.trim_end_matches('/').to_string());
+    let sql = if token.starts_with('/') {
+        "WITH RECURSIVE paths(id, path) AS ( \
+           SELECT id, '/' || name FROM Tags WHERE pid = 0 \
+           UNION ALL \
+           SELECT t.id, p.path || '/' || t.name FROM Tags t JOIN paths p ON t.pid = p.id \
+         ), base(id) AS (SELECT id FROM paths WHERE path = ?) \
+         SELECT id FROM base \
+         UNION SELECT id FROM TagsTree WHERE pid IN (SELECT id FROM base)"
     } else {
-        format!(
-            "WITH base(id) AS (SELECT id FROM Tags WHERE name = {lit} COLLATE NOCASE) \
-             SELECT id FROM base \
-             UNION SELECT id FROM TagsTree WHERE pid IN (SELECT id FROM base)"
-        )
-    }
+        "WITH base(id) AS (SELECT id FROM Tags WHERE name = ? COLLATE NOCASE) \
+         SELECT id FROM base \
+         UNION SELECT id FROM TagsTree WHERE pid IN (SELECT id FROM base)"
+    };
+    (sql, value)
 }
 
-/// The boolean SQL predicate selecting the images one tag-filter token matches.
-/// Correlated on the image alias `i` and its album alias `a` (both in scope at
-/// every call site), so it splices into both the positional `build_filter` and
-/// the named-param `list_subalbums` without a second query.
+/// The boolean SQL predicate selecting the images one tag-filter token matches,
+/// plus its `?`-bound parameters (in left-to-right order). Correlated on the image
+/// alias `i` and its album alias `a` (both in scope at every call site).
 ///
 /// A photo matches via its **tags** — the ids from [`tag_ids_subquery`] (the
 /// matched tag(s) and their subtree). For a **name** token (one not starting with
@@ -192,35 +187,38 @@ fn tag_ids_subquery(token: &str) -> String {
 /// equals the token, case-insensitively — OR'd with the tag match. (A `/`-path
 /// token is tag-only.) So a filter like `fashion` catches both the
 /// `/local/fashion` tag tree and a `…/Fashion/…` album tree.
-fn resolve_tag_filter(token: &str) -> String {
-    let ids = tag_ids_subquery(token);
+fn resolve_tag_filter(token: &str) -> (String, Vec<Value>) {
+    let (ids_sql, tag_value) = tag_ids_subquery(token);
     let tag_match = format!(
-        "EXISTS (SELECT 1 FROM ImageTags it WHERE it.imageid = i.id AND it.tagid IN ({ids}))"
+        "EXISTS (SELECT 1 FROM ImageTags it WHERE it.imageid = i.id AND it.tagid IN ({ids_sql}))"
     );
     if token.starts_with('/') {
-        return tag_match;
+        return (tag_match, vec![tag_value]);
     }
     // Album-name match: a `/`-delimited segment of the album's relativePath equals
     // the token. Appending a trailing '/' makes the leading + trailing slashes act
     // as segment boundaries, so `fashion` matches `/Fashion` and `/X/Fashion/2020`
     // but not `/Fashionista`. SQLite `LIKE` is case-insensitive for ASCII; the
-    // token is escaped for both LIKE wildcards and the SQL string literal.
-    let like_tok = escape_like(token).replace('\'', "''");
-    let album_match = format!("(a.relativePath || '/') LIKE '%/{like_tok}/%' ESCAPE '\\'");
-    format!("({tag_match} OR {album_match})")
+    // pattern is a bound parameter with only its LIKE wildcards escaped.
+    let like_pattern = Value::Text(format!("%/{}/%", escape_like(token)));
+    let predicate = format!("({tag_match} OR (a.relativePath || '/') LIKE ? ESCAPE '\\')");
+    (predicate, vec![tag_value, like_pattern])
 }
 
 /// Build the `AND (...)` SQL for a tag-filter token list (AND'd: a photo must
-/// match every token). The image table must be aliased `i` and its album `a`.
-/// Each token's predicate resolves inline via [`resolve_tag_filter`], so this
-/// adds no bound params and runs as part of the single main query (no per-token
-/// round-trips).
-fn tag_filter_sql(tokens: &[String]) -> String {
+/// match every token) and its bound parameters. The image table must be aliased
+/// `i` and its album `a`. Each token's predicate comes from [`resolve_tag_filter`],
+/// so it runs as part of the single main query (no per-token round-trips).
+fn tag_filter_sql(tokens: &[String]) -> (String, Vec<Value>) {
     let mut sql = String::new();
+    let mut params = Vec::new();
     for token in tokens {
-        sql.push_str(&format!(" AND {}", resolve_tag_filter(token)));
+        let (predicate, token_params) = resolve_tag_filter(token);
+        sql.push_str(" AND ");
+        sql.push_str(&predicate);
+        params.extend(token_params);
     }
-    sql
+    (sql, params)
 }
 
 /// Split a display path (`/Photos/Lego`) into album segments (`["Photos",
@@ -272,7 +270,9 @@ fn build_filter(q: &PhotoQuery) -> (String, Vec<Value>) {
         }
     }
 
-    sql.push_str(&tag_filter_sql(&q.filters.tags));
+    let (tag_sql, tag_params) = tag_filter_sql(&q.filters.tags);
+    sql.push_str(&tag_sql);
+    params.extend(tag_params);
 
     if q.filters.min_rating.get() > 0 {
         // Treat unrated images (rating -1, or NULL when there's no
@@ -413,8 +413,9 @@ pub fn list_subalbums(
     // the sub-album counts, covers, and visibility all respect the filters.
     let media = media_filter_sql(filters.include_images, filters.include_video);
     let aspect = filters.aspect.sql_filter();
-    // Tag filter (AND of `EXISTS` clauses, ids inlined); image alias is `i` below.
-    let tags = tag_filter_sql(&filters.tags);
+    // Tag filter (AND of `EXISTS`/album predicates, with bound params appended
+    // after the per-mode params below); image alias is `i`, album alias `a`.
+    let (tags, tag_params) = tag_filter_sql(&filters.tags);
     // Display path of `album`, used to build each child's `path` ("" at the root).
     let parent = if album.is_empty() {
         String::new()
@@ -424,7 +425,7 @@ pub fn list_subalbums(
 
     // Each mode produces the `matched` rows (image_id, image_name, category,
     // cdate, bucket); only the bucketing/scope differs.
-    let (matched, params): (String, Vec<(&str, Value)>) = match album_root_and_rel(album) {
+    let (matched, mut params): (String, Vec<Value>) = match album_root_and_rel(album) {
         // Virtual top level: one bucket per album root (its label).
         None => (
             format!(
@@ -433,9 +434,9 @@ pub fn list_subalbums(
                  FROM Images i JOIN Albums a ON a.id = i.album \
                  JOIN AlbumRoots r ON r.id = a.albumRoot \
                  LEFT JOIN ImageInformation ii ON ii.imageid = i.id \
-                 WHERE i.status = 1 AND max(ifnull(ii.rating, 0), 0) >= :min{media}{aspect}{tags}"
+                 WHERE i.status = 1 AND max(ifnull(ii.rating, 0), 0) >= ?{media}{aspect}{tags}"
             ),
-            vec![(":min", Value::Integer(min))],
+            vec![Value::Integer(min)],
         ),
         Some((label, rel)) => {
             let Some((&root_id, _)) = roots.iter().find(|(_, r)| r.label == label) else {
@@ -450,6 +451,7 @@ pub fn list_subalbums(
             // Bucket each subtree photo by its direct-child path segment (the part
             // of the relativePath after the prefix, up to the next '/'). Filtering
             // by `albumRoot` id lets the `(albumRoot, relativePath)` index serve it.
+            // `prefix` is bound twice (it appears twice), in left-to-right order.
             (
                 format!(
                     "SELECT image_id, image_name, category, cdate, \
@@ -458,24 +460,27 @@ pub fn list_subalbums(
                      FROM ( \
                        SELECT i.id AS image_id, i.name AS image_name, i.category AS category, \
                               i.modificationDate AS cdate, \
-                              substr(a.relativePath, length(:prefix) + 1) AS rest \
+                              substr(a.relativePath, length(?) + 1) AS rest \
                        FROM Images i JOIN Albums a ON a.id = i.album \
                        LEFT JOIN ImageInformation ii ON ii.imageid = i.id \
-                       WHERE i.status = 1 AND a.albumRoot = :root \
-                         AND a.relativePath LIKE :like ESCAPE '\\' \
-                         AND length(a.relativePath) > length(:prefix) \
-                         AND max(ifnull(ii.rating, 0), 0) >= :min{media}{aspect}{tags} \
+                       WHERE i.status = 1 AND a.albumRoot = ? \
+                         AND a.relativePath LIKE ? ESCAPE '\\' \
+                         AND length(a.relativePath) > length(?) \
+                         AND max(ifnull(ii.rating, 0), 0) >= ?{media}{aspect}{tags} \
                      )"
                 ),
                 vec![
-                    (":prefix", Value::Text(prefix)),
-                    (":root", Value::Integer(root_id)),
-                    (":like", Value::Text(like)),
-                    (":min", Value::Integer(min)),
+                    Value::Text(prefix.clone()),
+                    Value::Integer(root_id),
+                    Value::Text(like),
+                    Value::Text(prefix),
+                    Value::Integer(min),
                 ],
             )
         }
     };
+    // The tag predicates' `?` come last in `matched` (appended after `>= ?`).
+    params.extend(tag_params);
 
     // Shared: group the matched rows into one tile per bucket (count + newest
     // cover), newest bucket first. The cover is the newest item — image OR video
@@ -496,12 +501,8 @@ pub fn list_subalbums(
          ORDER BY c.recent DESC, c.bucket COLLATE NOCASE"
     );
 
-    let bound: Vec<(&str, &dyn rusqlite::ToSql)> = params
-        .iter()
-        .map(|(n, v)| (*n, v as &dyn rusqlite::ToSql))
-        .collect();
     let mut stmt = conn.prepare_cached(&sql)?;
-    let rows = stmt.query_map(&bound[..], |row| {
+    let rows = stmt.query_map(rusqlite::params_from_iter(params.iter()), |row| {
         Ok((
             row.get::<_, String>(0)?,
             row.get::<_, Option<i64>>(1)?,
@@ -569,6 +570,34 @@ mod tests {
         assert_eq!(media_filter_sql(true, false), " AND i.category != 2"); // images only
         assert_eq!(media_filter_sql(false, true), " AND i.category = 2"); // video only
         assert_eq!(media_filter_sql(false, false), " AND 1 = 0"); // neither
+    }
+
+    #[test]
+    fn tag_filter_binds_params() {
+        // Name token: a tag-id subquery + an album LIKE, both `?`-bound. A token
+        // with a quote rides in as a bound value (not inlined / escaped).
+        let (sql, params) = tag_filter_sql(&["O'Brien".to_string()]);
+        assert!(sql.contains("name = ? COLLATE NOCASE"));
+        assert!(sql.contains("LIKE ? ESCAPE"));
+        assert!(!sql.contains("O'Brien")); // value is bound, never in the SQL text
+        assert_eq!(
+            params,
+            vec![
+                Value::Text("O'Brien".to_string()),
+                Value::Text("%/O'Brien/%".to_string()),
+            ]
+        );
+
+        // Path token: tag-only, a single bound param, no album LIKE.
+        let (sql, params) = tag_filter_sql(&["/local/fashion".to_string()]);
+        assert!(sql.contains("path = ?"));
+        assert!(!sql.contains("LIKE ?"));
+        assert_eq!(params, vec![Value::Text("/local/fashion".to_string())]);
+
+        // No tokens: empty fragment, no params.
+        let (sql, params) = tag_filter_sql(&[]);
+        assert!(sql.is_empty());
+        assert!(params.is_empty());
     }
 
     #[test]

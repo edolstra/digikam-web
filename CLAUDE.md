@@ -251,8 +251,10 @@ content-hash `ETag`) so updates propagate; icons are `immutable`.
   a `…/Fashion/…` album tree). Resolution = `resolve_tag_filter` in [src/query.rs](src/query.rs)
   (recursive `pid`-path CTE for `/`-tokens, `tag_ids_subquery` + `TagsTree` for the descendant
   closure, an album-segment `LIKE` for name tokens); per token it emits one `EXISTS`/`OR`
-  predicate, inlined (no bound params). Also a saved [`Filters`] field, so it applies to
-  `/subalbums` and persists in bookmarks.
+  predicate plus its **bound `?` parameters** (the token value + LIKE pattern), returned
+  alongside the SQL like `build_filter` and spliced into the single main query (no per-token
+  round-trips). Also a saved [`Filters`] field, so it applies to `/subalbums` and persists in
+  bookmarks.
 - **`min_rating=N`** — minimum rating, `0..=5` (else `400`). Unrated images
   (Digikam stores `-1`) count as `0`, so `min_rating=0` includes everything and
   `min_rating>=1` excludes the unrated. Implemented as `max(ifnull(ii.rating,0),0) >= N`.
