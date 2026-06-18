@@ -53,7 +53,51 @@ All endpoints are served under the `/api` prefix.
 | `DELETE /api/bookmarks/:name` | Remove a bookmark (idempotent → `204`). |
 | `GET /api/health` | Liveness. |
 
-### Frontend (HTML)
+### Query semantics
+- **`album=/Root/rel`** — the first path segment is the `AlbumRoots.label`; the
+  remainder is a `relativePath`. By default it matches **only that album**
+  (photos directly in it). `/Photos` alone means the root album (`relativePath = "/"`).
+  An **absent/empty `album`** (the virtual root) has no photos of its own, so
+  `/api/photos` returns an **empty** list — unless `recursive=true` (below).
+- **`recursive`** — a boolean: `?recursive=true` also includes all sub-albums;
+  `?recursive=false` or absence keeps the default non-recursive behavior. With
+  `?recursive=true`, `/Photos` selects the whole collection — and an empty `album`
+  with `recursive=true` selects **all** photos (every root).
+- **`tags=a,b`** — comma-separated tokens, **AND'd** (a photo must match every token;
+  an unmatched token yields an empty result). Each token matches a tag **and all its
+  subtags** — **no substring match** (`foo` ≠ `foobar`). A token starting with `/` is an
+  **absolute path** (`/local/fashion` ⇒ that node + its subtree), matched **case-sensitively**,
+  tag-only. Any other token is a **name**, matched **case-insensitively**, and matches either
+  (OR): **(a)** any tag with that name at any level (+ subtree), **or (b)** photos in an
+  **album named that token (or a sub-album thereof)** — any `/`-delimited segment of the
+  album's `relativePath` equals the token (so `fashion` ⇒ the `/local/fashion` tag tree **and**
+  a `…/Fashion/…` album tree). Resolution = `resolve_tag_filter` in [src/query.rs](src/query.rs)
+  (recursive `pid`-path CTE for `/`-tokens, `tag_ids_subquery` + `TagsTree` for the descendant
+  closure, an album-segment `LIKE` for name tokens); per token it emits one `EXISTS`/`OR`
+  predicate plus its **bound `?` parameters** (the token value + LIKE pattern), returned
+  alongside the SQL like `build_filter` and spliced into the single main query (no per-token
+  round-trips). Also a saved [`Filters`] field, so it applies to `/subalbums` and persists in
+  bookmarks.
+- **`min_rating=N`** — minimum rating, `0..=5` (else `400`). Unrated images
+  (Digikam stores `-1`) count as `0`, so `min_rating=0` includes everything and
+  `min_rating>=1` excludes the unrated. Implemented as `max(ifnull(ii.rating,0),0) >= N`.
+- **`images=` / `video=`** — the media-type filter, two independent booleans, **both
+  default `true`** (`=false` excludes that type; stock bool parsing, so the value is
+  `true`/`false`). `video=false` → only images (`category != 2`); `images=false` → only
+  videos (`category = 2`); both false → empty. Like `min_rating`, it constrains the photo
+  grid and the sub-album count/cover/visibility alike.
+- **`aspect=`** — aspect-ratio filter, an enum (so it can grow to exact ratios like `16:9`):
+  `all` (default, no constraint) / `portrait` (`ii.height >= ii.width`) / `landscape`
+  (`ii.width >= ii.height`); a **square** matches both (inclusive `>=`), an invalid value is a
+  `400`. Items with NULL dimensions are excluded from `portrait`/`landscape` (the comparison is
+  NULL) but kept under `all`. Constrains the grid and the sub-album count/cover/visibility alike.
+- **Ordering / dates** — newest first by **`Images.modificationDate`** (`ORDER BY
+  i.modificationDate DESC, i.id DESC`); the same column drives the day-grouping and the
+  sub-album cover/sort. We deliberately use the file modification date, **not**
+  `ImageInformation.creationDate` (which is Digikam's import time, rarely what you want).
+- **Paging** — `limit` defaults to 25000, capped at 100000; `offset` defaults to 0.
+
+## Frontend (HTML)
 
 The `/photos` page is a **client-side SPA**. [src/web.rs](src/web.rs) serves a single
 **static shell** — byte-identical for every URL — rendered by `render` with no DB or
@@ -76,7 +120,7 @@ The shell is sent with `Cache-Control: private, max-age=3600` on success: cached
 for navigations / back-forward, while a force-reload (Ctrl/Cmd+Shift+R) bypasses it. (Since
 the shell is now identical for every URL, this caches the one document across all albums.)
 
-#### The album page
+### The album page
 
 Everything below is built **client-side** by [web.js](src/web.js) from `state`; in-page
 navigation re-renders without a page load. A single persistent runtime — the thumbnail
@@ -154,66 +198,64 @@ reused across navigations; only the DOM is rebuilt (`render()` per navigation). 
   **lightbox tracks the selection too**: every `show()` (arrows / Home/End / wheel / swipe /
   random / slideshow) calls `setSelected(tiles[i])`, and `dismiss()` writes that last-viewed
   item to the grid selection + fragment — so closing the lightbox lands on the item you were viewing.
-- **Lightbox** (click a photo/video): full-page over a dimmed grid, requesting
-  **fullscreen** (Fullscreen API; guarded/no-op where unsupported, e.g. iPhone Safari).
-  The media is scaled to fill the viewport (up or down, preserving aspect). Videos
-  auto-play, looping, with **native `controls`** (play/pause/seek/volume; mp4/webm only);
-  Space toggles play/pause and `m` toggles mute. **Touch gestures take over from the
-  native controls on touch** (which stay mouse-usable on desktop): tap a video to
-  pause/play, swipe left/right (anywhere, incl. over a video) to go prev/next, swipe up
-  for a random item. **Zoom (images, 1×–4×)**: on touch, two-finger pinch (toward the pinch
-  point), one-finger pan while zoomed, double-tap toggles 2×/fit; on desktop, **Ctrl+mouse-wheel**
-  zooms toward the pointer, **+/-** zoom toward the viewport center, **double-click** toggles 2×/fit
-  at the click point, and **dragging pans** (a drag that moved suppresses the trailing click so it
-  doesn't close). All share one `zoomTo(s, fx, fy)` (keeps the focal point fixed) + `clampPan`;
-  navigation is suppressed while zoomed (a plain wheel is inert) and zoom resets on navigate/close.
-  The whole lightbox is
-  `touch-action: none` so the browser doesn't fight the touch gestures; the image carries the
-  `translate()+scale()` transform (origin `0 0`) and shows a `grab`/`grabbing` cursor while zoomed.
-  With a keyboard, ←/→ navigate (`preventDefault` stops a focused video
-  from also seeking), Home/End jump to first/last, and `r` jumps to a random item (it walks a
-  **shuffled permutation** of all items — a bag of indices popped one at a time, reshuffled only
-  once exhausted, so every item is seen once before any repeat); the
-  on-screen ‹ › chevrons navigate too, and the **mouse wheel** goes prev/next (scroll
-  down = next; throttled to one item per notch; Ctrl+wheel zooms instead). All navigation stops at the ends. Dismiss by
-  clicking the letterbox / Esc / the X / the device Back button — opening pushes a
-  history entry **carrying no URL** (so the album URL is preserved); the single shared
-  `popstate` handler dismisses the lightbox when it's open (leaving the album in place)
-  and otherwise treats the pop as album Back/Forward (re-render). Exiting fullscreen
-  closes it too. On dismiss, the grid scrolls the last-viewed tile fully into
-  view if browsing left it off-screen (`scrollIntoView({block:'nearest'})` with the tile's
-  `scroll-margin-top` set to the sticky navbar's height so it isn't tucked underneath). The close/`‹ ›` controls (and the mouse cursor) **start hidden**
-  (web.js `.idle` class) and are revealed by a **mouse/pen move or a tap** — *not* by
-  keyboard navigation or swipes — then auto-hide again after 2s of inactivity; a tap that
-  only reveals them is consumed so it doesn't also dismiss/navigate. A **🔍 reverse-image-search
-  button** (top-left, just below the info button; **images only**, hidden for videos via the
-  lightbox's `.is-video` class) opens `/api/photos/:id/reverse-search?engine=yandex` in a new tab
-  after a `confirm()` (it uploads the image to a third party) — the server does the upload + 302.
-  An **ⓘ info button**
-  (top-left) and the **`i` key** toggle a metadata overlay (`#lb-info`): file
-  name, album path (a **link** that jumps to that album), format, size, resolution, rating,
-  modification date, MIME — built client-side from the tile's `PhotoSummary` (stashed on the
-  grid tile as `_photo`, no extra fetch), updating as you navigate. A **⧉ copy-path button** next
-  to the file name copies the absolute server path (`file_path`, from the lazy `PhotoDetail`) to
-  the clipboard (async Clipboard API, hidden-textarea fallback; ✓ flash). The **creation date**,
-  **description** (the image's `ImageComments`, newlines preserved via CSS `white-space: pre-wrap`),
-  **location** (GPS, a link to Google Maps that opens in a new tab — shown only when present),
-  and **tags** (absolute paths, one per line, internal tags excluded) are added from
-  `GET /api/photos/:id` (`PhotoDetail`), fetched lazily only while the panel is open and cached per id
-  (those rows appear once it loads). The album link and tag links
-  `replaceState` the lightbox's URL-less history entry as the target view, close the
-  lightbox, and re-render in place (so Back still returns to the originating album); the panel's
-  click/touch handlers route any internal `<a>` through that, while the external maps link
-  (`target=_blank`) opens normally. Each **tag** is a link that filters the current album by
-  just that tag (replacing the current tag filter, keeping the others).
-  A **slideshow** toggle — the `s` key or a ▶/⏸ button (bottom-left) — auto-advances to a
-  **random** item (like `r`): an image after **5s**, a video after it **plays in full** (its
-  `loop` is turned off so `ended` fires; an unplayable one advances after 1.5s). Dismissing the
-  lightbox stops it. **While the info panel is open the controls stay pinned**
-  (no auto-hide). Perf: preloads the
-  prev/next images, `decoding="async"`, and `touch-action: manipulation` to cut mobile tap latency.
 
-#### Installable PWA
+### Lightbox
+
+Click a photo/video to open it full-page over a dimmed grid, requesting **fullscreen**
+(Fullscreen API; guarded/no-op where unsupported, e.g. iPhone Safari). The media is scaled to
+fill the viewport (up or down, preserving aspect).
+
+- **Videos**: auto-play, looping, with **native `controls`** (play/pause/seek/volume; mp4/webm
+  only); Space toggles play/pause, `m` toggles mute. On **touch**, gestures take over from the
+  native controls (which stay mouse-usable on desktop): tap a video to pause/play.
+- **Navigation**: keyboard ←/→ (`preventDefault` stops a focused video from also seeking),
+  Home/End → first/last, `r` → a random item, the on-screen ‹ › chevrons, the **mouse wheel**
+  (down = next; throttled to one item per notch), and **touch** swipe left/right (anywhere, incl.
+  over a video); swipe up → random. All navigation stops at the ends. `r` and the slideshow walk a
+  **shuffled permutation** (a bag of indices popped one at a time, reshuffled only once exhausted,
+  so every item is seen once before any repeat).
+- **Zoom (images, 1×–4×)**: touch two-finger pinch (toward the pinch point), one-finger pan while
+  zoomed, double-tap toggles 2×/fit; desktop **Ctrl+wheel** zooms toward the pointer, **+/-** toward
+  the viewport center, **double-click** toggles 2×/fit at the click point, and **drag** pans (a drag
+  that moved suppresses the trailing click so it doesn't close). All share one `zoomTo(s, fx, fy)`
+  (keeps the focal point fixed) + `clampPan`; navigation is suppressed while zoomed (a plain wheel is
+  inert) and zoom resets on navigate/close. The lightbox is `touch-action: none` so the browser
+  doesn't fight the touch gestures; the image carries the `translate()+scale()` transform
+  (origin `0 0`) and shows a `grab`/`grabbing` cursor while zoomed.
+- **Controls & auto-hide**: the close/`‹ ›` controls (and the mouse cursor) **start hidden**
+  (web.js `.idle` class), revealed by a **mouse/pen move or a tap** — *not* by keyboard navigation
+  or swipes — then auto-hide again after 2s of inactivity; a tap that only reveals them is consumed
+  so it doesn't also dismiss/navigate. **While the info panel is open the controls stay pinned**.
+- **🔍 reverse-image-search** (top-left, just below the info button; **images only**, hidden for
+  videos via the lightbox's `.is-video` class): opens `/api/photos/:id/reverse-search?engine=yandex`
+  in a new tab after a `confirm()` (it uploads the image to a third party) — the server does the
+  upload + 302.
+- **ⓘ info panel** (the ⓘ button or the `i` key): a metadata overlay (`#lb-info`) — file name,
+  album path (a **link** that jumps to that album), format, size, resolution, rating, modification
+  date, MIME — built client-side from the tile's `PhotoSummary` (stashed as `_photo`, no extra
+  fetch), updating as you navigate. A **⧉ copy-path button** next to the file name copies the
+  absolute server path (`file_path`) to the clipboard (async Clipboard API, hidden-textarea
+  fallback; ✓ flash). The **creation date**, **description** (the image's `ImageComments`, newlines
+  preserved via CSS `white-space: pre-wrap`), **location** (GPS → a Google Maps link in a new tab,
+  shown only when present), and **tags** (absolute paths, one per line, internal tags excluded) come
+  from `GET /api/photos/:id` (`PhotoDetail`), fetched lazily only while the panel is open and cached
+  per id. The album link and tag links `replaceState` the lightbox's URL-less history entry as the
+  target view, close the lightbox, and re-render in place (so Back still returns to the originating
+  album); the external maps link (`target=_blank`) opens normally. Each **tag** is a link that
+  filters the current album by just that tag (replacing the current tag filter, keeping the others).
+- **Slideshow** (`s` or the ▶/⏸ button, bottom-left): auto-advances to a **random** item — an image
+  after **5s**, a video after it **plays in full** (its `loop` is turned off so `ended` fires; an
+  unplayable one advances after 1.5s). Dismissing the lightbox stops it.
+- **Dismiss**: click the letterbox / Esc / the X / the device Back button, or exit fullscreen.
+  Opening pushes a history entry **carrying no URL** (so the album URL is preserved); the single
+  shared `popstate` handler dismisses the lightbox when open (leaving the album in place) and
+  otherwise treats the pop as album Back/Forward (re-render). On dismiss, the grid scrolls the
+  last-viewed tile into view if browsing left it off-screen (`scrollIntoView({block:'nearest'})` with
+  `scroll-margin-top` = the sticky navbar height, so it isn't tucked underneath).
+- **Perf**: preloads the prev/next images, `decoding="async"`, and `touch-action: manipulation` to
+  cut mobile tap latency.
+
+### Installable PWA
 The app is a Progressive Web App, so it can be "installed" (Android home screen,
 desktop, etc.). Embedded + served like the other static assets:
 `GET /manifest.webmanifest` (the manifest: `digiKam Browse`, `display: standalone`,
@@ -234,50 +276,6 @@ content-hash `ETag`) so updates propagate; icons are `immutable`.
 > is **not** a secure context, so the SW won't register and the browser won't offer
 > "Install". Put it behind TLS (an nginx reverse proxy / `tailscale serve` / a tunnel)
 > for a trusted cert and a secure context.
-
-### Query semantics
-- **`album=/Root/rel`** — the first path segment is the `AlbumRoots.label`; the
-  remainder is a `relativePath`. By default it matches **only that album**
-  (photos directly in it). `/Photos` alone means the root album (`relativePath = "/"`).
-  An **absent/empty `album`** (the virtual root) has no photos of its own, so
-  `/api/photos` returns an **empty** list — unless `recursive=true` (below).
-- **`recursive`** — a boolean: `?recursive=true` also includes all sub-albums;
-  `?recursive=false` or absence keeps the default non-recursive behavior. With
-  `?recursive=true`, `/Photos` selects the whole collection — and an empty `album`
-  with `recursive=true` selects **all** photos (every root).
-- **`tags=a,b`** — comma-separated tokens, **AND'd** (a photo must match every token;
-  an unmatched token yields an empty result). Each token matches a tag **and all its
-  subtags** — **no substring match** (`foo` ≠ `foobar`). A token starting with `/` is an
-  **absolute path** (`/local/fashion` ⇒ that node + its subtree), matched **case-sensitively**,
-  tag-only. Any other token is a **name**, matched **case-insensitively**, and matches either
-  (OR): **(a)** any tag with that name at any level (+ subtree), **or (b)** photos in an
-  **album named that token (or a sub-album thereof)** — any `/`-delimited segment of the
-  album's `relativePath` equals the token (so `fashion` ⇒ the `/local/fashion` tag tree **and**
-  a `…/Fashion/…` album tree). Resolution = `resolve_tag_filter` in [src/query.rs](src/query.rs)
-  (recursive `pid`-path CTE for `/`-tokens, `tag_ids_subquery` + `TagsTree` for the descendant
-  closure, an album-segment `LIKE` for name tokens); per token it emits one `EXISTS`/`OR`
-  predicate plus its **bound `?` parameters** (the token value + LIKE pattern), returned
-  alongside the SQL like `build_filter` and spliced into the single main query (no per-token
-  round-trips). Also a saved [`Filters`] field, so it applies to `/subalbums` and persists in
-  bookmarks.
-- **`min_rating=N`** — minimum rating, `0..=5` (else `400`). Unrated images
-  (Digikam stores `-1`) count as `0`, so `min_rating=0` includes everything and
-  `min_rating>=1` excludes the unrated. Implemented as `max(ifnull(ii.rating,0),0) >= N`.
-- **`images=` / `video=`** — the media-type filter, two independent booleans, **both
-  default `true`** (`=false` excludes that type; stock bool parsing, so the value is
-  `true`/`false`). `video=false` → only images (`category != 2`); `images=false` → only
-  videos (`category = 2`); both false → empty. Like `min_rating`, it constrains the photo
-  grid and the sub-album count/cover/visibility alike.
-- **`aspect=`** — aspect-ratio filter, an enum (so it can grow to exact ratios like `16:9`):
-  `all` (default, no constraint) / `portrait` (`ii.height >= ii.width`) / `landscape`
-  (`ii.width >= ii.height`); a **square** matches both (inclusive `>=`), an invalid value is a
-  `400`. Items with NULL dimensions are excluded from `portrait`/`landscape` (the comparison is
-  NULL) but kept under `all`. Constrains the grid and the sub-album count/cover/visibility alike.
-- **Ordering / dates** — newest first by **`Images.modificationDate`** (`ORDER BY
-  i.modificationDate DESC, i.id DESC`); the same column drives the day-grouping and the
-  sub-album cover/sort. We deliberately use the file modification date, **not**
-  `ImageInformation.creationDate` (which is Digikam's import time, rarely what you want).
-- **Paging** — `limit` defaults to 25000, capped at 100000; `offset` defaults to 0.
 
 ## Architecture & design choices
 
@@ -369,23 +367,25 @@ queues for the next idle worker in a small **Blob Web Worker pool** (`min(hardwa
 First-paint latency was dominated by **Firefox network behavior** (full write-up in
 [docs/thumbnail-loading-performance.md](docs/thumbnail-loading-performance.md)), fixed three
 ways (see [web.js](src/web.js) — verified to take first paint from ~500ms to ~120ms):
-(1) **cap concurrent fetches** at 6 — firing a screenful at once makes Firefox's request
-pacer hold the *whole burst* for hundreds of ms; (2) **`priority: 'high'`** on every fetch —
-Firefox otherwise deprioritises `fetch()` for ~150ms during page load; (3) **kick off the
-first ~24 tiles synchronously** at script start rather than from the observer callback —
-requests issued during initial parse are dispatched promptly, later ones are held. The
-observer handles the rest (skipping the eager ones). To make the *first* paint snappy,
-the decoder assets are fetched **once** (not once per worker): `/webpgf.js` is inlined into
-the worker body and `/webpgf.wasm` is fetched once, then the pool is **pre-warmed** — each
-worker instantiates the module at page load (via an init message carrying the shared wasm
-bytes), overlapping with the thumbnail fetches, so blobs decode the instant they arrive
-rather than waiting on a cold module. Each worker returns an `ImageData` whose buffer is
-transferred back. The main thread draws each result — applying the EXIF `X-Orientation`
-(2..8; 0/1/junk = no rotation) — to a canvas, then sets the `<img>` to the canvas's blob URL.
-The worker URLs are made **absolute** (`location.origin` baked in) because a `blob:` worker
-resolves relative paths against its opaque blob base, not the page origin. A worker that dies
-(e.g. webpgf failed to load) falls back its tile to `/file`; once the whole pool is gone,
-queued/new tiles do too.
+
+1. **Cap concurrent fetches** at 6 — firing a screenful at once makes Firefox's request pacer
+   hold the *whole burst* for hundreds of ms.
+2. **`priority: 'high'`** on every fetch — Firefox otherwise deprioritises `fetch()` for ~150ms
+   during page load.
+3. **Kick off the first ~24 tiles synchronously** at script start rather than from the observer
+   callback — requests issued during initial parse are dispatched promptly, later ones are held
+   (the observer handles the rest, skipping the eager ones).
+
+To make the *first* paint snappy, the decoder assets are fetched **once** (not once per worker):
+`/webpgf.js` is inlined into the worker body and `/webpgf.wasm` is fetched once, then the pool is
+**pre-warmed** — each worker instantiates the module at page load (via an init message carrying the
+shared wasm bytes), overlapping with the thumbnail fetches, so blobs decode the instant they arrive
+rather than waiting on a cold module. Each worker returns an `ImageData` whose buffer is transferred
+back. The main thread draws each result — applying the EXIF `X-Orientation` (2..8; 0/1/junk = no
+rotation) — to a canvas, then sets the `<img>` to the canvas's blob URL. The worker URLs are made
+**absolute** (`location.origin` baked in) because a `blob:` worker resolves relative paths against
+its opaque blob base, not the page origin. A worker that dies (e.g. webpgf failed to load) falls
+back its tile to `/file`; once the whole pool is gone, queued/new tiles do too.
 
 ### Deliberately out of scope (this milestone)
 - Auth, any write operations, and search by date/rating/geo.
