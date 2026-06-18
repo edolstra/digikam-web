@@ -230,19 +230,20 @@ fill the viewport (up or down, preserving aspect).
   videos via the lightbox's `.is-video` class): opens `/api/photos/:id/reverse-search?engine=yandex`
   in a new tab after a `confirm()` (it uploads the image to a third party) — the server does the
   upload + 302.
-- **ⓘ info panel** (the ⓘ button or the `i` key): a metadata overlay (`#lb-info`) — file name,
-  album path (a **link** that jumps to that album), format, size, resolution, rating, modification
-  date, MIME — built client-side from the tile's `PhotoSummary` (stashed as `_photo`, no extra
-  fetch), updating as you navigate. A **⧉ copy-path button** next to the file name copies the
-  absolute server path (`file_path`) to the clipboard (async Clipboard API, hidden-textarea
-  fallback; ✓ flash). The **creation date**, **description** (the image's `ImageComments`, newlines
-  preserved via CSS `white-space: pre-wrap`), **location** (GPS → a Google Maps link in a new tab,
-  shown only when present), and **tags** (absolute paths, one per line, internal tags excluded) come
-  from `GET /api/photos/:id` (`PhotoDetail`), fetched lazily only while the panel is open and cached
-  per id. The album link and tag links `replaceState` the lightbox's URL-less history entry as the
-  target view, close the lightbox, and re-render in place (so Back still returns to the originating
-  album); the external maps link (`target=_blank`) opens normally. Each **tag** is a link that
-  filters the current album by just that tag (replacing the current tag filter, keeping the others).
+- **ⓘ info panel** (the ⓘ button or the `i` key): a metadata overlay (`#lb-info`), updated as you
+  navigate.
+  - **From the tile's `PhotoSummary`** (stashed as `_photo`, no extra fetch): file name, album path
+    (a **link** that jumps to that album), format, size, resolution, rating, modification date, MIME.
+  - **From `GET /api/photos/:id` (`PhotoDetail`)**, fetched lazily only while the panel is open and
+    cached per id: **creation date**, **description** (the image's `ImageComments`, newlines preserved
+    via CSS `white-space: pre-wrap`), **location** (GPS → a Google Maps link in a new tab, shown only
+    when present), and **tags** (absolute paths, one per line, internal tags excluded).
+  - **⧉ copy-path button** next to the file name: copies the absolute server path (`file_path`) to the
+    clipboard (async Clipboard API, hidden-textarea fallback; ✓ flash).
+  - **Links**: the album link and tag links `replaceState` the lightbox's URL-less history entry as
+    the target view, close the lightbox, and re-render in place (so Back still returns to the
+    originating album); the external maps link (`target=_blank`) opens normally. Each **tag** links to
+    the current album filtered by just that tag (replacing the current tag filter, keeping the others).
 - **Slideshow** (`s` or the ▶/⏸ button, bottom-left): auto-advances to a **random** item — an image
   after **5s**, a video after it **plays in full** (its `loop` is turned off so `ended` fires; an
   unplayable one advances after 1.5s). Dismissing the lightbox stops it.
