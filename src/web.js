@@ -854,6 +854,16 @@ function initLightbox() {
     }
     else if (e.key === 'i' || e.key === 'I') { e.preventDefault(); toggleInfo(); }
     else if (e.key === 's' || e.key === 'S') { e.preventDefault(); toggleSlideshow(); }
+    // +/- zoom the image toward the viewport center (like Ctrl+wheel toward the
+    // pointer). `=` is `+` unshifted; `_` is `-` shifted.
+    else if ((e.key === '+' || e.key === '=') && zoomable()) {
+      e.preventDefault();
+      zoomTo(scale * 1.3, window.innerWidth / 2, window.innerHeight / 2);
+    }
+    else if ((e.key === '-' || e.key === '_') && zoomable()) {
+      e.preventDefault();
+      zoomTo(scale / 1.3, window.innerWidth / 2, window.innerHeight / 2);
+    }
   });
 
   // ----- Touch gestures -----
@@ -1005,16 +1015,54 @@ function initLightbox() {
     suppressClick = true;
   }, { passive: true });
 
-  // Mouse wheel: scroll down -> next, scroll up -> previous. Throttled so one
-  // notch (or a trackpad flick of several events) advances a single item.
+  // Mouse wheel: Ctrl+wheel zooms the image toward the pointer (preventing the
+  // browser's own page zoom); a plain wheel navigates (scroll down -> next, up ->
+  // previous), throttled so one notch advances a single item. While zoomed, a plain
+  // wheel does nothing (pan by dragging instead).
   var lastWheel = 0;
   lb.addEventListener('wheel', function (e) {
     if (!e.deltaY) return; // ignore purely-horizontal scroll
     e.preventDefault();
+    if (e.ctrlKey) {
+      if (zoomable()) zoomTo(scale * (e.deltaY < 0 ? 1.2 : 1 / 1.2), e.clientX, e.clientY);
+      return;
+    }
+    if (scale > 1) return; // zoomed: the wheel neither navigates nor zooms
     if (e.timeStamp - lastWheel < 50) return;
     lastWheel = e.timeStamp;
     go(e.deltaY > 0 ? 1 : -1);
   }, { passive: false });
+
+  // Mouse drag pans a zoomed image (mirrors the one-finger touch pan). A drag that
+  // moved suppresses the trailing click so it doesn't close on the letterbox.
+  var panning = null;
+  img.addEventListener('dragstart', function (e) { e.preventDefault(); }); // no ghost drag
+  img.addEventListener('mousedown', function (e) {
+    if (e.button !== 0 || scale <= 1 || !zoomable()) return;
+    e.preventDefault();
+    panning = { x0: e.clientX, y0: e.clientY, tx0: tx, ty0: ty, moved: false };
+    lb.classList.add('panning');
+  });
+  document.addEventListener('mousemove', function (e) {
+    if (!panning) return;
+    var dx = e.clientX - panning.x0, dy = e.clientY - panning.y0;
+    if (Math.abs(dx) > 2 || Math.abs(dy) > 2) panning.moved = true;
+    tx = panning.tx0 + dx; ty = panning.ty0 + dy;
+    clampPan(); applyZoom();
+  });
+  document.addEventListener('mouseup', function () {
+    if (!panning) return;
+    if (panning.moved) suppressClick = true; // swallow the click that would close
+    panning = null;
+    lb.classList.remove('panning');
+  });
+  // Double-click an image toggles zoom: to 2× at the click point, or back to fit
+  // (mirrors the touch double-tap).
+  img.addEventListener('dblclick', function (e) {
+    if (!zoomable() || !onMedia(e.clientX, e.clientY)) return;
+    e.preventDefault();
+    if (scale > 1) resetZoom(); else zoomTo(2, e.clientX, e.clientY);
+  });
 
   LB = { isOpen: isOpen, dismiss: dismiss, refresh: refresh };
 }

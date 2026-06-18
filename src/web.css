@@ -137,6 +137,9 @@ body.modal-open { overflow: hidden; }
 .lightbox .full { width: 100%; height: 100%; object-fit: contain; display: none;
                   transform-origin: 0 0; }
 .lightbox .full.active { display: block; }
+/* Zoomed image: a grab cursor (grabbing while dragging to pan). */
+.lightbox.zoomed #lb-img { cursor: grab; }
+.lightbox.panning #lb-img { cursor: grabbing; }
 .lightbox .close { position: absolute; top: 0.25rem; right: 0.75rem;
                    font-size: 2.5rem; line-height: 1; }
 /* "i" info toggle, top-left corner. */
