@@ -381,6 +381,23 @@ pub fn list_photos(
     })
 }
 
+/// Pick one random item id matching the query — the same album scope + [`Filters`]
+/// as [`list_photos`] (media-type filter included, so pass `video=false` for an
+/// images-only pick) — or `None` when nothing matches. Backs the `/random` redirect.
+/// `limit`/`offset` are ignored. Uses `ORDER BY random() LIMIT 1` (a single O(n)
+/// scan, no full sort).
+pub fn random_photo_id(conn: &Connection, q: &PhotoQuery) -> AppResult<Option<i64>> {
+    // Same emptiness rule as `list_photos`: the virtual root has no photos of its own.
+    if q.album.is_empty() && !q.filters.recursive {
+        return Ok(None);
+    }
+    let (filter, params) = build_filter(q);
+    let sql = format!("SELECT i.id{filter} ORDER BY random() LIMIT 1");
+    let mut stmt = conn.prepare(&sql)?;
+    let mut rows = stmt.query(rusqlite::params_from_iter(params.iter()))?;
+    Ok(rows.next()?.map(|row| row.get::<_, i64>(0)).transpose()?)
+}
+
 /// List the direct sub-albums of `album`, each with its recursive photo count
 /// and a cover (the newest **image** anywhere in that sub-album's subtree), sorted
 /// by most recent photo (newest first; ties broken by name). Sub-albums with no

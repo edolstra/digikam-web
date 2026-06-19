@@ -97,6 +97,7 @@ async fn main() -> Result<()> {
         .route("/", get(web::album_page))
         .route("/photos", get(web::album_page))
         .route("/photos/*path", get(web::album_page))
+        .route("/random", get(handlers::random_photo))
         .route("/webpgf.js", get(web::webpgf_js))
         .route("/webpgf.wasm", get(web::webpgf_wasm))
         .route("/favicon.ico", get(web::favicon))

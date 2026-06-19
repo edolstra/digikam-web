@@ -36,7 +36,7 @@ Config (CLI flags or env vars):
 
 ## API
 
-All endpoints are served under the `/api` prefix.
+All endpoints are served under the `/api` prefix, except the root-level `/random` (last row).
 
 | Route | Notes |
 |-------|-------|
@@ -52,6 +52,7 @@ All endpoints are served under the `/api` prefix.
 | `POST /api/bookmarks` | Create a bookmark from the same JSON shape (+ optional `overwrite`). Empty/over-long name → `400`; bad `min_rating`/`aspect` → `422` (typed body validation); duplicate name without `overwrite` → `409`; `overwrite:true` does `INSERT OR REPLACE`. |
 | `DELETE /api/bookmarks/:name` | Remove a bookmark (idempotent → `204`). |
 | `GET /api/health` | Liveness. |
+| `GET /random?album=&tags=&recursive=&min_rating=&images=&video=&aspect=` | **Root-level** (not under `/api`). **307-redirect** to a random matching item's `/api/photos/:id/file`, with `Cache-Control: no-store` so every hit re-randomizes — for screensavers / photo frames that just fetch a URL (pass `video=false` for an images-only frame, since the target `/file` of a video is the video bytes). Same album + filter params and semantics as `/api/photos` (incl. the empty-album-non-recursive rule); `404` when nothing matches. `random_photo_id` in [src/query.rs](src/query.rs) reuses `build_filter` with `ORDER BY random() LIMIT 1`. |
 
 ### Query semantics
 - **`album=/Root/rel`** — the first path segment is the `AlbumRoots.label`; the

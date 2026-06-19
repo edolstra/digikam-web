@@ -94,6 +94,41 @@ pub async fn list_photos(
     Ok(Json(page))
 }
 
+/// `GET /random?album=&tags=&recursive=&min_rating=&images=&video=&aspect=` —
+/// **307-redirect** to a random matching item's `/api/photos/:id/file`. Handy for
+/// screensavers / photo frames that just fetch a URL (each hit re-randomizes; pass
+/// `video=false` for an images-only frame). Same album + filter params as
+/// `/photos`. `404` when nothing matches.
+pub async fn random_photo(
+    State(state): State<AppState>,
+    Query(params): Query<PhotoParams>,
+) -> AppResult<Response> {
+    let q = PhotoQuery {
+        album: query::album_segments(params.album.as_deref().unwrap_or_default()),
+        filters: Filters {
+            recursive: params.recursive,
+            min_rating: params.min_rating,
+            include_images: params.images,
+            include_video: params.video,
+            aspect: params.aspect,
+            tags: parse_tags(params.tags.as_deref()),
+        },
+        limit: 0,
+        offset: 0,
+    };
+
+    let id = run_blocking(&state, move |conn, _state| query::random_photo_id(conn, &q))
+        .await?
+        .ok_or_else(|| AppError::NotFound("no item matches the given filters".into()))?;
+
+    // `no-store` so a screensaver re-randomizes every hit (doesn't cache the redirect).
+    Ok((
+        [(header::CACHE_CONTROL, HeaderValue::from_static("no-store"))],
+        Redirect::temporary(&format!("/api/photos/{id}/file")),
+    )
+        .into_response())
+}
+
 /// `GET /photos/:id`
 pub async fn get_photo(
     State(state): State<AppState>,
