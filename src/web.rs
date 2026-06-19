@@ -156,7 +156,7 @@ fn webpgf_build_id() -> &'static str {
 }
 
 /// Stylesheet for the frontend pages (inlined into each page's `<style>`).
-const STYLE: &str = include_str!("web.css");
+const STYLE: &str = include_str!("assets/style.css");
 
 /// The SPA frontend (inlined into each page's `<script>`). Split across
 /// `src/web/*.js` by concern and concatenated here — at runtime it's one script in

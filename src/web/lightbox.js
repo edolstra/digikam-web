@@ -570,7 +570,7 @@ function initLightbox() {
   function zoomable() { return activeEl() === img; }
   function applyZoom() {
     img.style.transform = scale === 1 ? '' : 'translate(' + tx + 'px,' + ty + 'px) scale(' + scale + ')';
-    // Hide all controls (incl. the ‹ › chevrons) while zoomed — see web.css.
+    // Hide all controls (incl. the ‹ › chevrons) while zoomed — see assets/style.css.
     lb.classList.toggle('zoomed', scale > 1);
   }
   function resetZoom() { scale = 1; tx = 0; ty = 0; applyZoom(); }

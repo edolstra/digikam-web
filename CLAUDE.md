@@ -291,7 +291,7 @@ content-hash `ETag`) so updates propagate; icons are `immutable`.
   (compile-time `html!` templates with automatic escaping). `album_page` returns
   `maud::Markup` (its axum feature makes it `IntoResponse`). The shell is static — all
   album/filter rendering moved client-side ([src/web/](src/web/)), so maud now just emits
-  the fixed navbar/container scaffolding. `web.css` and the `concat!`-ed `web/*.js` (`STYLE` /
+  the fixed navbar/container scaffolding. `assets/style.css` and the `concat!`-ed `web/*.js` (`STYLE` /
   `SCRIPT`) are emitted inside `<style>`/`<script>` via `PreEscaped` (trusted, must not be escaped).
 - **Read-only & safe alongside running Digikam**: connections open with
   `SQLITE_OPEN_READ_ONLY`, set `PRAGMA query_only=ON`, and a 5s `busy_timeout` so
@@ -402,7 +402,6 @@ src/
   query.rs     /photos + /subalbums SQL + param building; Rating/Aspect types (+ unit tests)
   handlers.rs  axum JSON API handlers (incl. bookmarks), run_blocking/run_web DB helpers
   web.rs       static SPA shell (navbar + empty containers) + static asset handlers, maud
-  web.css      frontend stylesheet, inlined via include_str!  (STYLE)
   web/         the SPA, split by concern and concat!'d into SCRIPT (web.rs), in order:
                  state.js      app state + URL/filter model (state, readUrl, filters, photosUrl, apiParams)
                  navbar.js     breadcrumb + the bookmarks & funnel-filter dropdown menus
@@ -413,13 +412,14 @@ src/
                  main.js       render() orchestrator, nav controller, bootstrap IIFE + SW (loaded LAST)
   manifest.webmanifest  PWA manifest (include_str!), served at /manifest.webmanifest
   sw.js        PWA service worker (include_str!), served at /sw.js
-  assets/      binary assets embedded via include_bytes!:
-                 favicon.ico                 Digikam's site icon, served at /favicon.ico
-                 icon-192.png icon-512.png   PWA icons, served at /icon-*.png
+  assets/      embedded assets:
+                 style.css                   frontend stylesheet, inlined via include_str! (STYLE)
+                 favicon.ico                 Digikam's site icon (include_bytes!), served at /favicon.ico
+                 icon-192.png icon-512.png   PWA icons (include_bytes!), served at /icon-*.png
   error.rs     AppError -> JSON HTTP responses
 ```
 
-> `web.css`/`manifest.webmanifest`/`sw.js` are pulled in with `include_str!`, the binary
+> `assets/style.css`/`manifest.webmanifest`/`sw.js` are pulled in with `include_str!`, the binary
 > assets (`src/assets/{favicon.ico,icon-*.png}`) with `include_bytes!`, and `SCRIPT` is
 > `concat!(include_str!("web/state.js"), "\n", …)` over the `src/web/*.js` fragments — one
 > served script, split only at the source level (`state` first, `main`/bootstrap last; the
