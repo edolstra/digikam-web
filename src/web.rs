@@ -16,14 +16,14 @@ const WEBPGF_WASM: &[u8] = include_bytes!(concat!(env!("WEBPGF_PATH"), "/webpgf.
 
 /// The site favicon (Digikam's), embedded at build time and served at
 /// `/favicon.ico`. Its `ETag` is a content hash so it busts the cache if replaced.
-const FAVICON: &[u8] = include_bytes!("favicon.ico");
+const FAVICON: &[u8] = include_bytes!("assets/favicon.ico");
 
 /// PWA assets, embedded and served so the app can be "installed" (Android etc.):
 /// the web app manifest, the service worker, and the icons it references.
 const MANIFEST: &str = include_str!("manifest.webmanifest");
 const SW_JS: &str = include_str!("sw.js");
-const ICON_192: &[u8] = include_bytes!("icon-192.png");
-const ICON_512: &[u8] = include_bytes!("icon-512.png");
+const ICON_192: &[u8] = include_bytes!("assets/icon-192.png");
+const ICON_512: &[u8] = include_bytes!("assets/icon-512.png");
 
 /// `GET /webpgf.js` — the Emscripten loader for the PGF decoder.
 pub async fn webpgf_js(headers: HeaderMap) -> Response {

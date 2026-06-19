@@ -411,15 +411,16 @@ src/
                  lightbox.js   the full-screen lightbox (initLightbox/LB) — one closure
                  gridnav.js    arrow-key grid selection (initGridNav)
                  main.js       render() orchestrator, nav controller, bootstrap IIFE + SW (loaded LAST)
-  favicon.ico  Digikam's site icon, embedded via include_bytes!, served at /favicon.ico
   manifest.webmanifest  PWA manifest (include_str!), served at /manifest.webmanifest
   sw.js        PWA service worker (include_str!), served at /sw.js
-  icon-192.png icon-512.png  PWA icons (include_bytes!), served at /icon-*.png
+  assets/      binary assets embedded via include_bytes!:
+                 favicon.ico                 Digikam's site icon, served at /favicon.ico
+                 icon-192.png icon-512.png   PWA icons, served at /icon-*.png
   error.rs     AppError -> JSON HTTP responses
 ```
 
 > `web.css`/`manifest.webmanifest`/`sw.js` are pulled in with `include_str!`, the binary
-> assets (`favicon.ico`, `icon-*.png`) with `include_bytes!`, and `SCRIPT` is
+> assets (`src/assets/{favicon.ico,icon-*.png}`) with `include_bytes!`, and `SCRIPT` is
 > `concat!(include_str!("web/state.js"), "\n", …)` over the `src/web/*.js` fragments — one
 > served script, split only at the source level (`state` first, `main`/bootstrap last; the
 > `"\n"` separators keep a trailing `//`-comment from eating the next fragment). The flake's
