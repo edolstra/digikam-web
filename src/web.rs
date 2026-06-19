@@ -158,13 +158,31 @@ fn webpgf_build_id() -> &'static str {
 /// Stylesheet for the frontend pages (inlined into each page's `<style>`).
 const STYLE: &str = include_str!("web.css");
 
-/// Lightbox behavior (inlined into each page's `<script>`). No server data is
-/// interpolated; media URLs are read from the grid `<img src>` / `.vtile`
-/// `data-src` attributes. Photos use `#lb-img`, videos `#lb-video`.
-const SCRIPT: &str = include_str!("web.js");
+/// The SPA frontend (inlined into each page's `<script>`). Split across
+/// `src/web/*.js` by concern and concatenated here — at runtime it's one script in
+/// one shared top-level scope, exactly as before. Order matters only at the ends:
+/// `state` first (defines the shared `state`/helpers), `main` last (the bootstrap
+/// IIFE); the `"\n"` separators stop a trailing `//`-comment in one fragment from
+/// swallowing the next fragment's first line. No server data is interpolated.
+const SCRIPT: &str = concat!(
+    include_str!("web/state.js"),
+    "\n",
+    include_str!("web/navbar.js"),
+    "\n",
+    include_str!("web/thumbnails.js"),
+    "\n",
+    include_str!("web/grid.js"),
+    "\n",
+    include_str!("web/lightbox.js"),
+    "\n",
+    include_str!("web/gridnav.js"),
+    "\n",
+    include_str!("web/main.js"),
+    "\n",
+);
 
 /// Assemble the full HTML page shell. The navbar's breadcrumb (`.crumb`) and
-/// rating selector (`.rating`) are emitted **empty**; [web.js](web.js) fills them
+/// rating selector (`.rating`) are emitted **empty**; the SPA (`src/web/`) fills them
 /// from the URL on load and rebuilds them on each in-page navigation (the page is
 /// a client-side SPA, so the shell is identical for every album/filter).
 fn page_html(title: &str, body: Markup) -> Markup {
@@ -212,7 +230,7 @@ fn page_html(title: &str, body: Markup) -> Markup {
 
 /// The album browsing page, serving `/`, `/photos`, and `/photos/<album path>`.
 /// The served HTML is a **static shell** — identical for every URL — that
-/// [web.js](web.js) turns into a client-side SPA: it reads the album + filters
+/// the SPA (`src/web/`) turns into a client-side app: it reads the album + filters
 /// from the URL, fetches `/api/subalbums` + `/api/photos`, and renders the navbar,
 /// sub-album tiles, and photo grid, re-rendering in place (no page load) as the
 /// user navigates. The route captures are therefore ignored here.
@@ -230,7 +248,7 @@ pub async fn album_page() -> impl IntoResponse {
 
 /// Render the album browsing page **shell**. No DB work and no album/filter logic
 /// happens here: the navbar, sub-album tiles, and photo grid are all built
-/// client-side (see [web.js](web.js)) into the empty navbar / `#subalbums` /
+/// client-side (see `src/web/`) into the empty navbar / `#subalbums` /
 /// `#photos` containers. The `<title>` is a constant placeholder that web.js
 /// replaces with the album path on first render.
 fn render() -> Markup {

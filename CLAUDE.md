@@ -105,7 +105,7 @@ album/filter logic: an empty navbar (`<span class="menu">` for the `☰` bookmar
 `<span class="crumb">` for the breadcrumb, `<span class="filter-menu">` for the funnel
 filters menu) plus empty `#subalbums` / `#photos` containers, the lightbox, and the
 inlined CSS/JS.
-[web.js](src/web.js) drives everything from in-memory **state** (`{album: segments[],
+The SPA ([src/web/](src/web/)) drives everything from in-memory **state** (`{album: segments[],
 minRating}`), initialized from the URL by `readUrl()` and updated on each navigation. It
 builds the navbar, sub-album tiles, and photo grid by fetching `/api/subalbums` +
 `/api/photos`, and **navigates in place**: clicking a breadcrumb / sub-album tile / `⌂` /
@@ -122,7 +122,7 @@ the shell is now identical for every URL, this caches the one document across al
 
 ### The album page
 
-Everything below is built **client-side** by [web.js](src/web.js) from `state`; in-page
+Everything below is built **client-side** by the SPA ([src/web/](src/web/)) from `state`; in-page
 navigation re-renders without a page load. A single persistent runtime — the thumbnail
 worker pool, the lightbox listeners, and the nav/popstate handlers — is created once and
 reused across navigations; only the DOM is rebuilt (`render()` per navigation). A
@@ -182,7 +182,7 @@ reused across navigations; only the DOM is rebuilt (`render()` per navigation). 
   `data-full`, so a missing thumbnail just leaves the ▶ placeholder; the video itself
   isn't fetched until opened). The lightbox enumerates only *direct* grid children
   (`.grid > img, .grid > .vtile`), so a poster isn't its own item. See [Thumbnails](#thumbnails).
-- **Keyboard navigation** (`initGridNav` in [web.js](src/web.js)): the **arrow keys** move a
+- **Keyboard navigation** (`initGridNav` in [gridnav.js](src/web/gridnav.js)): the **arrow keys** move a
   highlighted selection (`.selected`, an inset gold outline) across **both** grids in one
   sequence — `.albums > a.album` then `.grid > img.thumb, .grid > .vtile`. Left/Right step in
   DOM (reading) order; Up/Down are *geometric* (nearest row above/below by tile center, then
@@ -263,7 +263,7 @@ desktop, etc.). Embedded + served like the other static assets:
 `start_url: /photos`, theme/background `#1a1a1a`/`#111`), `GET /icon-192.png` &
 `GET /icon-512.png` (rasterized from digiKam's `digikam_oxygen.svg`), and
 `GET /sw.js` (the service worker). The `<head>` carries `<link rel="manifest">`,
-`<meta name="theme-color">`, and an `apple-touch-icon`; [web.js](src/web.js) registers the
+`<meta name="theme-color">`, and an `apple-touch-icon`; [main.js](src/web/main.js) registers the
 service worker on `load`. The SW is **deliberately a no-op for fetches** (empty `fetch`
 handler): a response served from a service worker **bypasses the browser's HTTP cache**,
 which would defeat our `Cache-Control` headers (immutable assets, the `/photos` `max-age`),
@@ -290,9 +290,9 @@ content-hash `ETag`) so updates propagate; icons are `immutable`.
 - **HTML rendering**: the page **shell** uses [`maud`](https://maud.lang.rs/)
   (compile-time `html!` templates with automatic escaping). `album_page` returns
   `maud::Markup` (its axum feature makes it `IntoResponse`). The shell is static — all
-  album/filter rendering moved client-side ([web.js](src/web.js)), so maud now just emits
-  the fixed navbar/container scaffolding. The `include_str!`'d `web.css`/`web.js` are
-  emitted inside `<style>`/`<script>` via `PreEscaped` (trusted, must not be escaped).
+  album/filter rendering moved client-side ([src/web/](src/web/)), so maud now just emits
+  the fixed navbar/container scaffolding. `web.css` and the `concat!`-ed `web/*.js` (`STYLE` /
+  `SCRIPT`) are emitted inside `<style>`/`<script>` via `PreEscaped` (trusted, must not be escaped).
 - **Read-only & safe alongside running Digikam**: connections open with
   `SQLITE_OPEN_READ_ONLY`, set `PRAGMA query_only=ON`, and a 5s `busy_timeout` so
   reads don't fail while Digikam writes. We deliberately do **not** use `immutable=1`
@@ -359,7 +359,7 @@ The embed path comes from the `WEBPGF_PATH` env var, which the flake sets to the
 derivation output for **both** `nix build` (`commonArgs`) and the dev shell — so plain
 `cargo build` inside `nix develop` embeds them too.
 
-The frontend ([web.js](src/web.js)) wires this up. An `IntersectionObserver` with a wide,
+The frontend ([thumbnails.js](src/web/thumbnails.js)) wires this up. An `IntersectionObserver` with a wide,
 viewport-relative `rootMargin` (≈1 screen above, ≈2.5 below) triggers a `/thumbnail` fetch
 per `img.thumb` tile **well before** it scrolls in, so paging down lands on already-decoded
 images. Fetch (network) and decode (CPU) are **separate stages**: each finished PGF blob
@@ -367,7 +367,7 @@ queues for the next idle worker in a small **Blob Web Worker pool** (`min(hardwa
 
 First-paint latency was dominated by **Firefox network behavior** (full write-up in
 [docs/thumbnail-loading-performance.md](docs/thumbnail-loading-performance.md)), fixed three
-ways (see [web.js](src/web.js) — verified to take first paint from ~500ms to ~120ms):
+ways (see [thumbnails.js](src/web/thumbnails.js) — verified to take first paint from ~500ms to ~120ms):
 
 1. **Cap concurrent fetches** at 6 — firing a screenful at once makes Firefox's request pacer
    hold the *whole burst* for hundreds of ms.
@@ -403,7 +403,14 @@ src/
   handlers.rs  axum JSON API handlers (incl. bookmarks), run_blocking/run_web DB helpers
   web.rs       static SPA shell (navbar + empty containers) + static asset handlers, maud
   web.css      frontend stylesheet, inlined via include_str!  (STYLE)
-  web.js       SPA: state/URL routing, navbar, grid + sub-album tiles, thumbnails, lightbox, SW (SCRIPT)
+  web/         the SPA, split by concern and concat!'d into SCRIPT (web.rs), in order:
+                 state.js      app state + URL/filter model (state, readUrl, filters, photosUrl, apiParams)
+                 navbar.js     breadcrumb + the bookmarks & funnel-filter dropdown menus
+                 thumbnails.js PGF decoder worker pool + per-render IntersectionObserver loader
+                 grid.js       day-grouped photo grid + sub-album tiles (buildGrid/buildSubalbums)
+                 lightbox.js   the full-screen lightbox (initLightbox/LB) — one closure
+                 gridnav.js    arrow-key grid selection (initGridNav)
+                 main.js       render() orchestrator, nav controller, bootstrap IIFE + SW (loaded LAST)
   favicon.ico  Digikam's site icon, embedded via include_bytes!, served at /favicon.ico
   manifest.webmanifest  PWA manifest (include_str!), served at /manifest.webmanifest
   sw.js        PWA service worker (include_str!), served at /sw.js
@@ -411,10 +418,14 @@ src/
   error.rs     AppError -> JSON HTTP responses
 ```
 
-> `web.css`/`web.js`/`manifest.webmanifest` are pulled in with `include_str!` and the
-> binary assets (`favicon.ico`, `icon-*.png`) with `include_bytes!`. The flake's `src`
-> filter keeps `.css`/`.js`/`.ico`/`.png`/`.webmanifest` alongside the Cargo sources
-> (plain `cleanCargoSource` would drop them and the build would fail).
+> `web.css`/`manifest.webmanifest`/`sw.js` are pulled in with `include_str!`, the binary
+> assets (`favicon.ico`, `icon-*.png`) with `include_bytes!`, and `SCRIPT` is
+> `concat!(include_str!("web/state.js"), "\n", …)` over the `src/web/*.js` fragments — one
+> served script, split only at the source level (`state` first, `main`/bootstrap last; the
+> `"\n"` separators keep a trailing `//`-comment from eating the next fragment). The flake's
+> `src` filter keeps `.css`/`.js`/`.ico`/`.png`/`.webmanifest` alongside the Cargo sources
+> (plain `cleanCargoSource` would drop them and the build would fail), so `src/web/*.js` are
+> included automatically — but each new fragment must be `git add`ed (Nix sees only tracked files).
 
 ## Future frontend
 Planned as full-stack Rust (**Leptos** recommended). The JSON API + `/file` endpoint
