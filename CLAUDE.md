@@ -11,7 +11,7 @@ uses [crane](https://github.com/ipetkov/crane) + [rust-overlay](https://github.c
 ```bash
 nix run                              # build + run with defaults
 nix develop --command cargo run      # iterate inside the dev shell
-nix develop --command cargo test     # unit tests
+nix develop --command cargo test     # unit + API integration tests (seeded temp SQLite)
 nix build                            # produce ./result/bin/digikam-web
 nix flake check                      # build + clippy (-D warnings)
 ```
@@ -396,7 +396,10 @@ back its tile to `/file`; once the whole pool is gone, queued/new tiles do too.
 
 ```
 src/
-  main.rs      router, startup, graceful shutdown
+  main.rs      build_router(state) + startup, graceful shutdown
+  tests/       in-crate API integration tests (`#[cfg(test)] mod tests` in main.rs):
+                 mod.rs        Fixture — seeds a synthetic temp SQLite DB, exercises the real
+                               router via tower `oneshot`; read.rs / bookmarks.rs / files.rs
   config.rs    clap config (database path, listen addr)
   db.rs        read-only pools + writable web.sql pool, album-root loading, path resolution  (+ unit tests)
   models.rs    serde types (PhotoSummary, PhotoDetail, AlbumNode, SubAlbum, TagNode, Page<T>, Filters, Bookmark)

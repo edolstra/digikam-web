@@ -6,6 +6,9 @@ mod models;
 mod query;
 mod web;
 
+#[cfg(test)]
+mod tests;
+
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
@@ -73,6 +76,24 @@ async fn main() -> Result<()> {
         roots: Arc::new(roots),
     };
 
+    let app = build_router(state);
+
+    let listener = tokio::net::TcpListener::bind(config.listen)
+        .await
+        .with_context(|| format!("failed to bind {}", config.listen))?;
+
+    tracing::info!(addr = %config.listen, "listening");
+    axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown_signal())
+        .await
+        .context("server error")?;
+    Ok(())
+}
+
+/// Assemble the full application router from an [`AppState`]: the JSON API under
+/// `/api`, the SPA shell + static assets at the root, the `/random` redirect, and
+/// the request-logging `TraceLayer`. Shared by `main` and the integration tests.
+pub(crate) fn build_router(state: AppState) -> Router {
     let api = Router::new()
         .route("/health", get(handlers::health))
         .route("/photos", get(handlers::list_photos))
@@ -92,7 +113,7 @@ async fn main() -> Result<()> {
             axum::routing::delete(handlers::delete_bookmark),
         );
 
-    let app = Router::new()
+    Router::new()
         .nest("/api", api)
         .route("/", get(web::album_page))
         .route("/photos", get(web::album_page))
@@ -112,18 +133,7 @@ async fn main() -> Result<()> {
                 .make_span_with(DefaultMakeSpan::new().level(Level::INFO))
                 .on_response(DefaultOnResponse::new().level(Level::INFO)),
         )
-        .with_state(state);
-
-    let listener = tokio::net::TcpListener::bind(config.listen)
-        .await
-        .with_context(|| format!("failed to bind {}", config.listen))?;
-
-    tracing::info!(addr = %config.listen, "listening");
-    axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown_signal())
-        .await
-        .context("server error")?;
-    Ok(())
+        .with_state(state)
 }
 
 async fn shutdown_signal() {
