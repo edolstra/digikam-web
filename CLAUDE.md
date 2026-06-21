@@ -145,33 +145,30 @@ To make the *first* paint snappy, the decoder assets are fetched **once** (not o
 
 ## Source layout
 
-```
-src/
-  main.rs      build_router(state) + startup, graceful shutdown
-  tests/       in-crate API integration tests (`#[cfg(test)] mod tests` in main.rs):
-                 mod.rs        Fixture — seeds a synthetic temp SQLite DB, exercises the real
-                               router via tower `oneshot`; read.rs / bookmarks.rs / files.rs
-  config.rs    clap config (database path, listen addr)
-  db.rs        read-only pools + writable web.sql pool, album-root loading, path resolution  (+ unit tests)
-  models.rs    serde types (PhotoSummary, PhotoDetail, AlbumNode, SubAlbum, TagNode, Page<T>, Filters, Bookmark)
-  query.rs     /photos + /subalbums SQL + param building; Rating/Aspect types (+ unit tests)
-  handlers.rs  axum JSON API handlers (incl. bookmarks), run_blocking/run_web DB helpers
-  web.rs       static SPA shell (navbar + empty containers) + static asset handlers, maud
-  web/         the SPA, split by concern and concat!'d into SCRIPT (web.rs), in order:
-                 state.js      app state + URL/filter model (state, readUrl, filters, photosUrl, apiParams)
-                 navbar.js     breadcrumb + the bookmarks & funnel-filter dropdown menus
-                 thumbnails.js PGF decoder worker pool + per-render IntersectionObserver loader
-                 grid.js       day-grouped photo grid + sub-album tiles (buildGrid/buildSubalbums)
-                 lightbox.js   the full-screen lightbox (initLightbox/LB) — one closure
-                 gridnav.js    arrow-key grid selection (initGridNav)
-                 main.js       render() orchestrator, nav controller, bootstrap IIFE + SW (loaded LAST)
-  manifest.webmanifest  PWA manifest (include_str!), served at /manifest.webmanifest
-  sw.js        PWA service worker (include_str!), served at /sw.js
-  assets/      embedded assets:
-                 style.css                   frontend stylesheet, inlined via include_str! (STYLE)
-                 favicon.ico                 Digikam's site icon (include_bytes!), served at /favicon.ico
-                 icon-192.png icon-512.png   PWA icons (include_bytes!), served at /icon-*.png
-  error.rs     AppError -> JSON HTTP responses
-```
+- `src/`
+  - `main.rs` — `build_router(state)` + startup, graceful shutdown
+  - `tests/` — in-crate API integration tests (`#[cfg(test)] mod tests` in main.rs)
+    - `mod.rs` — `Fixture` — seeds a synthetic temp SQLite DB, exercises the real router via tower `oneshot`; read.rs / bookmarks.rs / files.rs
+  - `config.rs` — clap config (database path, listen addr)
+  - `db.rs` — read-only pools + writable web.sql pool, album-root loading, path resolution (+ unit tests)
+  - `models.rs` — serde types (PhotoSummary, PhotoDetail, AlbumNode, SubAlbum, TagNode, Page<T>, Filters, Bookmark)
+  - `query.rs` — /photos + /subalbums SQL + param building; Rating/Aspect types (+ unit tests)
+  - `handlers.rs` — axum JSON API handlers (incl. bookmarks), run_blocking/run_web DB helpers
+  - `web.rs` — static SPA shell (navbar + empty containers) + static asset handlers, maud
+  - `web/` — the SPA, split by concern and concat!'d into SCRIPT (web.rs), in order:
+    - `state.js` — app state + URL/filter model (state, readUrl, filters, photosUrl, apiParams)
+    - `navbar.js` — breadcrumb + the bookmarks & funnel-filter dropdown menus
+    - `thumbnails.js` — PGF decoder worker pool + per-render IntersectionObserver loader
+    - `grid.js` — day-grouped photo grid + sub-album tiles (buildGrid/buildSubalbums)
+    - `lightbox.js` — the full-screen lightbox (initLightbox/LB) — one closure
+    - `gridnav.js` — arrow-key grid selection (initGridNav)
+    - `main.js` — render() orchestrator, nav controller, bootstrap IIFE + SW (loaded LAST)
+  - `manifest.webmanifest` — PWA manifest (include_str!), served at /manifest.webmanifest
+  - `sw.js` — PWA service worker (include_str!), served at /sw.js
+  - `assets/` — embedded assets:
+    - `style.css` — frontend stylesheet, inlined via include_str! (STYLE)
+    - `favicon.ico` — Digikam's site icon (include_bytes!), served at /favicon.ico
+    - `icon-192.png`, `icon-512.png` — PWA icons (include_bytes!), served at /icon-*.png
+  - `error.rs` — AppError -> JSON HTTP responses
 
 `assets/style.css`/`manifest.webmanifest`/`sw.js` are pulled in with `include_str!`, the binary assets (`src/assets/{favicon.ico,icon-*.png}`) with `include_bytes!`, and `SCRIPT` is `concat!(include_str!("web/state.js"), "\n", …)` over the `src/web/*.js` fragments — one served script, split only at the source level (`state` first, `main`/bootstrap last; the `"\n"` separators keep a trailing `//`-comment from eating the next fragment). The flake's `src` filter keeps `.css`/`.js`/`.ico`/`.png`/`.webmanifest` alongside the Cargo sources (plain `cleanCargoSource` would drop them and the build would fail), so `src/web/*.js` are included automatically — but each new fragment must be `git add`ed (Nix sees only tracked files).
