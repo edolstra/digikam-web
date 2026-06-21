@@ -172,6 +172,3 @@ src/
 ```
 
 `assets/style.css`/`manifest.webmanifest`/`sw.js` are pulled in with `include_str!`, the binary assets (`src/assets/{favicon.ico,icon-*.png}`) with `include_bytes!`, and `SCRIPT` is `concat!(include_str!("web/state.js"), "\n", …)` over the `src/web/*.js` fragments — one served script, split only at the source level (`state` first, `main`/bootstrap last; the `"\n"` separators keep a trailing `//`-comment from eating the next fragment). The flake's `src` filter keeps `.css`/`.js`/`.ico`/`.png`/`.webmanifest` alongside the Cargo sources (plain `cleanCargoSource` would drop them and the build would fail), so `src/web/*.js` are included automatically — but each new fragment must be `git add`ed (Nix sees only tracked files).
-
-## Future frontend
-Planned as full-stack Rust (**Leptos** recommended). The JSON API + `/file` endpoint is framework-agnostic; `limit/offset/total` paging supports grid virtualization / infinite scroll over the large image set (~225k photos here). Add a thumbnail endpoint before building the grid.
