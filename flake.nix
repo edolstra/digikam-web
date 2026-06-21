@@ -12,7 +12,12 @@
   };
 
   outputs = { self, nixpkgs, flake-utils, rust-overlay, crane }:
-    flake-utils.lib.eachDefaultSystem (system:
+    {
+      # System-agnostic NixOS module (the per-system outputs are merged in below).
+      nixosModules.default = import ./nix/nixos-module.nix self;
+      nixosModules.digikam-web = self.nixosModules.default;
+    }
+    // flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = import nixpkgs {
           inherit system;
