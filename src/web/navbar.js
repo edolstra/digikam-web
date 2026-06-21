@@ -110,7 +110,7 @@ function renderMenuFilters() {
   tagsInput.type = 'text';
   tagsInput.className = 'tags-input';
   tagsInput.value = state.tags.join(', ');
-  tagsInput.placeholder = 'tag, /local/fashion';
+  tagsInput.placeholder = 'tag, /animals/cats';
   tagsInput.setAttribute('aria-label', 'Filter by tags');
   function commitTags() {
     var parsed = tagsInput.value.split(',').map(function (s) { return s.trim(); }).filter(Boolean);

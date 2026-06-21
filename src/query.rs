@@ -150,7 +150,7 @@ fn escape_like(s: &str) -> String {
 /// matched tag(s) **plus all their descendants** — and the bound value holding the
 /// token. No substring matching.
 ///
-/// - A token starting with `/` is an **absolute path** (`/local/fashion`): it
+/// - A token starting with `/` is an **absolute path** (`/animals/cats`): it
 ///   matches the single tag at that path (built by walking `pid` from the root),
 ///   case-sensitively.
 /// - Any other token is a **name**: it matches every tag with that name,
@@ -185,8 +185,8 @@ fn tag_ids_subquery(token: &str) -> (&'static str, Value) {
 /// `/`) it *also* matches when the photo lives in an **album named that token, or
 /// a sub-album thereof** — any `/`-delimited segment of its album's `relativePath`
 /// equals the token, case-insensitively — OR'd with the tag match. (A `/`-path
-/// token is tag-only.) So a filter like `fashion` catches both the
-/// `/local/fashion` tag tree and a `…/Fashion/…` album tree.
+/// token is tag-only.) So a filter like `vacation` catches both the
+/// `/places/vacation` tag tree and a `…/Vacation/…` album tree.
 fn resolve_tag_filter(token: &str) -> (String, Vec<Value>) {
     let (ids_sql, tag_value) = tag_ids_subquery(token);
     let tag_match = format!(
@@ -197,8 +197,8 @@ fn resolve_tag_filter(token: &str) -> (String, Vec<Value>) {
     }
     // Album-name match: a `/`-delimited segment of the album's relativePath equals
     // the token. Appending a trailing '/' makes the leading + trailing slashes act
-    // as segment boundaries, so `fashion` matches `/Fashion` and `/X/Fashion/2020`
-    // but not `/Fashionista`. SQLite `LIKE` is case-insensitive for ASCII; the
+    // as segment boundaries, so `vacation` matches `/Vacation` and `/X/Vacation/2020`
+    // but not `/Vacations`. SQLite `LIKE` is case-insensitive for ASCII; the
     // pattern is a bound parameter with only its LIKE wildcards escaped.
     let like_pattern = Value::Text(format!("%/{}/%", escape_like(token)));
     let predicate = format!("({tag_match} OR (a.relativePath || '/') LIKE ? ESCAPE '\\')");
@@ -606,10 +606,10 @@ mod tests {
         );
 
         // Path token: tag-only, a single bound param, no album LIKE.
-        let (sql, params) = tag_filter_sql(&["/local/fashion".to_string()]);
+        let (sql, params) = tag_filter_sql(&["/animals/cats".to_string()]);
         assert!(sql.contains("path = ?"));
         assert!(!sql.contains("LIKE ?"));
-        assert_eq!(params, vec![Value::Text("/local/fashion".to_string())]);
+        assert_eq!(params, vec![Value::Text("/animals/cats".to_string())]);
 
         // No tokens: empty fragment, no params.
         let (sql, params) = tag_filter_sql(&[]);

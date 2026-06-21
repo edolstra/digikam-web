@@ -86,7 +86,7 @@ pub struct PhotoDetail {
     /// captions/titles/imported EXIF-JFIF comments here) concatenated with
     /// newlines; `None` when the image has none.
     pub description: Option<String>,
-    /// Tags as absolute paths (`/local/blender/todo`), internal tags excluded.
+    /// Tags as absolute paths (`/vacation/2020/beach`), internal tags excluded.
     pub tags: Vec<String>,
     /// GPS coordinates (`ImagePositions.latitudeNumber`/`longitudeNumber`), if present.
     pub latitude: Option<f64>,

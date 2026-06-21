@@ -196,7 +196,7 @@ pub async fn get_photo(
                 other => AppError::from(other),
             })?;
 
-        // Each tag as its absolute path (e.g. `/local/blender/todo`): walk up the
+        // Each tag as its absolute path (e.g. `/vacation/2020/beach`): walk up the
         // `pid` chain prepending each ancestor's name to the top-level (pid 0).
         // Excludes Digikam's internal tags (Color/Pick labels, version history).
         let mut tag_stmt = conn.prepare_cached(
