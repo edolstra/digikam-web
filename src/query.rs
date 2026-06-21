@@ -109,6 +109,63 @@ impl<'de> Deserialize<'de> for Aspect {
     }
 }
 
+/// The photo sort order. `Modified` (the default) and `Created` are newest-first
+/// by `Images.modificationDate` / `ImageInformation.creationDate`; `Name` is
+/// ascending by `Images.name`. Modeled as an enum (like [`Aspect`]) so it can
+/// grow more orderings later.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Sort {
+    #[default]
+    Modified,
+    Created,
+    Name,
+}
+
+impl Sort {
+    /// The `ORDER BY` clause body (column list + direction) for the main photo
+    /// query. `i`/`ii` are the `Images` / `ImageInformation` aliases in scope.
+    /// NULL dates sort last under the `DESC` orderings (SQLite ranks NULL lowest).
+    pub fn order_by(self) -> &'static str {
+        match self {
+            Sort::Modified => "i.modificationDate DESC, i.id DESC",
+            Sort::Created => "ii.creationDate DESC, i.id DESC",
+            Sort::Name => "i.name COLLATE NOCASE ASC, i.id ASC",
+        }
+    }
+
+    /// The canonical string form (matches the query-string / JSON values).
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Sort::Modified => "modified",
+            Sort::Created => "created",
+            Sort::Name => "name",
+        }
+    }
+
+    /// Parse the canonical string form, e.g. when reading a stored bookmark.
+    pub fn parse(s: &str) -> Option<Sort> {
+        match s {
+            "modified" => Some(Sort::Modified),
+            "created" => Some(Sort::Created),
+            "name" => Some(Sort::Name),
+            _ => None,
+        }
+    }
+}
+
+impl Serialize for Sort {
+    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for Sort {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        Sort::parse(&String::deserialize(d)?)
+            .ok_or_else(|| de::Error::custom("sort must be modified, created, or name"))
+    }
+}
+
 /// Parsed query parameters for `GET /photos`: an album scope plus the view
 /// [`Filters`] (shared with `/subalbums` and bookmarks) and paging.
 #[derive(Debug, Default)]
@@ -316,11 +373,13 @@ pub fn list_photos(
 
     let (filter, params) = build_filter(q);
 
-    // Page of results, newest first.
+    // Page of results, ordered per the requested sort.
+    let order = q.filters.sort.order_by();
     let select_sql = format!(
         "SELECT i.id, i.name, a.albumRoot, a.relativePath, i.fileSize, \
-                ii.format, ii.width, ii.height, ii.rating, i.modificationDate, i.category{filter} \
-         ORDER BY i.modificationDate DESC, i.id DESC \
+                ii.format, ii.width, ii.height, ii.rating, i.modificationDate, i.category, \
+                ii.creationDate{filter} \
+         ORDER BY {order} \
          LIMIT ? OFFSET ?"
     );
     let mut select_params = params;
@@ -351,6 +410,7 @@ pub fn list_photos(
                 modification_date: row.get(9)?,
                 mime: None,
                 is_video: row.get::<_, i64>(10)? == 2,
+                creation_date: row.get(11)?,
             })
         })?
         .collect::<Result<Vec<_>, _>>()?;
@@ -433,6 +493,13 @@ pub fn list_subalbums(
     // Tag filter (AND of `EXISTS`/album predicates, with bound params appended
     // after the per-mode params below); image alias is `i`, album alias `a`.
     let (tags, tag_params) = tag_filter_sql(&filters.tags);
+    // The date column the covers/recency derive from: `Created` sort uses
+    // creationDate, everything else (incl. `Name`, where it only picks the newest
+    // cover) modificationDate.
+    let cdate = match filters.sort {
+        Sort::Created => "ii.creationDate",
+        _ => "i.modificationDate",
+    };
     // Display path of `album`, used to build each child's `path` ("" at the root).
     let parent = if album.is_empty() {
         String::new()
@@ -447,7 +514,7 @@ pub fn list_subalbums(
         None => (
             format!(
                 "SELECT i.id AS image_id, i.name AS image_name, i.category AS category, \
-                        i.modificationDate AS cdate, r.label AS bucket \
+                        {cdate} AS cdate, r.label AS bucket \
                  FROM Images i JOIN Albums a ON a.id = i.album \
                  JOIN AlbumRoots r ON r.id = a.albumRoot \
                  LEFT JOIN ImageInformation ii ON ii.imageid = i.id \
@@ -476,7 +543,7 @@ pub fn list_subalbums(
                                  THEN substr(rest, 1, instr(rest, '/') - 1) ELSE rest END AS bucket \
                      FROM ( \
                        SELECT i.id AS image_id, i.name AS image_name, i.category AS category, \
-                              i.modificationDate AS cdate, \
+                              {cdate} AS cdate, \
                               substr(a.relativePath, length(?) + 1) AS rest \
                        FROM Images i JOIN Albums a ON a.id = i.album \
                        LEFT JOIN ImageInformation ii ON ii.imageid = i.id \
@@ -499,10 +566,17 @@ pub fn list_subalbums(
     // The tag predicates' `?` come last in `matched` (appended after `>= ?`).
     params.extend(tag_params);
 
+    // Sub-album order: `Name` sort lists them alphabetically; otherwise by most
+    // recent matching photo (newest first), name breaking ties.
+    let bucket_order = match filters.sort {
+        Sort::Name => "c.bucket COLLATE NOCASE",
+        _ => "c.recent DESC, c.bucket COLLATE NOCASE",
+    };
+
     // Shared: group the matched rows into one tile per bucket (count + newest
-    // cover), newest bucket first. The cover is the newest item — image OR video
-    // (videos have stored thumbnails the client renders), so its `category` rides
-    // along to flag a video cover.
+    // cover). The cover is the newest item — image OR video (videos have stored
+    // thumbnails the client renders), so its `category` rides along to flag a
+    // video cover.
     let sql = format!(
         "WITH matched AS ( {matched} ), \
          counts AS ( \
@@ -515,7 +589,7 @@ pub fn list_subalbums(
          ) \
          SELECT c.bucket, cv.image_id, cv.image_name, cv.category, c.cnt \
          FROM counts c LEFT JOIN covers cv ON cv.bucket = c.bucket AND cv.rn = 1 \
-         ORDER BY c.recent DESC, c.bucket COLLATE NOCASE"
+         ORDER BY {bucket_order}"
     );
 
     let mut stmt = conn.prepare_cached(&sql)?;

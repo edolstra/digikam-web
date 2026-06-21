@@ -32,6 +32,99 @@ async fn photos_recursive_lists_all_visible() {
     assert!(!names.contains(&"obsol.jpg"));
 }
 
+/// The `name` field of every item in a `Page<…>`, in order.
+fn names(page: &serde_json::Value) -> Vec<&str> {
+    page["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|i| i["name"].as_str().unwrap())
+        .collect()
+}
+
+#[tokio::test]
+async fn photos_sort_orders() {
+    let fx = Fixture::new();
+
+    // Default (modified, newest first).
+    let (status, page) = fx.get_json("/api/photos?album=&recursive=true").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        names(&page),
+        [
+            "detail.jpg",
+            "img001.jpg",
+            "img002.jpg",
+            "clip001.mp4",
+            "img003.jpg",
+            "tagged.jpg"
+        ]
+    );
+
+    // Created date, newest first (distinct from the modified order).
+    let (_s, page) = fx
+        .get_json("/api/photos?album=&recursive=true&sort=created")
+        .await;
+    assert_eq!(
+        names(&page),
+        [
+            "tagged.jpg",
+            "img003.jpg",
+            "clip001.mp4",
+            "img002.jpg",
+            "img001.jpg",
+            "detail.jpg"
+        ]
+    );
+
+    // Name, ascending (case-insensitive).
+    let (_s, page) = fx
+        .get_json("/api/photos?album=&recursive=true&sort=name")
+        .await;
+    assert_eq!(
+        names(&page),
+        [
+            "clip001.mp4",
+            "detail.jpg",
+            "img001.jpg",
+            "img002.jpg",
+            "img003.jpg",
+            "tagged.jpg"
+        ]
+    );
+
+    // An unknown sort value is rejected.
+    let (status, _b) = fx.get_json("/api/photos?album=&sort=bogus").await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn subalbums_sort_name_is_alphabetical() {
+    let fx = Fixture::new();
+    // Default order is by most recent photo: Beach (img 106, 01-06) before
+    // Animals (img 100, 01-05).
+    let (_s, subs) = fx.get_json("/api/subalbums?album=/Collection").await;
+    let order: Vec<&str> = subs
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| s["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(order, ["Beach", "Animals"]);
+
+    // sort=name lists them alphabetically instead.
+    let (_s, subs) = fx
+        .get_json("/api/subalbums?album=/Collection&sort=name")
+        .await;
+    let order: Vec<&str> = subs
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| s["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(order, ["Animals", "Beach"]);
+}
+
 #[tokio::test]
 async fn photos_empty_album_non_recursive_is_empty() {
     let fx = Fixture::new();

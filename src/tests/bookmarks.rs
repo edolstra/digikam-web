@@ -15,6 +15,7 @@ fn sample(name: &str) -> serde_json::Value {
         "include_video": false,
         "aspect": "portrait",
         "tags": ["beach"],
+        "sort": "name",
     })
 }
 
@@ -43,6 +44,7 @@ async fn create_list_delete_round_trip() {
     assert_eq!(b["include_video"], false);
     assert_eq!(b["aspect"], "portrait");
     assert_eq!(b["tags"], json!(["beach"]));
+    assert_eq!(b["sort"], "name");
 
     // Delete is 204 and idempotent.
     assert_eq!(
@@ -96,6 +98,24 @@ async fn validation_errors() {
     body["aspect"] = json!("diagonal");
     let (status, _b) = fx.post_json("/api/bookmarks", &body).await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+
+    // Bad sort -> 422.
+    let mut body = sample("s");
+    body["sort"] = json!("sideways");
+    let (status, _b) = fx.post_json("/api/bookmarks", &body).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+#[tokio::test]
+async fn sort_defaults_to_modified_when_omitted() {
+    let fx = Fixture::new();
+    // A body without a `sort` field (the default) round-trips as "modified".
+    let mut body = sample("nosort");
+    body.as_object_mut().unwrap().remove("sort");
+    let (status, _b) = fx.post_json("/api/bookmarks", &body).await;
+    assert_eq!(status, StatusCode::OK);
+    let (_s, list) = fx.get_json("/api/bookmarks").await;
+    assert_eq!(list[0]["sort"], "modified");
 }
 
 #[tokio::test]

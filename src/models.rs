@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::query::{Aspect, Rating};
+use crate::query::{Aspect, Rating, Sort};
 
 /// The set of view filters active on an album page. Held separately from
 /// `PhotoQuery` so it can be passed to `list_subalbums` and applied to the
@@ -25,6 +25,10 @@ pub struct Filters {
     /// absolute path (see `resolve_tag_filter`). Empty = no tag filter.
     #[serde(default)]
     pub tags: Vec<String>,
+    /// Photo sort order; the default `Modified` is newest-first by modification
+    /// date. Not a filter per se, but carried alongside them (and bookmarked).
+    #[serde(default)]
+    pub sort: Sort,
 }
 
 impl Default for Filters {
@@ -36,6 +40,7 @@ impl Default for Filters {
             include_video: true,
             aspect: Aspect::All,
             tags: Vec::new(),
+            sort: Sort::Modified,
         }
     }
 }
@@ -62,9 +67,12 @@ pub struct PhotoSummary {
     pub height: Option<u64>,
     /// Rating 0..=5. Digikam stores -1 for "unrated", which is reported as null.
     pub rating: Option<u64>,
-    /// File modification date (`Images.modificationDate`) — used for ordering and
-    /// day-grouping. Preferred over Digikam's `creationDate` (the import time).
+    /// File modification date (`Images.modificationDate`) — the default ordering
+    /// and day-grouping key. Preferred over Digikam's `creationDate` (import time).
     pub modification_date: Option<String>,
+    /// `ImageInformation.creationDate` (Digikam's import/EXIF time), if present —
+    /// used for ordering and day-grouping when sorting by creation date.
+    pub creation_date: Option<String>,
     pub mime: Option<String>,
     /// True if this item is a video (Digikam `category = 2`).
     pub is_video: bool,
@@ -79,9 +87,6 @@ pub struct PhotoDetail {
     /// Absolute path of the original file on the server (album-root base +
     /// `relativePath` + name); `None` if the album root is unknown.
     pub file_path: Option<String>,
-    /// `ImageInformation.creationDate` (Digikam's import/EXIF time), if present —
-    /// distinct from the `modificationDate` the app sorts/groups by.
-    pub creation_date: Option<String>,
     /// Image description: all of the image's `ImageComments` (Digikam stores
     /// captions/titles/imported EXIF-JFIF comments here) concatenated with
     /// newlines; `None` when the image has none.

@@ -59,10 +59,21 @@ function buildGrid(host, token) {
       count.className = 'count';
       count.textContent = page.items.length + (page.incomplete ? '+' : '') + ' photo(s) or video(s)';
       host.appendChild(count);
+      if (state.sort === 'name') {
+        // Name sort: a single flat A–Z grid, no day grouping.
+        var flat = document.createElement('div');
+        flat.className = 'grid';
+        host.appendChild(flat);
+        page.items.forEach(function (p) { flat.appendChild(buildTile(p)); });
+        return;
+      }
       // Group into contiguous runs by day (the API already orders newest-first).
+      // The grouping date follows the sort: creation date for `created`, else the
+      // modification date.
+      var dateField = state.sort === 'created' ? 'creation_date' : 'modification_date';
       var curDay = null, grid = null;
       page.items.forEach(function (p) {
-        var d = p.modification_date;
+        var d = p[dateField];
         var day = (d && d.length >= 10) ? d.slice(0, 10) : 'Unknown date';
         if (day !== curDay) {
           curDay = day;

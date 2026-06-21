@@ -12,7 +12,7 @@
 // The filter fields at their defaults (everything off / all media). The single
 // source of truth for the initial `state`, the "clear all" reset (the ↺ button,
 // see renderMenuFilters), and filtersActive()'s "is anything non-default?" check.
-var DEFAULT_FILTERS = { minRating: 0, includeImages: true, includeVideo: true, recursive: false, aspect: 'all', tags: [] };
+var DEFAULT_FILTERS = { minRating: 0, includeImages: true, includeVideo: true, recursive: false, aspect: 'all', tags: [], sort: 'modified' };
 // The current view, initialized from the URL by readUrl() and updated on each
 // navigation. `album` is the decoded display segments (e.g. ["Photos","Lego"];
 // [] is the virtual root); `minRating` is 0 (no filter) or 1..=5; the media-type
@@ -39,6 +39,8 @@ function readUrl() {
   var a = q.get('aspect');
   state.aspect = (a === 'portrait' || a === 'landscape') ? a : 'all';
   state.tags = (q.get('tags') || '').split(',').map(function (s) { return s.trim(); }).filter(Boolean);
+  var s = q.get('sort');
+  state.sort = (s === 'created' || s === 'name') ? s : 'modified';
 }
 
 // The current filters as a plain object, optionally with some keys overridden —
@@ -50,7 +52,8 @@ function filters(over) {
     includeVideo: state.includeVideo,
     recursive: state.recursive,
     aspect: state.aspect,
-    tags: state.tags
+    tags: state.tags,
+    sort: state.sort
   };
   if (over) for (var k in over) f[k] = over[k];
   return f;
@@ -66,6 +69,7 @@ function setFilterParams(qs, f) {
   if (f.recursive) qs.set('recursive', 'true');
   if (f.aspect && f.aspect !== 'all') qs.set('aspect', f.aspect);
   if (f.tags && f.tags.length) qs.set('tags', f.tags.join(','));
+  if (f.sort && f.sort !== 'modified') qs.set('sort', f.sort);
 }
 
 // Build a frontend URL from album segments + a filter object, percent-encoding
@@ -153,9 +157,29 @@ function renderAspect(host) {
   }));
 }
 
+// The sort order as a 3-state radio (segmented control), same style as the media
+// / aspect ones: Modified (default) / Created / Name. The option matching
+// state.sort is the active inert <span>; the others are links. `name` also
+// switches the grid to a flat (ungrouped) A–Z list (see buildGrid).
+var SORT_OPTIONS = [
+  { label: 'Modified', value: 'modified', title: 'Sort by modification date (newest first)' },
+  { label: 'Created', value: 'created', title: 'Sort by creation date (newest first)' },
+  { label: 'Name', value: 'name', title: 'Sort by file name (A–Z)' }
+];
+function renderSort(host) {
+  segmented(host, SORT_OPTIONS.map(function (o) {
+    return {
+      label: o.label,
+      title: o.title,
+      active: state.sort === o.value,
+      href: photosUrl(state.album, filters({ sort: o.value }))
+    };
+  }));
+}
+
 function filtersActive() {
   return state.minRating || !state.includeImages || !state.includeVideo || state.recursive
-    || state.aspect !== 'all' || state.tags.length;
+    || state.aspect !== 'all' || state.tags.length || state.sort !== 'modified';
 }
 
 // The shared query for both API fetches: the album display path (empty for the

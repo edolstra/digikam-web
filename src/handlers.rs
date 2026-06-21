@@ -16,7 +16,7 @@ use crate::models::{
     AlbumNode, Bookmark, CreateBookmark, Filters, Page, PhotoDetail, PhotoSummary, SubAlbum,
     TagNode,
 };
-use crate::query::{self, Aspect, PhotoQuery, Rating, DEFAULT_LIMIT, MAX_LIMIT};
+use crate::query::{self, Aspect, PhotoQuery, Rating, Sort, DEFAULT_LIMIT, MAX_LIMIT};
 
 /// Digikam's internal tag root (`_Digikam_Internal_Tags_`). Its subtree holds the
 /// Color-Label / Pick-Label / version-history tags — internal bookkeeping, not real
@@ -63,6 +63,9 @@ pub struct PhotoParams {
     /// Aspect-ratio filter (`all` (default) / `portrait` / `landscape`).
     #[serde(default)]
     aspect: Aspect,
+    /// Sort order (`modified` (default) / `created` / `name`).
+    #[serde(default)]
+    sort: Sort,
     limit: Option<u64>,
     offset: Option<u64>,
 }
@@ -81,6 +84,7 @@ pub async fn list_photos(
             include_video: params.video,
             aspect: params.aspect,
             tags: parse_tags(params.tags.as_deref()),
+            sort: params.sort,
         },
         limit: params.limit.unwrap_or(DEFAULT_LIMIT).clamp(1, MAX_LIMIT),
         offset: params.offset.unwrap_or(0),
@@ -112,6 +116,7 @@ pub async fn random_photo(
             include_video: params.video,
             aspect: params.aspect,
             tags: parse_tags(params.tags.as_deref()),
+            sort: params.sort,
         },
         limit: 0,
         offset: 0,
@@ -178,11 +183,11 @@ pub async fn get_photo(
                         height: opt_u64(row.get(7)?),
                         rating: opt_u64(row.get(8)?),
                         modification_date: row.get(9)?,
+                        creation_date: row.get(13)?,
                         mime,
                         is_video: row.get::<_, i64>(12)? == 2,
                     },
                     file_path,
-                    creation_date: row.get(13)?,
                     description: row.get(14)?,
                     tags: Vec::new(),
                     latitude: row.get(10)?,
@@ -560,6 +565,10 @@ pub struct SubalbumParams {
     aspect: Aspect,
     /// Comma-separated tag filter (same hierarchical semantics as `/photos`).
     tags: Option<String>,
+    /// Sort order (`modified` (default) / `created` / `name`); `name` lists the
+    /// sub-albums alphabetically, `created` derives covers/recency from creationDate.
+    #[serde(default)]
+    sort: Sort,
 }
 
 /// `GET /subalbums?album=/Root/rel&min_rating=&images=&video=` — direct sub-albums
@@ -582,6 +591,7 @@ pub async fn list_subalbums(
         include_video: params.video,
         aspect: params.aspect,
         tags: parse_tags(params.tags.as_deref()),
+        sort: params.sort,
     };
 
     let subalbums = run_blocking(&state, move |conn, state| {
@@ -727,6 +737,7 @@ fn row_to_bookmark(row: &rusqlite::Row) -> rusqlite::Result<Bookmark> {
             aspect: Aspect::parse(&row.get::<_, String>(6)?).unwrap_or_default(),
             // tags stored as a JSON array; tolerate anything unexpected as empty.
             tags: serde_json::from_str(&row.get::<_, String>(7)?).unwrap_or_default(),
+            sort: Sort::parse(&row.get::<_, String>(8)?).unwrap_or_default(),
         },
     })
 }
@@ -739,7 +750,7 @@ pub async fn list_bookmarks(State(state): State<AppState>) -> AppResult<Json<Vec
     }
     let bookmarks = run_web(&state, |conn| {
         let mut stmt = conn.prepare(
-            "SELECT name, album, recursive, min_rating, images, video, aspect, tags \
+            "SELECT name, album, recursive, min_rating, images, video, aspect, tags, sort \
              FROM bookmarks ORDER BY name COLLATE NOCASE",
         )?;
         let rows = stmt
@@ -778,12 +789,12 @@ pub async fn create_bookmark(
     run_web(&state, move |conn| {
         let sql = if overwrite {
             "INSERT OR REPLACE INTO bookmarks \
-               (name, album, recursive, min_rating, images, video, aspect, tags) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)"
+               (name, album, recursive, min_rating, images, video, aspect, tags, sort) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)"
         } else {
             "INSERT INTO bookmarks \
-               (name, album, recursive, min_rating, images, video, aspect, tags) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)"
+               (name, album, recursive, min_rating, images, video, aspect, tags, sort) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)"
         };
         let tags_json = serde_json::to_string(&b.filters.tags).unwrap_or_else(|_| "[]".into());
         conn.execute(
@@ -797,6 +808,7 @@ pub async fn create_bookmark(
                 b.filters.include_video as i64,
                 b.filters.aspect.as_str(),
                 tags_json,
+                b.filters.sort.as_str(),
             ],
         )
         .map_err(|e| match &e {

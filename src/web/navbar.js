@@ -103,6 +103,12 @@ function renderMenuFilters() {
   renderAspect(aspect);
   frag.appendChild(filterRow('Aspect ratio', aspect));
 
+  // Sort: a 3-state radio (modified / created / name).
+  var sort = document.createElement('span');
+  sort.className = 'seg sort';
+  renderSort(sort);
+  frag.appendChild(filterRow('Sort', sort));
+
   // Tags: a free-text, comma-separated input. A bare token matches a tag (and its
   // subtree) by name; a "/path" token matches by absolute path. Commit on Enter or
   // blur — navigating only when the list actually changed.
