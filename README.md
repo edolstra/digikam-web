@@ -2,6 +2,8 @@
 
 A vibe-coded web interface to [Digikam](https://www.digikam.org/), allowing remote access to your Digikam photo albums.
 
+<img src="docs/photo-grid.jpg" alt="Photo grid" width="49%"> <img src="docs/lightbox.jpg" alt="Lightbox" width="49%">
+
 ## Features
 
 * Browse albums and sub-albums, with a day-grouped photo grid
