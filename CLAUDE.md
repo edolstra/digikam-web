@@ -14,8 +14,6 @@ nix build                            # produce ./result/bin/digikam-web
 nix flake check                      # build + clippy (-D warnings)
 ```
 
-> **Always run `cargo fmt` and `cargo clippy` before committing** (e.g. `nix develop --command cargo fmt` and `nix develop --command cargo clippy --all-targets`). Keep both clean — `nix flake check` treats clippy warnings as errors (`-D warnings`).
-
 Config (CLI flags or env vars):
 - `--database` / `DIGIKAM_DB` — path to `digikam4.db` (default `~/.local/share/digikam/db/digikam4.db`).
 - `--listen` / `LISTEN_ADDR` — bind address (default `127.0.0.1:8080`). Plain HTTP/1.1 (`axum::serve`); terminate TLS in a reverse proxy (e.g. nginx) in front of it.
@@ -24,6 +22,11 @@ Config (CLI flags or env vars):
 - `--web-database` / `WEB_DB` — path to the **writable** bookmarks DB (`web.sql`, default: alongside `--database`; created if missing). This is the *only* DB we write to.
 
 > Nix flakes only see git-tracked files. After adding/renaming a file, `git add` it before `nix build`/`nix develop`, or Nix won't find it (and crane needs `Cargo.lock` tracked).
+
+## Coding standards
+
+- **Always run `cargo fmt` and `cargo clippy` before committing** (e.g. `nix develop --command cargo fmt` and `nix develop --command cargo clippy --all-targets`). Keep both clean — `nix flake check` treats clippy warnings as errors (`-D warnings`).
+- **Markdown**: don't hard-wrap paragraphs — keep each paragraph (and each list item, blockquote, or table cell) on a single line, letting the editor soft-wrap. Reserve line breaks for actual block boundaries (new paragraphs, list items, etc.).
 
 ## API
 
