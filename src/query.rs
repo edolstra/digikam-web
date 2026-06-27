@@ -458,10 +458,11 @@ pub fn random_photo_id(conn: &Connection, q: &PhotoQuery) -> AppResult<Option<i6
     Ok(rows.next()?.map(|row| row.get::<_, i64>(0)).transpose()?)
 }
 
-/// List the direct sub-albums of `album`, each with its recursive photo count
-/// and a cover (the newest **image** anywhere in that sub-album's subtree), sorted
-/// by most recent photo (newest first; ties broken by name). Sub-albums with no
-/// matching photos anywhere are omitted.
+/// List the direct sub-albums of `album`, each with its recursive photo count and
+/// a cover. Both the **cover** and the **sub-album order** follow `filters.sort`,
+/// mirroring the photo grid: by recency (newest first) under `Modified`/`Created`,
+/// and alphabetically (cover = the first item by name; tiles A→Z) under `Name`.
+/// Sub-albums with no matching items anywhere are omitted.
 ///
 /// An **empty** `album` lists the album roots themselves (as if they were
 /// sub-albums of a virtual top level), bucketed by root label rather than by
@@ -470,14 +471,13 @@ pub fn random_photo_id(conn: &Connection, q: &PhotoQuery) -> AppResult<Option<i6
 /// `filters` applies the same filtering as the photo grid to the whole subtree,
 /// so the count, the cover, and which sub-albums appear all respect it.
 ///
-/// Videos (`category = 2`) are never used as a cover: a sub-album whose subtree
-/// contains only (matching) videos is still listed but with no cover (`cover` is
-/// `None`). The photo count includes videos.
+/// The cover may be an **image or a video** (videos have stored thumbnails the
+/// client renders; `Cover.is_video` flags that). The photo count includes videos.
 ///
-/// One query: every matching photo is tagged with a `bucket` (the child path
-/// segment, or the root label at the top level); the count is taken over all
-/// photos in the bucket, while the cover is the newest non-video photo
-/// (left-joined, so it may be absent).
+/// One query: every matching item is tagged with a `bucket` (the child path
+/// segment, or the root label at the top level); the count is taken over all items
+/// in the bucket, while the cover is the bucket's first item under the sort (picked
+/// by a `ROW_NUMBER()` window, left-joined so it can't be absent here).
 pub fn list_subalbums(
     conn: &Connection,
     roots: &HashMap<i64, AlbumRoot>,
@@ -572,11 +572,18 @@ pub fn list_subalbums(
         Sort::Name => "c.bucket COLLATE NOCASE",
         _ => "c.recent DESC, c.bucket COLLATE NOCASE",
     };
+    // The cover is the FIRST matching item per the active sort (so it matches what
+    // the grid shows first): alphabetically-first by name under `Name`, else newest
+    // by `cdate` (the date column the sort uses, set above).
+    let cover_order = match filters.sort {
+        Sort::Name => "image_name COLLATE NOCASE ASC, image_id ASC",
+        _ => "cdate DESC, image_id DESC",
+    };
 
-    // Shared: group the matched rows into one tile per bucket (count + newest
-    // cover). The cover is the newest item — image OR video (videos have stored
-    // thumbnails the client renders), so its `category` rides along to flag a
-    // video cover.
+    // Shared: group the matched rows into one tile per bucket (count + cover). The
+    // cover is the bucket's first item under `{cover_order}` — image OR video
+    // (videos have stored thumbnails the client renders), so its `category` rides
+    // along to flag a video cover.
     let sql = format!(
         "WITH matched AS ( {matched} ), \
          counts AS ( \
@@ -584,7 +591,7 @@ pub fn list_subalbums(
          ), \
          covers AS ( \
            SELECT bucket, image_id, image_name, category, \
-                  ROW_NUMBER() OVER (PARTITION BY bucket ORDER BY cdate DESC, image_id DESC) AS rn \
+                  ROW_NUMBER() OVER (PARTITION BY bucket ORDER BY {cover_order}) AS rn \
            FROM matched \
          ) \
          SELECT c.bucket, cv.image_id, cv.image_name, cv.category, c.cnt \

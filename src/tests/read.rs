@@ -126,6 +126,42 @@ async fn subalbums_sort_name_is_alphabetical() {
 }
 
 #[tokio::test]
+async fn subalbums_cover_respects_sort() {
+    let fx = Fixture::new();
+
+    // Default (modified): the cover is the newest item in each subtree.
+    let (_s, subs) = fx.get_json("/api/subalbums?album=/Collection").await;
+    let cover = |name: &str| -> serde_json::Value {
+        subs.as_array()
+            .unwrap()
+            .iter()
+            .find(|s| s["name"] == name)
+            .unwrap()["cover"]
+            .clone()
+    };
+    assert_eq!(cover("Animals")["id"], 100); // img001.jpg, newest in /Animals
+    assert_eq!(cover("Beach")["id"], 106); // detail.jpg, newest in /Beach
+
+    // sort=name: the cover is the alphabetically-first item (matching the grid).
+    let (_s, subs) = fx
+        .get_json("/api/subalbums?album=/Collection&sort=name")
+        .await;
+    let cover = |name: &str| -> serde_json::Value {
+        subs.as_array()
+            .unwrap()
+            .iter()
+            .find(|s| s["name"] == name)
+            .unwrap()["cover"]
+            .clone()
+    };
+    // In /Animals, 'clip001.mp4' sorts before 'img001.jpg' — a video cover.
+    assert_eq!(cover("Animals")["id"], 102);
+    assert_eq!(cover("Animals")["is_video"], true);
+    // In /Beach, 'detail.jpg' sorts before 'img003.jpg'.
+    assert_eq!(cover("Beach")["id"], 106);
+}
+
+#[tokio::test]
 async fn photos_empty_album_non_recursive_is_empty() {
     let fx = Fixture::new();
     let (status, page) = fx.get_json("/api/photos?album=").await;
