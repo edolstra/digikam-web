@@ -129,7 +129,7 @@ impl Sort {
         match self {
             Sort::Modified => "i.modificationDate DESC, i.id DESC",
             Sort::Created => "ii.creationDate DESC, i.id DESC",
-            Sort::Name => "i.name COLLATE NOCASE ASC, i.id ASC",
+            Sort::Name => "i.name COLLATE NATSORT ASC, i.id ASC",
         }
     }
 
@@ -569,14 +569,14 @@ pub fn list_subalbums(
     // Sub-album order: `Name` sort lists them alphabetically; otherwise by most
     // recent matching photo (newest first), name breaking ties.
     let bucket_order = match filters.sort {
-        Sort::Name => "c.bucket COLLATE NOCASE",
+        Sort::Name => "c.bucket COLLATE NATSORT",
         _ => "c.recent DESC, c.bucket COLLATE NOCASE",
     };
     // The cover is the FIRST matching item per the active sort (so it matches what
     // the grid shows first): alphabetically-first by name under `Name`, else newest
     // by `cdate` (the date column the sort uses, set above).
     let cover_order = match filters.sort {
-        Sort::Name => "image_name COLLATE NOCASE ASC, image_id ASC",
+        Sort::Name => "image_name COLLATE NATSORT ASC, image_id ASC",
         _ => "cdate DESC, image_id DESC",
     };
 

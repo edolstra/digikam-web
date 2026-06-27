@@ -1,3 +1,4 @@
+use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -28,6 +29,65 @@ pub struct AppState {
     pub roots: Arc<HashMap<i64, AlbumRoot>>,
 }
 
+/// Natural ("version") comparison of two strings, used as the SQLite `NATURAL`
+/// collation for the `name` sort. Maximal runs of ASCII digits compare by numeric
+/// value (so `9_foo` sorts before `10_bar`); everything else compares
+/// case-insensitively (ASCII, like SQLite's built-in `NOCASE`). Separators such as
+/// `_`, `-`, and spaces fall into the non-digit runs and compare lexicographically.
+fn natural_cmp(a: &str, b: &str) -> Ordering {
+    let (mut a, mut b) = (a.as_bytes(), b.as_bytes());
+    loop {
+        match (a.first(), b.first()) {
+            (None, None) => return Ordering::Equal,
+            (None, Some(_)) => return Ordering::Less,
+            (Some(_), None) => return Ordering::Greater,
+            (Some(&ca), Some(&cb)) => {
+                if ca.is_ascii_digit() && cb.is_ascii_digit() {
+                    let (na, nb) = (digit_run(a), digit_run(b));
+                    match cmp_numeric(&a[..na], &b[..nb]) {
+                        Ordering::Equal => {
+                            a = &a[na..];
+                            b = &b[nb..];
+                        }
+                        other => return other,
+                    }
+                } else {
+                    match ca.to_ascii_lowercase().cmp(&cb.to_ascii_lowercase()) {
+                        Ordering::Equal => {
+                            a = &a[1..];
+                            b = &b[1..];
+                        }
+                        other => return other,
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Length of the leading run of ASCII digits in `s`.
+fn digit_run(s: &[u8]) -> usize {
+    s.iter().take_while(|c| c.is_ascii_digit()).count()
+}
+
+/// Compare two ASCII-digit runs by numeric value, overflow-proof (no parsing):
+/// drop leading zeros, then the longer run is the larger number; equal lengths
+/// compare byte-wise. A final tie-break on the raw length keeps e.g. `9` before
+/// `09` deterministic (rather than relying on the row-id tiebreak).
+fn cmp_numeric(a: &[u8], b: &[u8]) -> Ordering {
+    let (sa, sb) = (strip_zeros(a), strip_zeros(b));
+    sa.len()
+        .cmp(&sb.len())
+        .then_with(|| sa.cmp(sb))
+        .then_with(|| a.len().cmp(&b.len()))
+}
+
+/// Drop leading `0` bytes, but keep at least one digit (all-zeros → `"0"`).
+fn strip_zeros(s: &[u8]) -> &[u8] {
+    let nz = s.iter().take_while(|&&c| c == b'0').count();
+    &s[nz.min(s.len() - 1)..]
+}
+
 /// Open a read-only connection pool to the Digikam database.
 ///
 /// Connections are opened with `SQLITE_OPEN_READ_ONLY` so we can never modify
@@ -42,6 +102,11 @@ pub fn build_pool(database: &Path, trace_sql: bool) -> Result<Pool> {
         .with_init(move |c| {
             c.busy_timeout(std::time::Duration::from_secs(5))?;
             c.pragma_update(None, "query_only", true)?;
+            // Natural ("version") ordering for the `name` sort (see `natural_cmp`).
+            // Named `NATSORT` (not `NATURAL`, which is a reserved SQL keyword and
+            // can't appear bare after `COLLATE`). Registering a collation doesn't
+            // write to the DB, so it's fine on a read-only / `query_only` connection.
+            c.create_collation("NATSORT", natural_cmp)?;
             if trace_sql {
                 // The callback receives each statement with its bound values
                 // already expanded, logged under the `digikam_web::sql` target.
@@ -185,6 +250,32 @@ pub fn album_display_path(root: &AlbumRoot, relative_path: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn natural_ordering() {
+        use std::cmp::Ordering::*;
+        // The motivating case: numeric runs compare by value, not lexically.
+        assert_eq!(natural_cmp("9_foo", "10_bar"), Less);
+        assert_eq!(natural_cmp("10_bar", "9_foo"), Greater);
+        assert_eq!(natural_cmp("img2.jpg", "img10.jpg"), Less);
+        // Case-insensitive, like NOCASE.
+        assert_eq!(natural_cmp("Foo", "foo"), Equal);
+        assert_eq!(natural_cmp("ABC", "abd"), Less);
+        // Leading zeros don't change the value; same value tie-breaks deterministically.
+        assert_eq!(natural_cmp("09_a", "9_a"), Greater); // "9" before "09"
+        assert_eq!(natural_cmp("file007", "file7"), Greater);
+        // Big numbers beyond u64 still compare correctly (no parsing/overflow).
+        assert_eq!(
+            natural_cmp("v99999999999999999999", "v100000000000000000000"),
+            Less
+        );
+        // Separators are ordinary non-digit characters.
+        assert_eq!(natural_cmp("a-2", "a-10"), Less);
+        // Sorting a slice gives the expected natural order.
+        let mut v = ["10_b", "9_a", "1_c", "100_d"];
+        v.sort_by(|x, y| natural_cmp(x, y));
+        assert_eq!(v, ["1_c", "9_a", "10_b", "100_d"]);
+    }
 
     #[test]
     fn parses_volume_path() {
