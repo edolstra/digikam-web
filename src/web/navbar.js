@@ -256,7 +256,8 @@ function initMenu() {
         includeVideo: bm.include_video,
         recursive: bm.recursive,
         aspect: bm.aspect,
-        tags: bm.tags || []
+        tags: bm.tags || [],
+        sort: bm.sort
       });
       // Navigation is handled by initNav's delegated handler; the menu stays open
       // (a panel, like the filters) so you can keep browsing bookmarks.
@@ -299,6 +300,7 @@ function initMenu() {
       include_video: state.includeVideo,
       aspect: state.aspect,
       tags: state.tags,
+      sort: state.sort,
       overwrite: overwrite
     };
     fetch('/api/bookmarks', {
