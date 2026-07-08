@@ -597,6 +597,8 @@ function initLightbox() {
   var gesture = null;     // active touch sequence: {mode:'swipe'|'pan'|'pinch', …}
   var multiTouch = false; // a 2nd finger joined this sequence (suppresses swipe)
   var lastTapTime = 0;    // for double-tap detection
+  var lastTouch = 0;      // last touchend time, to ignore the ghost mouse events
+                          // (mousedown/dblclick) the browser synthesizes after a tap
 
   // Pinch-zoom applies only to images (videos keep their native controls).
   function zoomable() { return activeEl() === img; }
@@ -664,6 +666,7 @@ function initLightbox() {
   }, { passive: false });
 
   lb.addEventListener('touchend', function (e) {
+    lastTouch = e.timeStamp; // suppress the ghost mouse events that follow a tap
     // A finger lifted but others remain: if a pinch dropped to one finger and
     // we're still zoomed, continue as a pan from that finger.
     if (e.touches.length > 0) {
@@ -758,6 +761,7 @@ function initLightbox() {
   var panning = null;
   img.addEventListener('dragstart', function (e) { e.preventDefault(); }); // no ghost drag
   img.addEventListener('mousedown', function (e) {
+    if (e.timeStamp - lastTouch < 700) return; // ghost mouse event from a touch
     if (e.button !== 0 || scale <= 1 || !zoomable()) return;
     e.preventDefault();
     panning = { x0: e.clientX, y0: e.clientY, tx0: tx, ty0: ty, moved: false };
@@ -779,6 +783,9 @@ function initLightbox() {
   // Double-click an image toggles zoom: to 2× at the click point, or back to fit
   // (mirrors the touch double-tap).
   img.addEventListener('dblclick', function (e) {
+    // Ignore the dblclick a browser synthesizes from a touch double-tap — the
+    // touchend handler already toggled zoom; letting this fire would undo it.
+    if (e.timeStamp - lastTouch < 700) return;
     if (!zoomable() || !onMedia(e.clientX, e.clientY)) return;
     e.preventDefault();
     if (scale > 1) resetZoom(); else zoomTo(2, e.clientX, e.clientY);
