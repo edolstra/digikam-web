@@ -368,8 +368,8 @@ function initLightbox() {
 
   // UI dismiss (X / Esc / tapping outside): step back in history so the Back
   // button and these all funnel through popstate -> dismiss(), keeping the
-  // history stack consistent. The `closing` guard keeps repeated calls (e.g. Esc
-  // firing both keydown and fullscreenchange) from popping history twice.
+  // history stack consistent. The `closing` guard keeps repeated calls (e.g. a
+  // double Esc/click before popstate lands) from popping history twice.
   function close() {
     if (isOpen() && !closing) {
       closing = true;
@@ -419,9 +419,40 @@ function initLightbox() {
     }
   }
 
-  // Exiting fullscreen (Esc, or the browser's own control) closes the lightbox.
+  // The `f` key toggles browser-fullscreen. `requestFullscreen` needs a user
+  // gesture (a keydown qualifies); no-ops where unsupported (e.g. iPhone Safari).
+  // `fsToggling` marks our own exit so the handler below doesn't treat it as a
+  // dismiss.
+  var fsToggling = false;
+  function toggleFullscreen() {
+    if (document.fullscreenElement) {
+      if (document.exitFullscreen) {
+        fsToggling = true;
+        document.exitFullscreen().catch(function () { fsToggling = false; });
+      }
+    } else if (lb.requestFullscreen) {
+      lb.requestFullscreen().catch(function () {});
+    }
+  }
+
+  // Fullscreen is decoupled from the lightbox's open/closed state, but pressing Esc
+  // in fullscreen is our main dismiss gesture and the browser swallows its keydown
+  // (it consumes Esc to exit fullscreen), so we detect that dismiss *here*. When
+  // fullscreen is lost while the lightbox is open, we dismiss ONLY if it was a
+  // deliberate exit while viewing — the tab still has focus and is visible. A **tab
+  // switch** also drops fullscreen but sends the tab to the background (loses focus
+  // / becomes hidden), so it keeps the lightbox open; likewise our own `f` toggle.
+  // Deferred one tick because the focus/visibility change can land just after
+  // `fullscreenchange`. (Esc while merely windowed has no fullscreen to exit, so the
+  // keydown handler dismisses it; the `closing` guard de-dupes if both fire.)
   document.addEventListener('fullscreenchange', function () {
-    if (!document.fullscreenElement && isOpen()) close();
+    if (document.fullscreenElement || !isOpen()) return;
+    if (fsToggling) { fsToggling = false; return; }
+    setTimeout(function () {
+      if (isOpen() && !document.fullscreenElement && !document.hidden && document.hasFocus()) {
+        close();
+      }
+    }, 0);
   });
 
   // Navigation (arrows / chevrons / swipe) auto-plays a video it lands on
@@ -542,6 +573,7 @@ function initLightbox() {
     }
     else if (e.key === 'i' || e.key === 'I') { e.preventDefault(); toggleInfo(); }
     else if (e.key === 's' || e.key === 'S') { e.preventDefault(); toggleSlideshow(); }
+    else if (e.key === 'f' || e.key === 'F') { e.preventDefault(); toggleFullscreen(); }
     // +/- zoom the image toward the viewport center (like Ctrl+wheel toward the
     // pointer). `=` is `+` unshifted; `_` is `-` shifted.
     else if ((e.key === '+' || e.key === '=') && zoomable()) {
