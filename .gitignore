@@ -2,3 +2,5 @@ target/
 # Nix build symlinks
 result
 result-*
+# direnv (nix-direnv) cache
+.direnv/
