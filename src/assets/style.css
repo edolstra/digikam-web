@@ -241,6 +241,8 @@ body.modal-open { overflow: hidden; }
                                     /* undo the generic translucent .lightbox button look */
                                     opacity: 1; text-shadow: none; }
 #lb-picker .picker-actions .picker-apply { background: #f5c518; border-color: #f5c518; color: #111; }
+/* Apply is disabled until something actually changed (see updateApplyState). */
+#lb-picker .picker-actions button[disabled] { opacity: 0.35; cursor: default; }
 @media (hover: hover) {
   #lb-picker .picker-row:hover { background: rgba(255, 255, 255, 0.08); }
   #lb-picker .picker-actions button:hover { filter: brightness(1.15); }

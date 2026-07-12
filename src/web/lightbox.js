@@ -329,6 +329,7 @@ function initLightbox() {
   var pickerFilter = document.getElementById('lb-picker-filter');
   var pickerMru = pickerEl.querySelector('.picker-mru');
   var pickerList = pickerEl.querySelector('.picker-list');
+  var pickerApplyBtn = pickerEl.querySelector('.picker-apply');
   var pickerOpen = false;
   var pickerMode = null;   // 'tags' | 'move' while open
   var pickerPhoto = null;  // the PhotoSummary the open picker is editing
@@ -377,8 +378,10 @@ function initLightbox() {
     pickerMru.replaceChildren();
     pickerList.replaceChildren();
     // Move mode has no commit step (activating a row IS the action), so the
-    // primary footer button only exists for tags mode.
-    pickerEl.querySelector('.picker-apply').hidden = mode === 'move';
+    // primary footer button only exists for tags mode — and starts disabled
+    // there (nothing changed yet).
+    pickerApplyBtn.hidden = mode === 'move';
+    pickerApplyBtn.disabled = true;
     function fail() {
       if (pickerOpen) { closePicker(); toast('could not load ' + mode + ' data', true); }
     }
@@ -552,6 +555,22 @@ function initLightbox() {
     });
   }
 
+  // True when any tags-mode checkbox differs from the open-time tag set.
+  function tagsDirty() {
+    var dirty = false;
+    Array.prototype.forEach.call(pickerList.querySelectorAll('.picker-row input'), function (cb) {
+      if (cb.checked !== !!tagsOriginal[cb.dataset.path]) dirty = true;
+    });
+    return dirty;
+  }
+  // Apply (and Enter) is enabled only with pending changes: an Enter on an
+  // unchanged modal would otherwise close it silently — after navigating to a
+  // tag and hitting Enter without Space, that reads as "tag added" when
+  // nothing happened. The dimmed Apply button makes the no-op state visible.
+  function updateApplyState() {
+    if (pickerMode === 'tags') pickerApplyBtn.disabled = !tagsDirty();
+  }
+
   // All visible focus targets in DOM order (the MRU section first, then the
   // tree — ArrowDown from the filter walks them as one sequence): the
   // checkboxes in tags mode, the rows themselves in move mode.
@@ -573,7 +592,9 @@ function initLightbox() {
       if (cb.checked && !had) { add.push(+cb.dataset.id); addPaths.push(cb.dataset.path); }
       else if (!cb.checked && had) { rem.push(+cb.dataset.id); remPaths.push(cb.dataset.path); }
     });
-    if (!add.length && !rem.length) { closePicker(); return; }
+    // Nothing pending: do NOT close — a silent close after Enter would look
+    // like a successful add. Apply is disabled in this state; Esc leaves.
+    if (!add.length && !rem.length) return;
     var label = 'tags of ' + p.name + ': ' +
       addPaths.map(function (t) { return '+' + t; })
         .concat(remPaths.map(function (t) { return '−' + t; })).join(' ');
@@ -648,6 +669,7 @@ function initLightbox() {
           if (addPaths.indexOf(cb.dataset.path) !== -1) cb.checked = true;
           if (removePaths.indexOf(cb.dataset.path) !== -1) cb.checked = false;
         });
+        updateApplyState();
       }
     });
   }
@@ -739,6 +761,7 @@ function initLightbox() {
     Array.prototype.forEach.call(
       pickerEl.querySelectorAll('.picker-row input[data-id="' + cb.dataset.id + '"]'),
       function (other) { other.checked = cb.checked; });
+    updateApplyState();
   });
   // Clicks inside the picker stay in it (the lb handler treats any click with
   // the picker open as a discard, see below). In move mode a click on a row
