@@ -91,6 +91,7 @@
             pkgs.curl
             pkgs.jq
             pkgs.python3
+            pkgs.nodejs
           ];
           # `cargo build` in the dev shell embeds these the same way `nix build`
           # does (commonArgs.WEBPGF_PATH), so iterating here picks up the assets.

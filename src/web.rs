@@ -167,6 +167,8 @@ const STYLE: &str = include_str!("assets/style.css");
 const SCRIPT: &str = concat!(
     include_str!("web/state.js"),
     "\n",
+    include_str!("web/undo.js"),
+    "\n",
     include_str!("web/navbar.js"),
     "\n",
     include_str!("web/thumbnails.js"),

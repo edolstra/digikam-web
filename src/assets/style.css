@@ -194,14 +194,16 @@ body.modal-open { overflow: hidden; }
   #lb-info a:hover { text-decoration: underline; }
   #lb-info .rate-star:hover { color: #f5c518; }
 }
-/* Transient confirmation of a Ctrl+digit rating change (panel closed), centered
-   near the bottom; red-ish while `.failed` (e.g. the server has writes disabled). */
-.rate-flash { position: absolute; bottom: 3rem; left: 50%; transform: translateX(-50%);
-              padding: 0.3rem 0.8rem; border-radius: 6px;
-              background: rgba(0, 0, 0, 0.6); color: #f5c518; font-size: 1.4rem;
-              opacity: 0; pointer-events: none; transition: opacity 0.25s ease; }
-.rate-flash.show { opacity: 1; }
-.rate-flash.failed { color: #f66; font-size: 1rem; }
+/* Transient bottom-center notification (see web/undo.js `toast`): rating-change
+   confirmations, undo results, errors (`.failed`, red). Fixed and above the
+   lightbox (z-index 1000) so it shows over grid and lightbox alike. */
+#toast { position: fixed; bottom: 3rem; left: 50%; transform: translateX(-50%);
+         z-index: 1100; max-width: 90vw; padding: 0.3rem 0.8rem; border-radius: 6px;
+         background: rgba(0, 0, 0, 0.7); color: #f5c518; font-size: 1.05rem;
+         text-align: center; overflow-wrap: anywhere;
+         opacity: 0; pointer-events: none; transition: opacity 0.25s ease; }
+#toast.show { opacity: 1; }
+#toast.failed { color: #f66; }
 /* Auto-hide the controls after inactivity (web.js toggles `.idle`); they fade
    back on any pointer move / touch / key. */
 .lightbox .close, .lightbox .info, .lightbox .search-btn, .lightbox .slideshow-btn, .lightbox .nav { transition: opacity 0.25s ease; }

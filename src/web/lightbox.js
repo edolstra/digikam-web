@@ -258,42 +258,48 @@ function initLightbox() {
     render();
   }
 
-  // Set (k = 1..5) or clear (k = null) the current item's rating via the write
-  // API (`PATCH /api/photos/:id`; a 403 means the server runs without
-  // --allow-writes). On success the tile's PhotoSummary is mutated in place —
-  // it's the same object the grid tile carries as `_photo`, so both stay in
-  // sync with no refetch. Confirmation: the re-rendered panel stars when the
-  // panel is open, a transient star flash otherwise (Ctrl+digit); failures
-  // always flash.
-  var flashEl = null, flashTimer = 0;
-  function flashRating(text, failed) {
-    if (!flashEl) {
-      flashEl = document.createElement('div');
-      flashEl.className = 'rate-flash';
-      lb.appendChild(flashEl);
-    }
-    flashEl.textContent = text;
-    flashEl.classList.toggle('failed', failed);
-    flashEl.classList.add('show');
-    clearTimeout(flashTimer);
-    flashTimer = setTimeout(function () { flashEl.classList.remove('show'); }, 1200);
+  // Human-readable stars for toasts/labels ("★★★☆☆", or "unrated").
+  function fmtStars(k) {
+    return k != null ? '★'.repeat(k) + '☆'.repeat(5 - k) : 'unrated';
   }
-  function setRating(k) {
-    var p = items[idx] && items[idx].photo;
-    if (!p) return;
-    fetch('/api/photos/' + p.id, {
+  // PATCH a photo's rating (k = 0..5, or null to clear) and sync the local
+  // view; returns the fetch Promise (rejects on a non-2xx, e.g. the 403 of a
+  // server without --allow-writes). Shared by user-initiated changes and undo,
+  // so it looks the photo up by id rather than trusting a captured object: the
+  // current tiles' `_photo`s (the same objects as `items[].photo`) may have
+  // been rebuilt — or the photo may have left the view entirely, in which case
+  // the server change alone is the whole job.
+  function applyRating(id, k) {
+    return fetch('/api/photos/' + id, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ rating: k })
     }).then(function (r) {
       if (!r.ok) throw new Error('HTTP ' + r.status);
-      p.rating = k;
-      // Repaint only if this item is still on screen.
-      if (items[idx] && items[idx].photo !== p) return;
-      if (infoOpen) renderInfo();
-      else flashRating(k != null ? '★'.repeat(k) + '☆'.repeat(5 - k) : 'unrated', false);
-    }).catch(function () {
-      flashRating('rating not saved', true);
+      items.forEach(function (it) {
+        if (it.photo && it.photo.id === id) it.photo.rating = k;
+      });
+      if (infoOpen && items[idx] && items[idx].photo && items[idx].photo.id === id) renderInfo();
+    });
+  }
+  // Set (k = 1..5) or clear (k = null) the current item's rating, recording the
+  // change on the undo stack (`u` reverses it). Confirmation: the re-rendered
+  // panel stars when the panel is open, a toast otherwise (Ctrl+digit);
+  // failures always toast.
+  function setRating(k) {
+    var p = items[idx] && items[idx].photo;
+    if (!p) return;
+    var from = p.rating != null ? p.rating : null;
+    if (from === k) return;
+    var id = p.id, name = p.name;
+    applyRating(id, k).then(function () {
+      pushUndo({
+        label: 'rating of ' + name + ' (' + fmtStars(from) + ' → ' + fmtStars(k) + ')',
+        undo: function () { return applyRating(id, from); }
+      });
+      if (!infoOpen) toast(fmtStars(k));
+    }, function () {
+      toast('rating not saved', true);
     });
   }
   // A click/tap on panel star K: set rating K, or clear if K is the current one.
