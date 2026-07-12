@@ -11,8 +11,12 @@ nix run                              # build + run with defaults
 nix develop --command cargo run      # iterate inside the dev shell
 nix develop --command cargo test     # unit + API integration tests (seeded temp SQLite)
 nix build                            # produce ./result/bin/digikam-web
-nix flake check                      # build + clippy (-D warnings)
+nix flake check                      # build + clippy (-D warnings) + Playwright e2e
 ```
+
+### Frontend e2e tests (Playwright)
+
+`tests/e2e/` holds a Playwright suite that drives the real server with headless Chromium: the config's `webServer` seeds a synthetic fixture via the hidden `--seed-fixture <dir>` flag (the same data as the API tests — both come from [src/fixture.rs](src/fixture.rs), so they can't drift; every visible image gets a real tiny JPEG so tiles/lightbox render actual pixels) and serves it with `--allow-writes`. It runs sandboxed as the flake's `e2e` check (`nix flake check`); to iterate locally: `nix develop --command sh -c 'cargo build && DIGIKAM_WEB_BIN=target/debug/digikam-web playwright test -c tests/e2e'` (the dev shell provides `playwright-test`, the matching nixpkgs browser bundle via `PLAYWRIGHT_BROWSERS_PATH`, and `NODE_PATH` for `require('@playwright/test')`; `E2E_PORT` overrides the default port 4621). Note the config uses `channel: 'chromium'` (the nixpkgs bundle omits Playwright's separate "headless shell") and `--no-sandbox` (no Chromium sandbox inside the Nix build sandbox). Headless Chromium does grant `requestFullscreen()` from a test click, so the lightbox's fullscreen behavior is genuinely asserted.
 
 Config (CLI flags or env vars):
 - `--database` / `DIGIKAM_DB` — path to `digikam4.db` (default `~/.local/share/digikam/db/digikam4.db`).
@@ -157,6 +161,7 @@ To make the *first* paint snappy, the decoder assets are fetched **once** (not o
   - `main.rs` — `build_router(state)` + startup, graceful shutdown
   - `tests/` — in-crate API integration tests (`#[cfg(test)] mod tests` in main.rs)
     - `mod.rs` — `Fixture` — seeds a synthetic temp SQLite DB (main pool writable, as with `--allow-writes`), exercises the real router via tower `oneshot`; read.rs / bookmarks.rs / files.rs / rating.rs
+  - `fixture.rs` — the synthetic fixture seeding shared by the API tests and `--seed-fixture` (e2e), incl. the embedded tiny JPEG
   - `config.rs` — clap config (database path, listen addr)
   - `db.rs` — read-only pools + writable web.sql pool, album-root loading, path resolution (+ unit tests)
   - `models.rs` — serde types (PhotoSummary, PhotoDetail, AlbumNode, SubAlbum, TagNode, Page<T>, Filters, Bookmark, PatchPhoto)
@@ -179,5 +184,6 @@ To make the *first* paint snappy, the decoder assets are fetched **once** (not o
     - `favicon.ico` — Digikam's site icon (include_bytes!), served at /favicon.ico
     - `icon-192.png`, `icon-512.png` — PWA icons (include_bytes!), served at /icon-*.png
   - `error.rs` — AppError -> JSON HTTP responses
+- `tests/e2e/` — Playwright e2e suite (not a Cargo target; excluded from the crane `src` filter): `playwright.config.js` (seeds + starts the server via its `webServer`) and `basic.spec.js`
 
 `assets/style.css`/`manifest.webmanifest`/`sw.js` are pulled in with `include_str!`, the binary assets (`src/assets/{favicon.ico,icon-*.png}`) with `include_bytes!`, and `SCRIPT` is `concat!(include_str!("web/state.js"), "\n", …)` over the `src/web/*.js` fragments — one served script, split only at the source level (`state` first, `main`/bootstrap last; the `"\n"` separators keep a trailing `//`-comment from eating the next fragment). The flake's `src` filter keeps `.css`/`.js`/`.ico`/`.png`/`.webmanifest` alongside the Cargo sources (plain `cleanCargoSource` would drop them and the build would fail), so `src/web/*.js` are included automatically — but each new fragment must be `git add`ed (Nix sees only tracked files).

@@ -4,3 +4,8 @@ result
 result-*
 # direnv (nix-direnv) cache
 .direnv/
+
+# Playwright e2e artifacts
+tests/e2e/node_modules
+tests/e2e/test-results
+test-results/
