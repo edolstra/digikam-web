@@ -232,6 +232,7 @@ body.modal-open { overflow: hidden; }
 #lb-picker .picker-row[hidden] { display: none; } /* display:block above would win otherwise */
 #lb-picker .picker-row:focus-within { outline: 2px solid #f5c518; outline-offset: -2px; }
 #lb-picker .picker-row.ctx { color: #888; }  /* non-matching ancestor kept for context */
+#lb-picker .picker-row.current { color: #f5c518; } /* move mode: the photo's current album */
 #lb-picker .picker-row input { margin-right: 0.45rem; accent-color: #f5c518; }
 #lb-picker .picker-actions { display: flex; justify-content: flex-end; gap: 0.5rem; margin-top: 0.5rem; }
 #lb-picker .picker-actions button { font: inherit; cursor: pointer; padding: 0.2rem 0.9rem;

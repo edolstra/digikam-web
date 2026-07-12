@@ -224,7 +224,8 @@ fn page_html(title: &str, body: Markup) -> Markup {
                     // Metadata overlay, filled + toggled by web.js (hidden by default).
                     div id="lb-info" {}
                     // Picker modal (`t` = tags, `m` = move to album): quick filter
-                    // + MRU + scrollable tree + Cancel/Apply-or-Move, filled +
+                    // + MRU + scrollable tree + footer (Cancel always; Apply in
+                    // tags mode only — move-mode rows activate directly), filled +
                     // toggled by web.js per mode. Must live inside #lightbox — a
                     // fullscreen element is the only thing the browser paints.
                     div id="lb-picker" {

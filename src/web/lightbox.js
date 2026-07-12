@@ -317,10 +317,14 @@ function initLightbox() {
   //   rows (checked = the image has that tag). Clicks / Space toggle LOCALLY;
   //   Enter/Apply commits all pending changes in one PATCH (one undo op for
   //   the batch); Esc/Cancel/outside-click/navigating discards them.
-  // - 'move': the album hierarchy as radio rows (single-select, the photo's
-  //   current album pre-selected). Enter/Move PATCHes the photo into the
-  //   chosen album — the server moves the file on disk too — and pushes the
-  //   reverse move onto the undo stack.
+  // - 'move': the album hierarchy as directly-activatable rows (menu-like, no
+  //   selection state): clicking a row, or arrow-navigating to it and hitting
+  //   Enter, PATCHes the photo into that album — the server moves the file on
+  //   disk too — and pushes the reverse move onto the undo stack. The photo's
+  //   current album is highlighted (activating it just closes). Enter in the
+  //   filter moves to the first match (only with a non-empty query, so a stray
+  //   Enter can't move anything). No primary footer button — a click/tap on a
+  //   row IS the action.
   var pickerEl = document.getElementById('lb-picker');
   var pickerFilter = document.getElementById('lb-picker-filter');
   var pickerMru = pickerEl.querySelector('.picker-mru');
@@ -372,7 +376,9 @@ function initLightbox() {
     pickerFilter.value = '';
     pickerMru.replaceChildren();
     pickerList.replaceChildren();
-    pickerEl.querySelector('.picker-apply').textContent = mode === 'move' ? 'Move' : 'Apply';
+    // Move mode has no commit step (activating a row IS the action), so the
+    // primary footer button only exists for tags mode.
+    pickerEl.querySelector('.picker-apply').hidden = mode === 'move';
     function fail() {
       if (pickerOpen) { closePicker(); toast('could not load ' + mode + ' data', true); }
     }
@@ -409,29 +415,38 @@ function initLightbox() {
     if (pickerOpen) closePicker();
     openPicker(mode);
   }
-  // Enter / the primary button, dispatched by mode.
+  // Enter / the primary button when no specific row is the target: commits the
+  // tag batch; in move mode there's nothing to commit (activating a row is the
+  // action), so it's a no-op.
   function pickerApply() {
-    if (pickerMode === 'move') applyMovePick();
-    else applyTags();
+    if (pickerMode === 'tags') applyTags();
   }
 
-  // One row. `kind` is 'checkbox' (tags) or 'radio' (move — one shared group
-  // name, so the browser enforces single-select across MRU + tree). The same
-  // entry can appear twice (MRU + tree): checkboxes are mirrored by a change
-  // listener; for radios the checked one's data-id IS the selection, whichever
-  // twin it is.
+  // One row. `kind` is 'checkbox' (tags mode: a label wrapping a checkbox) or
+  // 'item' (move mode: a bare focusable row — activating it is the action, so
+  // there's no input at all). The entry's id/path live on the row (the filter
+  // and move activation read them there); tags mode duplicates them onto the
+  // checkbox for the apply diff and the twin-mirroring change listener.
   function pickerRow(kind, id, path, text, depth) {
-    var row = document.createElement('label');
+    var row;
+    if (kind === 'checkbox') {
+      row = document.createElement('label');
+      var cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.checked = !!tagsOriginal[path];
+      cb.dataset.id = id;
+      cb.dataset.path = path;
+      row.appendChild(cb);
+      row.appendChild(document.createTextNode(text));
+    } else {
+      row = document.createElement('div');
+      row.tabIndex = -1; // focusable by arrows/script, not in the Tab order
+      row.textContent = text;
+    }
     row.className = 'picker-row';
     row.style.setProperty('--depth', depth);
-    var cb = document.createElement('input');
-    cb.type = kind;
-    if (kind === 'radio') cb.name = 'picker-album';
-    else cb.checked = !!tagsOriginal[path];
-    cb.dataset.id = id;
-    cb.dataset.path = path;
-    row.appendChild(cb);
-    row.appendChild(document.createTextNode(text));
+    row.dataset.id = id;
+    row.dataset.path = path;
     return row;
   }
 
@@ -462,9 +477,9 @@ function initLightbox() {
 
   // Move mode: build the album tree from the flat /api/albums list — index by
   // path, attach children to parents (every ancestor of an album is itself an
-  // album), sort siblings by name, DFS into indented radio rows. The photo's
-  // current album is pre-selected (its display path comes from the same
-  // album_display_path as /api/albums, so they match textually).
+  // album), sort siblings by name, DFS into indented item rows. The photo's
+  // current album is highlighted `.current` (its display path comes from the
+  // same album_display_path as /api/albums, so they match textually).
   function buildAlbumRows(albums) {
     var byPath = {};
     albums.forEach(function (a) { byPath[a.path] = { a: a, children: [] }; });
@@ -484,9 +499,9 @@ function initLightbox() {
     function walk(nodes, depth) {
       nodes.sort(byName);
       nodes.forEach(function (n) {
-        var row = pickerRow('radio', n.a.id, n.a.path, baseName(n.a.path), depth);
+        var row = pickerRow('item', n.a.id, n.a.path, baseName(n.a.path), depth);
         if (n.a.path === pickerPhoto.album_path) {
-          row.firstChild.checked = true;
+          row.classList.add('current');
           moveCurrentId = n.a.id;
         }
         frag.appendChild(row);
@@ -500,7 +515,7 @@ function initLightbox() {
     var mru = document.createDocumentFragment();
     albumMru.list().forEach(function (t) {
       if (byPath[t.path] && byPath[t.path].a.id === t.id) {
-        mru.appendChild(pickerRow('radio', t.id, t.path, t.path, 0));
+        mru.appendChild(pickerRow('item', t.id, t.path, t.path, 0));
       }
     });
     pickerMru.replaceChildren(mru);
@@ -516,7 +531,7 @@ function initLightbox() {
     // The section (and its divider) disappears when nothing in it is visible.
     var anyMru = false;
     Array.prototype.forEach.call(pickerMru.children, function (row) {
-      var match = !q || row.firstChild.dataset.path.toLowerCase().indexOf(q) !== -1;
+      var match = !q || row.dataset.path.toLowerCase().indexOf(q) !== -1;
       row.hidden = !match;
       anyMru = anyMru || match;
     });
@@ -526,7 +541,7 @@ function initLightbox() {
       var d = +row.style.getPropertyValue('--depth');
       anc[d] = row;
       anc.length = d + 1;
-      var match = !q || row.firstChild.dataset.path.toLowerCase().indexOf(q) !== -1;
+      var match = !q || row.dataset.path.toLowerCase().indexOf(q) !== -1;
       row.hidden = !match;
       row.classList.remove('ctx');
       if (match && q) {
@@ -537,12 +552,14 @@ function initLightbox() {
     });
   }
 
-  // All visible inputs in DOM order: the MRU section first, then the tree —
-  // ArrowDown from the filter walks them as one sequence.
+  // All visible focus targets in DOM order (the MRU section first, then the
+  // tree — ArrowDown from the filter walks them as one sequence): the
+  // checkboxes in tags mode, the rows themselves in move mode.
   function visiblePickerBoxes() {
+    var suffix = pickerMode === 'move' ? '' : ' input';
     return Array.prototype.slice.call(pickerEl.querySelectorAll(
-      '.picker-mru:not([hidden]) .picker-row:not([hidden]) input, ' +
-      '.picker-list .picker-row:not([hidden]) input'));
+      '.picker-mru:not([hidden]) .picker-row:not([hidden])' + suffix + ', ' +
+      '.picker-list .picker-row:not([hidden])' + suffix));
   }
 
   // Tags mode commit: diff the checkboxes against the set at open time, send
@@ -574,14 +591,14 @@ function initLightbox() {
     });
   }
 
-  // Move mode commit: PATCH the checked album (if it differs), record the
-  // target in the MRU, and push the reverse move onto the undo stack.
-  function applyMovePick() {
+  // Activate a move-mode row (click, or Enter while focused): PATCH the photo
+  // into that album, record the target in the MRU, and push the reverse move
+  // onto the undo stack. Activating the current album just closes.
+  function moveToRow(row) {
     var p = pickerPhoto;
     if (!p) { closePicker(); return; }
-    var sel = pickerEl.querySelector('.picker-row input:checked');
-    if (!sel || +sel.dataset.id === moveCurrentId) { closePicker(); return; }
-    var toId = +sel.dataset.id, toPath = sel.dataset.path;
+    var toId = +row.dataset.id, toPath = row.dataset.path;
+    if (toId === moveCurrentId) { closePicker(); return; }
     var fromId = moveCurrentId, fromPath = p.album_path;
     applyMove(p.id, toId, toPath).then(function () {
       albumMru.used([toId], [toPath]);
@@ -662,7 +679,22 @@ function initLightbox() {
   pickerFilter.addEventListener('keydown', function (e) {
     e.stopPropagation();
     if (e.key === 'Escape') { e.preventDefault(); closePicker(); }
-    else if (e.key === 'Enter') { e.preventDefault(); pickerApply(); }
+    else if (e.key === 'Enter') {
+      e.preventDefault();
+      if (pickerMode === 'move') {
+        // Type-and-Enter: move to the first real match (never a dim .ctx
+        // ancestor), and only with a non-empty query — a stray Enter on the
+        // empty filter must not move anything.
+        if (pickerFilter.value.trim()) {
+          var hit = pickerEl.querySelector(
+            '.picker-mru:not([hidden]) .picker-row:not([hidden]), ' +
+            '.picker-list .picker-row:not([hidden]):not(.ctx)');
+          if (hit) moveToRow(hit);
+        }
+      } else {
+        pickerApply();
+      }
+    }
     else if (e.key === 'ArrowDown') {
       e.preventDefault();
       var first = visiblePickerBoxes()[0];
@@ -678,7 +710,12 @@ function initLightbox() {
     e.stopPropagation();
     if (e.key === 'Escape') { e.preventDefault(); closePicker(); return; }
     if (e.target.closest('button')) return; // Enter on Cancel/Apply = native click
-    if (e.key === 'Enter') { e.preventDefault(); pickerApply(); return; }
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      var row = pickerMode === 'move' && e.target.closest('.picker-row');
+      if (row) moveToRow(row); else pickerApply();
+      return;
+    }
     if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
       e.preventDefault();
       var boxes = visiblePickerBoxes();
@@ -691,11 +728,11 @@ function initLightbox() {
         boxes[n].closest('.picker-row').scrollIntoView({ block: 'nearest' });
       }
     }
-    // Space is the native checkbox/radio toggle — a local change, left alone.
+    // Space is the native checkbox toggle (tags mode) — a local pending
+    // change, left alone. Move-mode rows don't react to Space.
   });
   // The same tag can be shown twice (MRU + tree): mirror a toggle onto every
-  // checkbox with the same tag id. Radios need no mirroring — they share one
-  // group, and whichever twin is checked carries the selected data-id.
+  // checkbox with the same tag id. (Move-mode rows have no inputs at all.)
   pickerEl.addEventListener('change', function (e) {
     var cb = e.target;
     if (cb.type !== 'checkbox' || !cb.dataset.id) return;
@@ -704,8 +741,14 @@ function initLightbox() {
       function (other) { other.checked = cb.checked; });
   });
   // Clicks inside the picker stay in it (the lb handler treats any click with
-  // the picker open as a discard, see below).
-  pickerEl.addEventListener('click', function (e) { e.stopPropagation(); });
+  // the picker open as a discard, see below). In move mode a click on a row
+  // activates it directly — the click IS the move, no selection step.
+  pickerEl.addEventListener('click', function (e) {
+    e.stopPropagation();
+    if (pickerMode !== 'move') return;
+    var row = e.target.closest('.picker-row');
+    if (row) moveToRow(row);
+  });
   pickerEl.querySelector('.picker-apply').addEventListener('click', pickerApply);
   pickerEl.querySelector('.picker-cancel').addEventListener('click', closePicker);
 
@@ -1165,7 +1208,7 @@ function initLightbox() {
 
   lb.addEventListener('touchend', function (e) {
     // Touches ending on the picker are left entirely to native behavior: taps
-    // click checkboxes/radios/buttons, drags scroll the list (touch-action: pan-y).
+    // click checkboxes/rows/buttons, drags scroll the list (touch-action: pan-y).
     if (e.target.closest('#lb-picker')) return;
     lastTouch = e.timeStamp; // suppress the ghost mouse events that follow a tap
     // A finger lifted but others remain: if a pinch dropped to one finger and
