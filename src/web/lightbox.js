@@ -310,6 +310,204 @@ function initLightbox() {
     setRating(p.rating === k ? null : k);
   }
 
+  // ----- Tag modal (`t`) -----
+  // A transactional editor for the current item's tags: the full tag hierarchy
+  // as checkbox rows (checked = the image has that tag) behind a quick filter.
+  // Clicks / Space toggle checkboxes LOCALLY; Enter or the Apply button commits
+  // all pending changes in one PATCH (and pushes one undo op for the batch);
+  // Esc, Cancel, a click outside, navigating, or dismissing discards them.
+  var tagsEl = document.getElementById('lb-tags');
+  var tagsFilter = document.getElementById('lb-tags-filter');
+  var tagsList = tagsEl.querySelector('.tag-list');
+  var tagsOpen = false;
+  var tagsPhoto = null;    // the PhotoSummary the open modal is editing
+  var tagsOriginal = {};   // path -> true: the tag set when the modal opened
+
+  function openTags() {
+    var p = items[idx] && items[idx].photo;
+    if (!p) return;
+    tagsPhoto = p;
+    tagsOpen = true;
+    lb.classList.add('tags-open');
+    tagsFilter.value = '';
+    tagsList.replaceChildren();
+    // The hierarchy (fresh each open — it's small) + this photo's current tags.
+    Promise.all([
+      fetch('/api/tags').then(function (r) { return r.json(); }),
+      loadMeta(p.id)
+    ]).then(function (res) {
+      if (!tagsOpen || tagsPhoto !== p) return; // closed / switched meanwhile
+      buildTagRows(res[0], res[1].tags || []);
+      applyTagFilter();
+    }).catch(function () {
+      if (tagsOpen) { closeTags(); toast('could not load tags', true); }
+    });
+    tagsFilter.focus();
+    wake();
+  }
+  function closeTags() {
+    tagsOpen = false;
+    tagsPhoto = null;
+    lb.classList.remove('tags-open');
+    tagsList.replaceChildren();
+  }
+  function toggleTags() { if (tagsOpen) closeTags(); else openTags(); }
+
+  // Flatten the tag tree (already name-sorted per level by the server) into
+  // indented checkbox rows, checked for the photo's current tags.
+  function buildTagRows(tree, currentPaths) {
+    tagsOriginal = {};
+    currentPaths.forEach(function (t) { tagsOriginal[t] = true; });
+    var frag = document.createDocumentFragment();
+    function walk(nodes, prefix, depth) {
+      nodes.forEach(function (n) {
+        var path = prefix + '/' + n.name;
+        var row = document.createElement('label');
+        row.className = 'tag-row';
+        row.style.setProperty('--depth', depth);
+        var cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.checked = !!tagsOriginal[path];
+        cb.dataset.id = n.id;
+        cb.dataset.path = path;
+        row.appendChild(cb);
+        row.appendChild(document.createTextNode(n.name));
+        frag.appendChild(row);
+        if (n.children && n.children.length) walk(n.children, path, depth + 1);
+      });
+    }
+    walk(tree, '', 0);
+    tagsList.replaceChildren(frag);
+  }
+
+  // Quick filter: case-insensitive substring match against the tag's full
+  // absolute path — "foo" matches /foo, /foobar, /barfoo, /foo/bar, and (since
+  // a descendant's path contains its ancestors') everything under a match.
+  // Non-matching ancestors of a match stay visible for context, dimmed (.ctx).
+  function applyTagFilter() {
+    var q = tagsFilter.value.trim().toLowerCase();
+    var anc = []; // current ancestor chain, indexed by depth (rows are in DFS order)
+    Array.prototype.forEach.call(tagsList.children, function (row) {
+      var d = +row.style.getPropertyValue('--depth');
+      anc[d] = row;
+      anc.length = d + 1;
+      var match = !q || row.firstChild.dataset.path.toLowerCase().indexOf(q) !== -1;
+      row.hidden = !match;
+      row.classList.remove('ctx');
+      if (match && q) {
+        for (var i = 0; i < d; i++) {
+          if (anc[i].hidden) { anc[i].hidden = false; anc[i].classList.add('ctx'); }
+        }
+      }
+    });
+  }
+
+  function visibleTagBoxes() {
+    return Array.prototype.slice.call(
+      tagsList.querySelectorAll('.tag-row:not([hidden]) input'));
+  }
+
+  // Commit the pending checkbox changes: diff against the set at open time,
+  // send one PATCH, push one undo op for the whole batch.
+  function applyTags() {
+    var p = tagsPhoto;
+    if (!p) { closeTags(); return; }
+    var add = [], addPaths = [], rem = [], remPaths = [];
+    Array.prototype.forEach.call(tagsList.querySelectorAll('.tag-row input'), function (cb) {
+      var had = !!tagsOriginal[cb.dataset.path];
+      if (cb.checked && !had) { add.push(+cb.dataset.id); addPaths.push(cb.dataset.path); }
+      else if (!cb.checked && had) { rem.push(+cb.dataset.id); remPaths.push(cb.dataset.path); }
+    });
+    if (!add.length && !rem.length) { closeTags(); return; }
+    var label = 'tags of ' + p.name + ': ' +
+      addPaths.map(function (t) { return '+' + t; })
+        .concat(remPaths.map(function (t) { return '−' + t; })).join(' ');
+    applyTagChange(p.id, add, addPaths, rem, remPaths).then(function () {
+      closeTags();
+      toast(label);
+      pushUndo({
+        label: label,
+        undo: function () { return applyTagChange(p.id, rem, remPaths, add, addPaths); }
+      });
+    }, function () {
+      // Keep the modal (and its pending state) so Enter retries or Esc bails.
+      toast('tags not saved', true);
+    });
+  }
+
+  // PATCH a tag delta and sync the local view: the cached PhotoDetail (tags are
+  // shown in the info panel), the open panel, and — if the modal is showing this
+  // photo (an undo can land there) — its checkboxes + baseline. Shared by
+  // apply and undo, so it works purely from ids/paths (no captured DOM).
+  function applyTagChange(photoId, addIds, addPaths, removeIds, removePaths) {
+    return fetch('/api/photos/' + photoId, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tags_add: addIds, tags_remove: removeIds })
+    }).then(function (r) {
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      var meta = metaCache[photoId];
+      if (meta && meta.tags) {
+        var t = meta.tags.filter(function (x) { return removePaths.indexOf(x) === -1; });
+        addPaths.forEach(function (x) { if (t.indexOf(x) === -1) t.push(x); });
+        t.sort(function (a, b) {
+          a = a.toLowerCase(); b = b.toLowerCase();
+          return a < b ? -1 : a > b ? 1 : 0;
+        });
+        meta.tags = t;
+      }
+      if (infoOpen && items[idx] && items[idx].photo && items[idx].photo.id === photoId) renderInfo();
+      if (tagsOpen && tagsPhoto && tagsPhoto.id === photoId) {
+        removePaths.forEach(function (x) { delete tagsOriginal[x]; });
+        addPaths.forEach(function (x) { tagsOriginal[x] = true; });
+        Array.prototype.forEach.call(tagsList.querySelectorAll('.tag-row input'), function (cb) {
+          if (addPaths.indexOf(cb.dataset.path) !== -1) cb.checked = true;
+          if (removePaths.indexOf(cb.dataset.path) !== -1) cb.checked = false;
+        });
+      }
+    });
+  }
+
+  tagsFilter.addEventListener('input', applyTagFilter);
+  // Modal keys are handled here (and stopPropagation'd so the lightbox's own
+  // document-level bindings — r, i, s, arrows, … — don't also fire).
+  tagsFilter.addEventListener('keydown', function (e) {
+    e.stopPropagation();
+    if (e.key === 'Escape') { e.preventDefault(); closeTags(); }
+    else if (e.key === 'Enter') { e.preventDefault(); applyTags(); }
+    else if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      var first = visibleTagBoxes()[0];
+      if (first) {
+        first.focus();
+        first.closest('.tag-row').scrollIntoView({ block: 'nearest' });
+      }
+    }
+  });
+  tagsList.addEventListener('keydown', function (e) {
+    e.stopPropagation();
+    if (e.key === 'Escape') { e.preventDefault(); closeTags(); return; }
+    if (e.key === 'Enter') { e.preventDefault(); applyTags(); return; }
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      var boxes = visibleTagBoxes();
+      var i = boxes.indexOf(document.activeElement);
+      if (i === -1) return;
+      var n = i + (e.key === 'ArrowDown' ? 1 : -1);
+      if (n < 0) { tagsFilter.focus(); return; }
+      if (n < boxes.length) {
+        boxes[n].focus();
+        boxes[n].closest('.tag-row').scrollIntoView({ block: 'nearest' });
+      }
+    }
+    // Space is the native checkbox toggle — a local pending change, left alone.
+  });
+  // Clicks inside the modal stay in it (the lb handler treats any click with
+  // the modal open as a discard, see below).
+  tagsEl.addEventListener('click', function (e) { e.stopPropagation(); });
+  tagsEl.querySelector('.tag-apply').addEventListener('click', applyTags);
+  tagsEl.querySelector('.tag-cancel').addEventListener('click', closeTags);
+
   // Panel clicks must not bubble to the letterbox-close handler; the album link
   // navigates in-page instead of doing a full document load. (`suppressClick`
   // swallows the synthetic click from a touch tap, which the touch handler below
@@ -383,6 +581,7 @@ function initLightbox() {
     if (i < 0 || i >= items.length) return;
     idx = i;
     var it = items[i];
+    if (tagsOpen) closeTags(); // pending tag edits don't survive navigation
     resetZoom(); // start each item un-zoomed
     lb.classList.toggle('is-video', it.video); // hides the reverse-search button
     vid.pause(); // stop any previously-playing video before switching
@@ -450,6 +649,7 @@ function initLightbox() {
   function dismiss() {
     closing = false;
     clearTimeout(idleTimer);
+    if (tagsOpen) closeTags(); // discard pending tag edits
     // Stop any running slideshow and restore the default video looping.
     clearSlide();
     slideshowOn = false;
@@ -520,6 +720,10 @@ function initLightbox() {
     if (fsToggling) { fsToggling = false; return; }
     setTimeout(function () {
       if (isOpen() && !document.fullscreenElement && !document.hidden && document.hasFocus()) {
+        // In fullscreen the browser swallows the Esc keydown to exit; that Esc
+        // lands here. With the tag modal open it means "discard the modal",
+        // not "dismiss the lightbox".
+        if (tagsOpen) { closeTags(); return; }
         close();
       }
     }, 0);
@@ -599,6 +803,9 @@ function initLightbox() {
   // their synthetic click is swallowed here so this doesn't re-fire.
   lb.addEventListener('click', function (e) {
     if (tapConsumed()) return;
+    // With the tag modal open, any click outside it (its own handler stops
+    // propagation) discards the pending changes — never dismisses the lightbox.
+    if (tagsOpen) { closeTags(); return; }
     var hidden = lb.classList.contains('idle');
     wake();
     if (!onMedia(e.clientX, e.clientY) && !hidden) close();
@@ -624,6 +831,14 @@ function initLightbox() {
 
   document.addEventListener('keydown', function (e) {
     if (!isOpen()) return;
+    // The tag modal owns the keyboard while open. Its own listeners handle (and
+    // stopPropagation) keys typed inside it; this catches the rest — e.g. focus
+    // on the modal background — so lightbox bindings (r, i, arrows, …) stay off.
+    if (tagsOpen) {
+      if (e.key === 'Escape') closeTags();
+      else if (e.key === 'Enter') applyTags();
+      return;
+    }
     // Ctrl+1..5 rate the current item; Ctrl+0 clears back to unrated. (Ctrl to
     // make accidental presses unlikely; note some browsers reserve Ctrl+digit
     // for tab switching / zoom reset and may not let preventDefault win.)
@@ -652,6 +867,7 @@ function initLightbox() {
       vid.muted = !vid.muted;
     }
     else if (e.key === 'i' || e.key === 'I') { e.preventDefault(); toggleInfo(); }
+    else if (e.key === 't' || e.key === 'T') { e.preventDefault(); toggleTags(); }
     else if (e.key === 's' || e.key === 'S') { e.preventDefault(); toggleSlideshow(); }
     else if (e.key === 'f' || e.key === 'F') { e.preventDefault(); toggleFullscreen(); }
     // +/- zoom the image toward the viewport center (like Ctrl+wheel toward the
@@ -746,6 +962,9 @@ function initLightbox() {
   }, { passive: false });
 
   lb.addEventListener('touchend', function (e) {
+    // Touches ending on the tag modal are left entirely to native behavior:
+    // taps click checkboxes/buttons, drags scroll the list (touch-action: pan-y).
+    if (e.target.closest('#lb-tags')) return;
     lastTouch = e.timeStamp; // suppress the ghost mouse events that follow a tap
     // A finger lifted but others remain: if a pinch dropped to one finger and
     // we're still zoomed, continue as a pan from that finger.
@@ -765,6 +984,10 @@ function initLightbox() {
     var dx = t.clientX - sx, dy = t.clientY - sy;
     var adx = Math.abs(dx), ady = Math.abs(dy);
     var moved = adx > 10 || ady > 10;
+
+    // Any touch outside the open tag modal discards it (the touch counterpart
+    // of the click-outside rule above); swipes don't navigate past it either.
+    if (tagsOpen) { closeTags(); suppressClick = true; return; }
 
     // Double-tap an image (directly on it — not an overlaid control like the
     // ‹ › chevrons) toggles zoom: to 2× at the tap point, or back to fit.
@@ -826,6 +1049,8 @@ function initLightbox() {
   // wheel does nothing (pan by dragging instead).
   var lastWheel = 0;
   lb.addEventListener('wheel', function (e) {
+    // Let the tag modal's list scroll natively instead of flipping photos.
+    if (e.target.closest('#lb-tags')) return;
     if (!e.deltaY) return; // ignore purely-horizontal scroll
     e.preventDefault();
     if (e.ctrlKey) {

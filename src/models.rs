@@ -161,6 +161,14 @@ pub struct PatchPhoto {
     /// New rating (0..=5), or `null` to clear back to Digikam's "unrated" (-1).
     #[serde(default, deserialize_with = "double_option")]
     pub rating: Option<Option<Rating>>,
+    /// Tag ids (from `/api/tags`) to add to / remove from the photo. Collection
+    /// deltas, not tri-state: absent or empty = no change. Already-present adds
+    /// and absent removes are silent no-ops; an unknown or internal tag id is a
+    /// 422.
+    #[serde(default)]
+    pub tags_add: Vec<i64>,
+    #[serde(default)]
+    pub tags_remove: Vec<i64>,
 }
 
 /// Deserialize a present-but-possibly-null field as `Some(inner)`, so that

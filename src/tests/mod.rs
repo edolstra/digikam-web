@@ -15,6 +15,7 @@ mod bookmarks;
 mod files;
 mod rating;
 mod read;
+mod tagging;
 
 use std::sync::Arc;
 

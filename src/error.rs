@@ -15,6 +15,12 @@ pub enum AppError {
     #[error("forbidden: {0}")]
     Forbidden(String),
 
+    /// Semantic body-validation failure, mirroring the `422` axum's `Json`
+    /// extractor produces for type-level rejections (e.g. an out-of-range
+    /// `Rating`) — used where the check needs the DB (e.g. an unknown tag id).
+    #[error("unprocessable: {0}")]
+    Unprocessable(String),
+
     #[error("conflict: {0}")]
     Conflict(String),
 
@@ -31,6 +37,7 @@ impl IntoResponse for AppError {
             AppError::NotFound(m) => (StatusCode::NOT_FOUND, m.clone()),
             AppError::BadRequest(m) => (StatusCode::BAD_REQUEST, m.clone()),
             AppError::Forbidden(m) => (StatusCode::FORBIDDEN, m.clone()),
+            AppError::Unprocessable(m) => (StatusCode::UNPROCESSABLE_ENTITY, m.clone()),
             AppError::Conflict(m) => (StatusCode::CONFLICT, m.clone()),
             AppError::BadGateway(m) => (StatusCode::BAD_GATEWAY, m.clone()),
             AppError::Internal(e) => {

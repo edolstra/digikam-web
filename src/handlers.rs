@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use axum::extract::{Path, Query, State};
 use axum::http::{header, HeaderMap, HeaderValue, Request, StatusCode};
@@ -228,12 +228,17 @@ pub async fn get_photo(
     Ok(Json(detail))
 }
 
-/// `PATCH /photos/:id` — partial update of a photo's Digikam metadata. The only
-/// field so far is `rating`: `{"rating": 3}` sets it, `{"rating": null}` clears
-/// back to Digikam's "unrated" (-1), an absent field leaves it unchanged (so
-/// `{}` is a valid no-op). Requires the server to have been started with
-/// `--allow-writes` (else 403). Every change is logged with the image id, path,
-/// and old/new value. Writes only the DB — not the file's XMP/EXIF metadata.
+/// `PATCH /photos/:id` — partial update of a photo's Digikam metadata:
+/// - `rating`: `{"rating": 3}` sets it, `{"rating": null}` clears back to
+///   Digikam's "unrated" (-1), an absent field leaves it unchanged.
+/// - `tags_add` / `tags_remove`: tag **ids** (from `/api/tags`) to link/unlink.
+///   Already-present adds and absent removes are silent no-ops; an unknown or
+///   Digikam-internal tag id is a 422 (nothing is applied — the whole patch is
+///   one transaction).
+///
+/// `{}` is a valid no-op. Requires the server to have been started with
+/// `--allow-writes` (else 403). Every actual change is logged with the image id
+/// and path. Writes only the DB — not the file's XMP/EXIF metadata.
 pub async fn patch_photo(
     State(state): State<AppState>,
     Path(id): Path<i64>,
@@ -244,11 +249,13 @@ pub async fn patch_photo(
             "writes are disabled; start the server with --allow-writes".into(),
         ));
     }
-    let Some(rating) = patch.rating else {
+    if patch.rating.is_none() && patch.tags_add.is_empty() && patch.tags_remove.is_empty() {
         return Ok(StatusCode::NO_CONTENT);
-    };
+    }
 
     run_blocking(&state, move |conn, state| {
+        let tx = conn.unchecked_transaction()?;
+
         let (album_root, relative_path, name, old): (i64, String, String, Option<i64>) = conn
             .query_row(
                 "SELECT a.albumRoot, a.relativePath, i.name, ii.rating FROM Images i \
@@ -265,14 +272,6 @@ pub async fn patch_photo(
                 other => AppError::from(other),
             })?;
 
-        let new = rating.map_or(-1, Rating::get);
-        // Upsert: an image may have no ImageInformation row yet.
-        conn.execute(
-            "INSERT INTO ImageInformation (imageid, rating) VALUES (?1, ?2) \
-             ON CONFLICT(imageid) DO UPDATE SET rating = excluded.rating",
-            rusqlite::params![id, new],
-        )?;
-
         // The path is best-effort, for the change log only: fall back to the
         // album-relative path when the root is unknown.
         let path = match state.roots.get(&album_root) {
@@ -281,18 +280,96 @@ pub async fn patch_photo(
                 .into_owned(),
             None => format!("root{album_root}:{relative_path}/{name}"),
         };
-        tracing::info!(
-            id,
-            path = %path,
-            old = %fmt_rating(old),
-            new = %fmt_rating(Some(new)),
-            "rating changed"
-        );
+
+        if let Some(rating) = patch.rating {
+            let new = rating.map_or(-1, Rating::get);
+            // Upsert: an image may have no ImageInformation row yet.
+            conn.execute(
+                "INSERT INTO ImageInformation (imageid, rating) VALUES (?1, ?2) \
+                 ON CONFLICT(imageid) DO UPDATE SET rating = excluded.rating",
+                rusqlite::params![id, new],
+            )?;
+            tracing::info!(
+                id,
+                path = %path,
+                old = %fmt_rating(old),
+                new = %fmt_rating(Some(new)),
+                "rating changed"
+            );
+        }
+
+        if !patch.tags_add.is_empty() || !patch.tags_remove.is_empty() {
+            // The current links, so no-op adds/removes stay silent (and aren't
+            // logged) and repeated ids in one request can't double-apply.
+            let mut current: HashSet<i64> = conn
+                .prepare("SELECT tagid FROM ImageTags WHERE imageid = ?1")?
+                .query_map([id], |r| r.get(0))?
+                .collect::<Result<_, _>>()?;
+            for &tag in &patch.tags_add {
+                let tag_path = checked_tag_path(conn, tag)?;
+                if !current.insert(tag) {
+                    continue;
+                }
+                conn.execute(
+                    "INSERT INTO ImageTags (imageid, tagid) VALUES (?1, ?2)",
+                    [id, tag],
+                )?;
+                tracing::info!(id, path = %path, tag = %tag_path, tag_id = tag, "tag added");
+            }
+            for &tag in &patch.tags_remove {
+                let tag_path = checked_tag_path(conn, tag)?;
+                if !current.remove(&tag) {
+                    continue;
+                }
+                conn.execute(
+                    "DELETE FROM ImageTags WHERE imageid = ?1 AND tagid = ?2",
+                    [id, tag],
+                )?;
+                tracing::info!(id, path = %path, tag = %tag_path, tag_id = tag, "tag removed");
+            }
+        }
+
+        tx.commit()?;
         Ok(())
     })
     .await?;
 
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// Resolve a tag id to its absolute path (`/places/beach`) for the change log,
+/// doubling as validation: a 422 for an id that doesn't exist or that belongs to
+/// Digikam's internal tag subtree (Color/Pick labels etc. — not user tags).
+fn checked_tag_path(conn: &PooledConn, tag: i64) -> AppResult<String> {
+    let internal = tag == INTERNAL_TAG_ROOT
+        || conn
+            .query_row(
+                "SELECT 1 FROM TagsTree WHERE id = ?1 AND pid = ?2",
+                [tag, INTERNAL_TAG_ROOT],
+                |_| Ok(()),
+            )
+            .optional()?
+            .is_some();
+    if internal {
+        return Err(AppError::Unprocessable(format!(
+            "tag {tag} is a Digikam-internal tag"
+        )));
+    }
+    // Walk up the `pid` chain to the root, prepending each ancestor's name
+    // (the single-tag version of get_photo's tag-path CTE).
+    conn.query_row(
+        "WITH RECURSIVE up(pid, path) AS ( \
+           SELECT pid, name FROM Tags WHERE id = ?1 \
+           UNION ALL \
+           SELECT t.pid, t.name || '/' || up.path FROM up JOIN Tags t ON t.id = up.pid \
+           WHERE up.pid <> 0 \
+         ) \
+         SELECT '/' || path FROM up WHERE pid = 0",
+        [tag],
+        |r| r.get(0),
+    )
+    .optional()?
+    .ok_or_else(|| AppError::Unprocessable(format!("unknown tag id {tag}")))
 }
 
 /// Render a stored rating for the change log: `-1` / no row = "unrated".

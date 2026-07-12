@@ -223,6 +223,18 @@ fn page_html(title: &str, body: Markup) -> Markup {
                     button.nav.next aria-label="Next" { "›" }
                     // Metadata overlay, filled + toggled by web.js (hidden by default).
                     div id="lb-info" {}
+                    // Tag modal (the `t` key): quick filter + scrollable checkbox
+                    // tree + Cancel/Apply, filled + toggled by web.js. Must live
+                    // inside #lightbox — a fullscreen element is the only thing
+                    // the browser paints.
+                    div id="lb-tags" {
+                        input id="lb-tags-filter" type="text" placeholder="Filter tags…" aria-label="Filter tags" autocomplete="off";
+                        div.tag-list {}
+                        div.tag-actions {
+                            button.tag-cancel type="button" { "Cancel" }
+                            button.tag-apply type="button" { "Apply" }
+                        }
+                    }
                 }
                 script { (PreEscaped(SCRIPT)) }
             }
