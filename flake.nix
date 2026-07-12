@@ -39,6 +39,7 @@
             !(pkgs.lib.hasInfix "/tests/e2e" path)
             && ((pkgs.lib.hasSuffix ".css" path)
               || (pkgs.lib.hasSuffix ".js" path)
+              || (pkgs.lib.hasSuffix ".jpg" path)
               || (pkgs.lib.hasSuffix ".ico" path)
               || (pkgs.lib.hasSuffix ".png" path)
               || (pkgs.lib.hasSuffix ".webmanifest" path)
