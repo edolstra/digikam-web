@@ -48,7 +48,7 @@ impl Serialize for Rating {
 impl<'de> Deserialize<'de> for Rating {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         let value = i64::deserialize(d)?;
-        Rating::new(value).ok_or_else(|| de::Error::custom("min_rating must be between 0 and 5"))
+        Rating::new(value).ok_or_else(|| de::Error::custom("rating must be between 0 and 5"))
     }
 }
 

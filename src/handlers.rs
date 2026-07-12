@@ -13,8 +13,8 @@ use tower_http::services::ServeFile;
 use crate::db::{album_display_path, image_abs_path, AppState, PooledConn};
 use crate::error::{AppError, AppResult};
 use crate::models::{
-    AlbumNode, Bookmark, CreateBookmark, Filters, Page, PhotoDetail, PhotoSummary, SubAlbum,
-    TagNode,
+    AlbumNode, Bookmark, CreateBookmark, Filters, Page, PatchPhoto, PhotoDetail, PhotoSummary,
+    SubAlbum, TagNode,
 };
 use crate::query::{self, Aspect, PhotoQuery, Rating, Sort, DEFAULT_LIMIT, MAX_LIMIT};
 
@@ -226,6 +226,81 @@ pub async fn get_photo(
     .await?;
 
     Ok(Json(detail))
+}
+
+/// `PATCH /photos/:id` — partial update of a photo's Digikam metadata. The only
+/// field so far is `rating`: `{"rating": 3}` sets it, `{"rating": null}` clears
+/// back to Digikam's "unrated" (-1), an absent field leaves it unchanged (so
+/// `{}` is a valid no-op). Requires the server to have been started with
+/// `--allow-writes` (else 403). Every change is logged with the image id, path,
+/// and old/new value. Writes only the DB — not the file's XMP/EXIF metadata.
+pub async fn patch_photo(
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+    Json(patch): Json<PatchPhoto>,
+) -> AppResult<StatusCode> {
+    if !state.allow_writes {
+        return Err(AppError::Forbidden(
+            "writes are disabled; start the server with --allow-writes".into(),
+        ));
+    }
+    let Some(rating) = patch.rating else {
+        return Ok(StatusCode::NO_CONTENT);
+    };
+
+    run_blocking(&state, move |conn, state| {
+        let (album_root, relative_path, name, old): (i64, String, String, Option<i64>) = conn
+            .query_row(
+                "SELECT a.albumRoot, a.relativePath, i.name, ii.rating FROM Images i \
+                 JOIN Albums a ON a.id = i.album \
+                 LEFT JOIN ImageInformation ii ON ii.imageid = i.id \
+                 WHERE i.id = ?1 AND i.status = 1",
+                [id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .map_err(|e| match e {
+                rusqlite::Error::QueryReturnedNoRows => {
+                    AppError::NotFound(format!("photo {id} not found"))
+                }
+                other => AppError::from(other),
+            })?;
+
+        let new = rating.map_or(-1, Rating::get);
+        // Upsert: an image may have no ImageInformation row yet.
+        conn.execute(
+            "INSERT INTO ImageInformation (imageid, rating) VALUES (?1, ?2) \
+             ON CONFLICT(imageid) DO UPDATE SET rating = excluded.rating",
+            rusqlite::params![id, new],
+        )?;
+
+        // The path is best-effort, for the change log only: fall back to the
+        // album-relative path when the root is unknown.
+        let path = match state.roots.get(&album_root) {
+            Some(root) => image_abs_path(root, &relative_path, &name)
+                .to_string_lossy()
+                .into_owned(),
+            None => format!("root{album_root}:{relative_path}/{name}"),
+        };
+        tracing::info!(
+            id,
+            path = %path,
+            old = %fmt_rating(old),
+            new = %fmt_rating(Some(new)),
+            "rating changed"
+        );
+        Ok(())
+    })
+    .await?;
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Render a stored rating for the change log: `-1` / no row = "unrated".
+fn fmt_rating(r: Option<i64>) -> String {
+    match r {
+        Some(n) if n >= 0 => n.to_string(),
+        _ => "unrated".into(),
+    }
 }
 
 /// Query for `GET /photos/:id/reverse-search`.

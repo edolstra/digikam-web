@@ -183,7 +183,25 @@ body.modal-open { overflow: hidden; }
 #lb-info .copy-path { border: 0; background: none; color: #6cf; cursor: pointer;
                       font: inherit; padding: 0; line-height: 1; }
 #lb-info .copy-path.copied { color: #6f6; }
-@media (hover: hover) { #lb-info a:hover { text-decoration: underline; } }
+/* Clickable rating stars (★ up to the rating, gold `.on`; ☆ beyond, grey) —
+   styled like the navbar's filter stars, overriding the generic `.lightbox
+   button` white/opacity. */
+#lb-info .rate-star { border: 0; background: none; cursor: pointer; font: inherit;
+                      font-size: 1.05rem; padding: 0 1px; line-height: 1;
+                      color: #777; opacity: 1; }
+#lb-info .rate-star.on { color: #f5c518; }
+@media (hover: hover) {
+  #lb-info a:hover { text-decoration: underline; }
+  #lb-info .rate-star:hover { color: #f5c518; }
+}
+/* Transient confirmation of a Ctrl+digit rating change (panel closed), centered
+   near the bottom; red-ish while `.failed` (e.g. the server has writes disabled). */
+.rate-flash { position: absolute; bottom: 3rem; left: 50%; transform: translateX(-50%);
+              padding: 0.3rem 0.8rem; border-radius: 6px;
+              background: rgba(0, 0, 0, 0.6); color: #f5c518; font-size: 1.4rem;
+              opacity: 0; pointer-events: none; transition: opacity 0.25s ease; }
+.rate-flash.show { opacity: 1; }
+.rate-flash.failed { color: #f66; font-size: 1rem; }
 /* Auto-hide the controls after inactivity (web.js toggles `.idle`); they fade
    back on any pointer move / touch / key. */
 .lightbox .close, .lightbox .info, .lightbox .search-btn, .lightbox .slideshow-btn, .lightbox .nav { transition: opacity 0.25s ease; }

@@ -31,9 +31,13 @@ async fn main() -> Result<()> {
         .init();
 
     let config = Config::parse();
-    tracing::info!(database = %config.database.display(), "opening Digikam database (read-only)");
+    tracing::info!(
+        database = %config.database.display(),
+        mode = if config.allow_writes { "read-write; writes enabled" } else { "read-only" },
+        "opening Digikam database"
+    );
 
-    let pool = db::build_pool(&config.database, config.trace_sql)?;
+    let pool = db::build_pool(&config.database, config.trace_sql, config.allow_writes)?;
     let roots = {
         let conn = pool.get().context("failed to get database connection")?;
         db::load_roots(&conn)?
@@ -42,7 +46,7 @@ async fn main() -> Result<()> {
 
     // The thumbnails DB is optional: without it, /thumbnail just 404s.
     let thumb_db = config.thumbnail_db_path();
-    let thumbs = match db::build_pool(&thumb_db, config.trace_sql) {
+    let thumbs = match db::build_pool(&thumb_db, config.trace_sql, false) {
         Ok(p) => {
             tracing::info!(path = %thumb_db.display(), "opened thumbnails database (read-only)");
             Some(p)
@@ -74,6 +78,7 @@ async fn main() -> Result<()> {
         thumbs,
         web,
         roots: Arc::new(roots),
+        allow_writes: config.allow_writes,
     };
 
     let app = build_router(state);
@@ -97,7 +102,10 @@ pub(crate) fn build_router(state: AppState) -> Router {
     let api = Router::new()
         .route("/health", get(handlers::health))
         .route("/photos", get(handlers::list_photos))
-        .route("/photos/:id", get(handlers::get_photo))
+        .route(
+            "/photos/:id",
+            get(handlers::get_photo).patch(handlers::patch_photo),
+        )
         .route("/photos/:id/file", get(handlers::get_photo_file))
         .route("/photos/:id/reverse-search", get(handlers::reverse_search))
         .route("/photos/:id/thumbnail", get(handlers::get_photo_thumbnail))

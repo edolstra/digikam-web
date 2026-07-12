@@ -164,13 +164,28 @@ function initLightbox() {
       copyBtn.dataset.path = meta.file_path;
       fileCell.appendChild(copyBtn);
     }
+    // Rating: five clickable stars. Clicking star K sets the rating to K;
+    // clicking the currently-set star clears back to unrated (like the navbar
+    // filter stars). Always shown, so an unrated item can be rated too.
+    var stars = document.createElement('span');
+    stars.className = 'rate';
+    for (var s = 1; s <= 5; s++) {
+      var st = document.createElement('button');
+      st.type = 'button';
+      var on = p.rating != null && s <= p.rating;
+      st.className = 'rate-star' + (on ? ' on' : '');
+      st.dataset.value = s;
+      st.textContent = on ? '★' : '☆';
+      st.title = p.rating === s ? 'Clear rating' : 'Rate ' + s + (s > 1 ? ' stars' : ' star');
+      stars.appendChild(st);
+    }
     // Format + MIME on one row, e.g. "jpg (image/jpeg)".
     var fmt = p.format ? p.format.toLowerCase() : null;
     var format = (fmt && p.mime) ? (fmt + ' (' + p.mime + ')') : (fmt || p.mime || null);
     var rows = [
       ['File', fileCell],
       ['Album', album],
-      ['Rating', p.rating != null ? '★'.repeat(p.rating) + '☆'.repeat(5 - p.rating) : null],
+      ['Rating', stars],
       ['Format', format],
       ['Size', fmtBytes(p.file_size)],
       ['Resolution', (p.width && p.height) ? (p.width + ' × ' + p.height) : null],
@@ -243,6 +258,52 @@ function initLightbox() {
     render();
   }
 
+  // Set (k = 1..5) or clear (k = null) the current item's rating via the write
+  // API (`PATCH /api/photos/:id`; a 403 means the server runs without
+  // --allow-writes). On success the tile's PhotoSummary is mutated in place —
+  // it's the same object the grid tile carries as `_photo`, so both stay in
+  // sync with no refetch. Confirmation: the re-rendered panel stars when the
+  // panel is open, a transient star flash otherwise (Ctrl+digit); failures
+  // always flash.
+  var flashEl = null, flashTimer = 0;
+  function flashRating(text, failed) {
+    if (!flashEl) {
+      flashEl = document.createElement('div');
+      flashEl.className = 'rate-flash';
+      lb.appendChild(flashEl);
+    }
+    flashEl.textContent = text;
+    flashEl.classList.toggle('failed', failed);
+    flashEl.classList.add('show');
+    clearTimeout(flashTimer);
+    flashTimer = setTimeout(function () { flashEl.classList.remove('show'); }, 1200);
+  }
+  function setRating(k) {
+    var p = items[idx] && items[idx].photo;
+    if (!p) return;
+    fetch('/api/photos/' + p.id, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rating: k })
+    }).then(function (r) {
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      p.rating = k;
+      // Repaint only if this item is still on screen.
+      if (items[idx] && items[idx].photo !== p) return;
+      if (infoOpen) renderInfo();
+      else flashRating(k != null ? '★'.repeat(k) + '☆'.repeat(5 - k) : 'unrated', false);
+    }).catch(function () {
+      flashRating('rating not saved', true);
+    });
+  }
+  // A click/tap on panel star K: set rating K, or clear if K is the current one.
+  function starClicked(btn) {
+    var p = items[idx] && items[idx].photo;
+    if (!p) return;
+    var k = +btn.dataset.value;
+    setRating(p.rating === k ? null : k);
+  }
+
   // Panel clicks must not bubble to the letterbox-close handler; the album link
   // navigates in-page instead of doing a full document load. (`suppressClick`
   // swallows the synthetic click from a touch tap, which the touch handler below
@@ -250,6 +311,9 @@ function initLightbox() {
   infoEl.addEventListener('click', function (e) {
     e.stopPropagation();
     if (tapConsumed()) return;
+    // The rating stars set/clear the rating via the write API.
+    var rs = e.target.closest('.rate-star');
+    if (rs) { e.preventDefault(); starClicked(rs); return; }
     // The copy-path button copies the absolute server path to the clipboard.
     var cp = e.target.closest('.copy-path');
     if (cp) { e.preventDefault(); copyPath(cp); return; }
@@ -554,6 +618,16 @@ function initLightbox() {
 
   document.addEventListener('keydown', function (e) {
     if (!isOpen()) return;
+    // Ctrl+1..5 rate the current item; Ctrl+0 clears back to unrated. (Ctrl to
+    // make accidental presses unlikely; note some browsers reserve Ctrl+digit
+    // for tab switching / zoom reset and may not let preventDefault win.)
+    if (e.ctrlKey && !e.altKey && !e.metaKey && e.key >= '0' && e.key <= '5') {
+      e.preventDefault();
+      setRating(e.key === '0' ? null : +e.key);
+      return;
+    }
+    // Leave other modifier combos (reload, tab switching, …) to the browser.
+    if (e.ctrlKey || e.altKey || e.metaKey) return;
     if (e.key === 'Escape') { close(); return; }
     // Arrows/Home/End navigate between items as usual. preventDefault keeps a
     // focused <video> (it has controls) from also consuming them to seek.
@@ -717,6 +791,8 @@ function initLightbox() {
     if (e.target.closest('.search-btn')) { yandexSearch(); suppressClick = true; return; }
     if (e.target.closest('.info')) { toggleInfo(); suppressClick = true; return; }
     if (e.target.closest('#lb-info')) {
+      var star = e.target.closest('.rate-star');
+      if (star) { starClicked(star); suppressClick = true; return; }
       var cpath = e.target.closest('.copy-path');
       if (cpath) { copyPath(cpath); suppressClick = true; return; }
       var link = e.target.closest('a');

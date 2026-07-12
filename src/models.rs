@@ -1,4 +1,4 @@
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::query::{Aspect, Rating, Sort};
 
@@ -150,6 +150,26 @@ pub struct Bookmark {
     /// The saved view filters (incl. `recursive`); flattened into the JSON.
     #[serde(flatten)]
     pub filters: Filters,
+}
+
+/// Request body for `PATCH /api/photos/:id` — a partial update, so every field
+/// is double-wrapped to distinguish **absent** (leave unchanged) from **`null`**
+/// (clear): `None` = not mentioned, `Some(None)` = clear, `Some(Some(v))` = set.
+/// Designed to grow (tags, album, …) as more write operations are added.
+#[derive(Debug, Deserialize)]
+pub struct PatchPhoto {
+    /// New rating (0..=5), or `null` to clear back to Digikam's "unrated" (-1).
+    #[serde(default, deserialize_with = "double_option")]
+    pub rating: Option<Option<Rating>>,
+}
+
+/// Deserialize a present-but-possibly-null field as `Some(inner)`, so that
+/// combined with `#[serde(default)]` an absent field is `None` while an explicit
+/// `null` is `Some(None)` (plain `Option<Option<T>>` can't tell them apart).
+fn double_option<'de, T: Deserialize<'de>, D: Deserializer<'de>>(
+    d: D,
+) -> Result<Option<Option<T>>, D::Error> {
+    Deserialize::deserialize(d).map(Some)
 }
 
 /// Request body for `POST /api/bookmarks`.

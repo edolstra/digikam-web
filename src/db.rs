@@ -27,6 +27,9 @@ pub struct AppState {
     /// Writable pool for our own `web.sql` (bookmarks), if it could be opened.
     pub web: Option<Pool>,
     pub roots: Arc<HashMap<i64, AlbumRoot>>,
+    /// Whether `--allow-writes` was given: `pool` is then writable and the write
+    /// endpoints (e.g. `PATCH /api/photos/:id`) work; otherwise they return 403.
+    pub allow_writes: bool,
 }
 
 /// Natural ("version") comparison of two strings, used as the SQLite `NATURAL`
@@ -88,20 +91,30 @@ fn strip_zeros(s: &[u8]) -> &[u8] {
     &s[nz.min(s.len() - 1)..]
 }
 
-/// Open a read-only connection pool to the Digikam database.
+/// Open a connection pool to the Digikam database.
 ///
-/// Connections are opened with `SQLITE_OPEN_READ_ONLY` so we can never modify
-/// Digikam's data, and each sets a busy timeout so that reads don't fail while
-/// Digikam itself is writing.
-pub fn build_pool(database: &Path, trace_sql: bool) -> Result<Pool> {
+/// By default (`writable == false`) connections are opened with
+/// `SQLITE_OPEN_READ_ONLY` **and** `PRAGMA query_only`, so we can never modify
+/// Digikam's data. With `--allow-writes` the main pool is opened
+/// `SQLITE_OPEN_READ_WRITE` instead (never CREATE — the DB must already exist)
+/// so the write endpoints can update it. Each connection sets a busy timeout so
+/// that our reads/writes don't fail while Digikam itself is writing.
+pub fn build_pool(database: &Path, trace_sql: bool, writable: bool) -> Result<Pool> {
     if !database.exists() {
         anyhow::bail!("database not found: {}", database.display());
     }
+    let flags = if writable {
+        OpenFlags::SQLITE_OPEN_READ_WRITE
+    } else {
+        OpenFlags::SQLITE_OPEN_READ_ONLY
+    };
     let manager = SqliteConnectionManager::file(database)
-        .with_flags(OpenFlags::SQLITE_OPEN_READ_ONLY)
+        .with_flags(flags)
         .with_init(move |c| {
             c.busy_timeout(std::time::Duration::from_secs(5))?;
-            c.pragma_update(None, "query_only", true)?;
+            if !writable {
+                c.pragma_update(None, "query_only", true)?;
+            }
             // Natural ("version") ordering for the `name` sort (see `natural_cmp`).
             // Named `NATSORT` (not `NATURAL`, which is a reserved SQL keyword and
             // can't appear bare after `COLLATE`). Registering a collation doesn't
@@ -126,8 +139,8 @@ pub fn build_pool(database: &Path, trace_sql: bool) -> Result<Pool> {
 /// Open (creating if missing) a **writable** pool for our own `web.sql` and run
 /// the bookmarks migration.
 ///
-/// This is the deliberate exception to the otherwise strictly read-only design:
-/// `web.sql` is *our* data file (never a Digikam DB), so it's opened with
+/// Unlike the Digikam pool — writable only with the opt-in `--allow-writes` —
+/// `web.sql` is *our* data file (never a Digikam DB), so it's always opened with
 /// `SQLITE_OPEN_READ_WRITE | SQLITE_OPEN_CREATE` and **without** `query_only`.
 pub fn build_web_pool(database: &Path, trace_sql: bool) -> Result<Pool> {
     let manager = SqliteConnectionManager::file(database)

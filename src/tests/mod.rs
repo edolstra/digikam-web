@@ -9,10 +9,11 @@
 //!
 //! In-memory SQLite can't be used here: the pool keeps several connections and a
 //! plain `:memory:` DB is private per connection, so seeded rows would be invisible.
-//! A temp file (seeded read-write, then reopened read-only by the pool) avoids that.
+//! A temp file (seeded by a direct connection, then reopened by the pool) avoids that.
 
 mod bookmarks;
 mod files;
+mod rating;
 mod read;
 
 use std::sync::Arc;
@@ -59,8 +60,10 @@ impl Fixture {
         std::fs::create_dir_all(&animals).expect("mk album dir");
         std::fs::write(animals.join("img001.jpg"), b"fake-jpeg-bytes").expect("write file");
 
-        let pool = db::build_pool(&db_path, false).expect("main pool");
-        let thumbs = db::build_pool(&thumb_path, false).expect("thumb pool");
+        // Writable main pool (as with --allow-writes) so the write endpoints are
+        // exercised too; a test simulates read-only mode via `allow_writes = false`.
+        let pool = db::build_pool(&db_path, false, true).expect("main pool");
+        let thumbs = db::build_pool(&thumb_path, false, false).expect("thumb pool");
         let web = db::build_web_pool(&web_path, false).expect("web pool");
         let roots = {
             let conn = pool.get().expect("conn");
@@ -73,6 +76,7 @@ impl Fixture {
                 thumbs: Some(thumbs),
                 web: Some(web),
                 roots: Arc::new(roots),
+                allow_writes: true,
             },
             _dir: dir,
         }
@@ -122,6 +126,15 @@ impl Fixture {
 
     pub async fn post_json(&self, uri: &str, body: &Value) -> (StatusCode, Value) {
         let req = Request::post(uri)
+            .header("content-type", "application/json")
+            .body(Body::from(serde_json::to_vec(body).unwrap()))
+            .unwrap();
+        let (status, _h, body) = self.send(req).await;
+        (status, parse_json(&body))
+    }
+
+    pub async fn patch_json(&self, uri: &str, body: &Value) -> (StatusCode, Value) {
+        let req = Request::patch(uri)
             .header("content-type", "application/json")
             .body(Body::from(serde_json::to_vec(body).unwrap()))
             .unwrap();

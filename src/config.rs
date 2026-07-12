@@ -33,6 +33,12 @@ pub struct Config {
     /// Log every SQL statement (with bound values) as it executes.
     #[arg(long, env = "TRACE_SQL")]
     pub trace_sql: bool,
+
+    /// Allow write operations on the Digikam database (e.g. changing ratings).
+    /// Off by default: the database is opened read-only and the write endpoints
+    /// return 403.
+    #[arg(long, env = "ALLOW_WRITES")]
+    pub allow_writes: bool,
 }
 
 impl Config {
