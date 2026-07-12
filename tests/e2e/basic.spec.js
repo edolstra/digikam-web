@@ -2,15 +2,33 @@
 // opens it full-screen in the lightbox. The data is the synthetic fixture from
 // src/fixture.rs: album /Collection/Animals holds images 100 (img001.jpg) and
 // 107 (tagged.jpg) plus video 102 (clip001.mp4), each on its own day.
+const fs = require('fs');
+const path = require('path');
 const { test, expect } = require('@playwright/test');
 
 const ALBUM = '/photos/Collection/Animals';
+
+// Full-page screenshots at each interesting stage, for human inspection. The
+// flake's e2e check points $E2E_SCREENSHOT_DIR at its $out, so
+// `nix build .#checks.<system>.e2e` leaves a ./result full of screenshots.
+const SHOT_DIR =
+  process.env.E2E_SCREENSHOT_DIR || path.join(__dirname, 'test-results', 'screenshots');
+fs.mkdirSync(SHOT_DIR, { recursive: true });
+function shot(page, name) {
+  return page.screenshot({ path: path.join(SHOT_DIR, name + '.png') });
+}
 
 test('root page lists the album roots', async ({ page }) => {
   await page.goto('/photos');
   const tiles = page.locator('.albums > a.album');
   await expect(tiles).toHaveCount(1);
   await expect(tiles.locator('.title')).toHaveText('Collection');
+  // The root tile's cover goes through the same lazy pipeline; let it paint
+  // before the screenshot.
+  await expect
+    .poll(() => tiles.locator('img.thumb').evaluate((el) => el.naturalWidth))
+    .toBeGreaterThan(0);
+  await shot(page, '01-root-albums');
 });
 
 test('photo grid loads and paints real images', async ({ page }) => {
@@ -25,6 +43,8 @@ test('photo grid loads and paints real images', async ({ page }) => {
   // real JPEG in the fixture).
   const tile = page.locator('#item-100');
   await expect.poll(() => tile.evaluate((el) => el.naturalWidth)).toBeGreaterThan(0);
+  await expect.poll(() => page.locator('#item-107').evaluate((el) => el.naturalWidth)).toBeGreaterThan(0);
+  await shot(page, '02-album-grid');
 });
 
 test('clicking a photo opens it full-screen in the lightbox', async ({ page }) => {
@@ -45,9 +65,11 @@ test('clicking a photo opens it full-screen in the lightbox', async ({ page }) =
       page.evaluate(() => document.fullscreenElement && document.fullscreenElement.id)
     )
     .toBe('lightbox');
+  await shot(page, '03-lightbox-fullscreen');
 
   // Esc exits fullscreen and (tab focused + visible) dismisses the lightbox.
   await page.keyboard.press('Escape');
   await expect(lb).not.toHaveClass(/\bopen\b/);
   await expect(lb).toBeHidden();
+  await shot(page, '04-lightbox-dismissed');
 });

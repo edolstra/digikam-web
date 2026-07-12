@@ -91,9 +91,9 @@
             nativeBuildInputs = [ digikam-web pkgs.playwright-test pkgs.nodejs ];
             PLAYWRIGHT_BROWSERS_PATH = pkgs.playwright-driver.browsers-chromium;
             PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS = "true";
-            # Chromium wants a fontconfig config even though the pages under
-            # test don't care which fonts exist.
-            FONTCONFIG_FILE = pkgs.makeFontsConf { fontDirectories = [ ]; };
+            # Real fonts, so the stage screenshots (below) have legible text
+            # instead of tofu boxes.
+            FONTCONFIG_FILE = pkgs.makeFontsConf { fontDirectories = [ pkgs.dejavu_fonts ]; };
           } ''
             export HOME=$TMPDIR
             cp -r ${./tests/e2e} e2e
@@ -101,8 +101,11 @@
             cd e2e
             # Makes require('@playwright/test') in the config/specs resolve.
             ln -s ${pkgs.playwright-test}/lib/node_modules node_modules
+            # $out is a directory of per-stage screenshots for human review:
+            # `nix build .#checks.<system>.e2e` leaves them under ./result.
+            mkdir $out
+            export E2E_SCREENSHOT_DIR=$out
             playwright test
-            touch $out
           '';
         };
 
