@@ -13,6 +13,7 @@
 
 mod bookmarks;
 mod files;
+mod moving;
 mod rating;
 mod read;
 mod tagging;
@@ -31,6 +32,9 @@ use crate::db::{self, AppState};
 /// the fixture's lifetime and removed on drop.
 pub struct Fixture {
     pub state: AppState,
+    /// The album root's base directory on disk (`<tempdir>/root`), for tests
+    /// that create/inspect real files (the /file endpoint, photo moves).
+    pub root_base: std::path::PathBuf,
     _dir: tempfile::TempDir,
 }
 
@@ -79,6 +83,7 @@ impl Fixture {
                 roots: Arc::new(roots),
                 allow_writes: true,
             },
+            root_base,
             _dir: dir,
         }
     }

@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::path::PathBuf;
 
 use axum::extract::{Path, Query, State};
 use axum::http::{header, HeaderMap, HeaderValue, Request, StatusCode};
@@ -235,10 +236,17 @@ pub async fn get_photo(
 ///   Already-present adds and absent removes are silent no-ops; an unknown or
 ///   Digikam-internal tag id is a 422 (nothing is applied — the whole patch is
 ///   one transaction).
+/// - `album`: target album id (from `/api/albums`) — **moves** the photo: the
+///   `Images.album` row and the **file on disk** (a same-filesystem `rename`
+///   only; cross-device is a 409, as are a name collision, a missing target
+///   directory, and a source file missing on disk). The current album is a
+///   silent no-op. `modificationDate`/`uniqueHash` are untouched (a rename
+///   keeps content and mtime), so thumbnails keep working.
 ///
 /// `{}` is a valid no-op. Requires the server to have been started with
 /// `--allow-writes` (else 403). Every actual change is logged with the image id
-/// and path. Writes only the DB — not the file's XMP/EXIF metadata.
+/// and path(s). Metadata writes touch only the DB — not the file's XMP/EXIF
+/// (like Digikam with "write metadata to files" off); only a move touches disk.
 pub async fn patch_photo(
     State(state): State<AppState>,
     Path(id): Path<i64>,
@@ -249,21 +257,39 @@ pub async fn patch_photo(
             "writes are disabled; start the server with --allow-writes".into(),
         ));
     }
-    if patch.rating.is_none() && patch.tags_add.is_empty() && patch.tags_remove.is_empty() {
+    if patch.rating.is_none()
+        && patch.tags_add.is_empty()
+        && patch.tags_remove.is_empty()
+        && patch.album.is_none()
+    {
         return Ok(StatusCode::NO_CONTENT);
     }
 
     run_blocking(&state, move |conn, state| {
         let tx = conn.unchecked_transaction()?;
 
-        let (album_root, relative_path, name, old): (i64, String, String, Option<i64>) = conn
+        let (album_root, relative_path, name, old, cur_album): (
+            i64,
+            String,
+            String,
+            Option<i64>,
+            i64,
+        ) = conn
             .query_row(
-                "SELECT a.albumRoot, a.relativePath, i.name, ii.rating FROM Images i \
+                "SELECT a.albumRoot, a.relativePath, i.name, ii.rating, i.album FROM Images i \
                  JOIN Albums a ON a.id = i.album \
                  LEFT JOIN ImageInformation ii ON ii.imageid = i.id \
                  WHERE i.id = ?1 AND i.status = 1",
                 [id],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                    ))
+                },
             )
             .map_err(|e| match e {
                 rusqlite::Error::QueryReturnedNoRows => {
@@ -329,12 +355,81 @@ pub async fn patch_photo(
             }
         }
 
-        tx.commit()?;
+        // The move comes LAST: its filesystem rename must sit between the final
+        // DB statement and the commit — a rename failure drops the transaction
+        // (DB rolled back, disk untouched), a commit failure renames back.
+        let mut moved: Option<(PathBuf, PathBuf)> = None;
+        if let Some(target) = patch.album {
+            if target != cur_album {
+                let (t_root, t_rel): (i64, String) = conn
+                    .query_row(
+                        "SELECT albumRoot, relativePath FROM Albums WHERE id = ?1",
+                        [target],
+                        |row| Ok((row.get(0)?, row.get(1)?)),
+                    )
+                    .optional()?
+                    .ok_or_else(|| {
+                        AppError::Unprocessable(format!("unknown album id {target}"))
+                    })?;
+                let src_root = state.roots.get(&album_root).ok_or_else(|| {
+                    AppError::Unprocessable(format!("album root {album_root} unknown"))
+                })?;
+                let dst_root = state.roots.get(&t_root).ok_or_else(|| {
+                    AppError::Unprocessable(format!("album root {t_root} unknown"))
+                })?;
+                let old_abs = image_abs_path(src_root, &relative_path, &name);
+                let new_abs = image_abs_path(dst_root, &t_rel, &name);
+                // Preflight: refuse DB/filesystem drift rather than papering
+                // over it, and never overwrite an existing file.
+                let new_dir = new_abs.parent().expect("image path has a parent");
+                if !new_dir.is_dir() {
+                    return Err(AppError::Conflict(format!(
+                        "target album directory missing: {}",
+                        new_dir.display()
+                    )));
+                }
+                if new_abs.exists() {
+                    return Err(AppError::Conflict(format!(
+                        "a file named \"{name}\" already exists in the target album"
+                    )));
+                }
+                conn.execute("UPDATE Images SET album = ?1 WHERE id = ?2", [target, id])?;
+                std::fs::rename(&old_abs, &new_abs).map_err(|e| rename_error(e, &old_abs))?;
+                tracing::info!(id, from = %old_abs.display(), to = %new_abs.display(), "photo moved");
+                moved = Some((old_abs, new_abs));
+            }
+        }
+
+        if let Err(e) = tx.commit() {
+            // The rename already happened; put the file back (best effort) so
+            // disk matches the rolled-back DB.
+            if let Some((old_abs, new_abs)) = &moved {
+                if let Err(e2) = std::fs::rename(new_abs, old_abs) {
+                    tracing::error!(id, error = %e2, "could not rename file back after failed commit");
+                }
+            }
+            return Err(e.into());
+        }
         Ok(())
     })
     .await?;
 
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// Map a failed move `rename` to a client-facing error: a cross-filesystem move
+/// or a source file missing on disk is a 409 (the request conflicts with the
+/// state of the world), anything else is a 500.
+fn rename_error(e: std::io::Error, from: &std::path::Path) -> AppError {
+    match e.kind() {
+        std::io::ErrorKind::CrossesDevices => {
+            AppError::Conflict("moving across filesystems is not supported (yet)".into())
+        }
+        std::io::ErrorKind::NotFound => {
+            AppError::Conflict(format!("file missing on disk: {}", from.display()))
+        }
+        _ => AppError::Internal(anyhow::anyhow!("renaming {}: {e}", from.display())),
+    }
 }
 
 /// Resolve a tag id to its absolute path (`/places/beach`) for the change log,

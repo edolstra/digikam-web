@@ -169,6 +169,12 @@ pub struct PatchPhoto {
     pub tags_add: Vec<i64>,
     #[serde(default)]
     pub tags_remove: Vec<i64>,
+    /// Target album id (from `/api/albums`) to **move** the photo to — both the
+    /// DB row and the file on disk. Plain `Option` (a photo always has an
+    /// album, so there's no "clear"): absent = no change, the current album =
+    /// silent no-op. Same-filesystem moves only (`rename`).
+    #[serde(default)]
+    pub album: Option<i64>,
 }
 
 /// Deserialize a present-but-possibly-null field as `Some(inner)`, so that

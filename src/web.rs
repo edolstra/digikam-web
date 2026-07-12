@@ -223,18 +223,18 @@ fn page_html(title: &str, body: Markup) -> Markup {
                     button.nav.next aria-label="Next" { "›" }
                     // Metadata overlay, filled + toggled by web.js (hidden by default).
                     div id="lb-info" {}
-                    // Tag modal (the `t` key): quick filter + scrollable checkbox
-                    // tree + Cancel/Apply, filled + toggled by web.js. Must live
-                    // inside #lightbox — a fullscreen element is the only thing
-                    // the browser paints.
-                    div id="lb-tags" {
-                        input id="lb-tags-filter" type="text" placeholder="Filter tags…" aria-label="Filter tags" autocomplete="off";
-                        // Most-recently-used tags (flat, full paths), then the tree.
-                        div.tag-mru {}
-                        div.tag-list {}
-                        div.tag-actions {
-                            button.tag-cancel type="button" { "Cancel" }
-                            button.tag-apply type="button" { "Apply" }
+                    // Picker modal (`t` = tags, `m` = move to album): quick filter
+                    // + MRU + scrollable tree + Cancel/Apply-or-Move, filled +
+                    // toggled by web.js per mode. Must live inside #lightbox — a
+                    // fullscreen element is the only thing the browser paints.
+                    div id="lb-picker" {
+                        input id="lb-picker-filter" type="text" placeholder="Filter…" aria-label="Filter" autocomplete="off";
+                        // Most-recently-used entries (flat, full paths), then the tree.
+                        div.picker-mru {}
+                        div.picker-list {}
+                        div.picker-actions {
+                            button.picker-cancel type="button" { "Cancel" }
+                            button.picker-apply type="button" { "Apply" }
                         }
                     }
                 }

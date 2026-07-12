@@ -204,44 +204,45 @@ body.modal-open { overflow: hidden; }
          opacity: 0; pointer-events: none; transition: opacity 0.25s ease; }
 #toast.show { opacity: 1; }
 #toast.failed { color: #f66; }
-/* Tag modal (the `t` key): quick filter on top, scrollable checkbox tree,
-   Cancel/Apply footer. Toggled via `.lightbox.tags-open` like the info panel. */
-#lb-tags { position: absolute; top: 3.5rem; left: 50%; transform: translateX(-50%);
-           display: none; flex-direction: column;
-           width: min(92vw, 24rem); max-height: min(75vh, 32rem);
-           padding: 0.6rem 0.85rem; border-radius: 6px;
-           background: rgba(0, 0, 0, 0.75); color: #fff; font-size: 0.9rem;
-           text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9); }
-.lightbox.tags-open #lb-tags { display: flex; }
-#lb-tags-filter { margin-bottom: 0.4rem; padding: 0.25rem 0.4rem;
-                  background: #222; color: #fff; border: 1px solid #555;
-                  border-radius: 4px; font: inherit; }
-/* Most-recently-used tags: a flat, full-path list pinned between the filter
+/* Picker modal (`t` = tags, `m` = move to album): quick filter on top, MRU,
+   scrollable tree, Cancel/Apply(-or-Move) footer. Toggled via
+   `.lightbox.picker-open` like the info panel. */
+#lb-picker { position: absolute; top: 3.5rem; left: 50%; transform: translateX(-50%);
+             display: none; flex-direction: column;
+             width: min(92vw, 24rem); max-height: min(75vh, 32rem);
+             padding: 0.6rem 0.85rem; border-radius: 6px;
+             background: rgba(0, 0, 0, 0.75); color: #fff; font-size: 0.9rem;
+             text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9); }
+.lightbox.picker-open #lb-picker { display: flex; }
+#lb-picker-filter { margin-bottom: 0.4rem; padding: 0.25rem 0.4rem;
+                    background: #222; color: #fff; border: 1px solid #555;
+                    border-radius: 4px; font: inherit; }
+/* Most-recently-used entries: a flat, full-path list pinned between the filter
    and the (scrollable) tree; its divider disappears with it when the quick
    filter leaves it empty. */
-#lb-tags .tag-mru:not(:empty) { border-bottom: 1px solid #444;
-                                margin-bottom: 0.3rem; padding-bottom: 0.3rem; }
+#lb-picker .picker-mru:not(:empty) { border-bottom: 1px solid #444;
+                                     margin-bottom: 0.3rem; padding-bottom: 0.3rem; }
 /* The scrollable part; pan-y re-enables native touch scrolling under the
    lightbox's touch-action: none. */
-#lb-tags .tag-list { flex: 1; min-height: 0; overflow-y: auto; touch-action: pan-y; }
-#lb-tags .tag-row { display: block; padding: 0.15rem 0.3rem;
-                    padding-left: calc(0.3rem + var(--depth, 0) * 1rem);
-                    border-radius: 4px; cursor: pointer; white-space: nowrap;
-                    overflow: hidden; text-overflow: ellipsis; }
-#lb-tags .tag-row[hidden] { display: none; } /* display:block above would win otherwise */
-#lb-tags .tag-row:focus-within { outline: 2px solid #f5c518; outline-offset: -2px; }
-#lb-tags .tag-row.ctx { color: #888; }  /* non-matching ancestor kept for context */
-#lb-tags .tag-row input { margin-right: 0.45rem; accent-color: #f5c518; }
-#lb-tags .tag-actions { display: flex; justify-content: flex-end; gap: 0.5rem; margin-top: 0.5rem; }
-#lb-tags .tag-actions button { font: inherit; cursor: pointer; padding: 0.2rem 0.9rem;
-                               border: 1px solid #555; border-radius: 4px;
-                               background: #222; color: #fff;
-                               /* undo the generic translucent .lightbox button look */
-                               opacity: 1; text-shadow: none; }
-#lb-tags .tag-actions .tag-apply { background: #f5c518; border-color: #f5c518; color: #111; }
+#lb-picker .picker-list { flex: 1; min-height: 0; overflow-y: auto; touch-action: pan-y; }
+#lb-picker .picker-row { display: block; padding: 0.15rem 0.3rem;
+                         padding-left: calc(0.3rem + var(--depth, 0) * 1rem);
+                         border-radius: 4px; cursor: pointer; white-space: nowrap;
+                         overflow: hidden; text-overflow: ellipsis; }
+#lb-picker .picker-row[hidden] { display: none; } /* display:block above would win otherwise */
+#lb-picker .picker-row:focus-within { outline: 2px solid #f5c518; outline-offset: -2px; }
+#lb-picker .picker-row.ctx { color: #888; }  /* non-matching ancestor kept for context */
+#lb-picker .picker-row input { margin-right: 0.45rem; accent-color: #f5c518; }
+#lb-picker .picker-actions { display: flex; justify-content: flex-end; gap: 0.5rem; margin-top: 0.5rem; }
+#lb-picker .picker-actions button { font: inherit; cursor: pointer; padding: 0.2rem 0.9rem;
+                                    border: 1px solid #555; border-radius: 4px;
+                                    background: #222; color: #fff;
+                                    /* undo the generic translucent .lightbox button look */
+                                    opacity: 1; text-shadow: none; }
+#lb-picker .picker-actions .picker-apply { background: #f5c518; border-color: #f5c518; color: #111; }
 @media (hover: hover) {
-  #lb-tags .tag-row:hover { background: rgba(255, 255, 255, 0.08); }
-  #lb-tags .tag-actions button:hover { filter: brightness(1.15); }
+  #lb-picker .picker-row:hover { background: rgba(255, 255, 255, 0.08); }
+  #lb-picker .picker-actions button:hover { filter: brightness(1.15); }
 }
 
 /* Auto-hide the controls after inactivity (web.js toggles `.idle`); they fade
