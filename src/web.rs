@@ -214,9 +214,18 @@ fn page_html(title: &str, body: Markup) -> Markup {
                 (body)
                 div.lightbox id="lightbox" {
                     button.close aria-label="Close" { "×" }
-                    button.info aria-label="Image info" title="Image info (i)" { "ⓘ" }
-                    button.search-btn aria-label="Reverse image search on Yandex" title="Reverse image search on Yandex" { "🔍" }
-                    button.slideshow-btn aria-label="Slideshow" title="Slideshow (s)" { "▶" }
+                    // Top-left action row: the ⓘ info toggle plus the per-photo
+                    // operations (same as the t / m keys; Yandex lives only
+                    // here, hidden for videos). One uniform row of buttons.
+                    div.lb-actions {
+                        button.info aria-label="Image info" title="Image info (i)" { "ⓘ" }
+                        // Slideshow lives up here (not bottom-left) so it stays
+                        // clear of a video's native controls.
+                        button.slideshow-btn aria-label="Slideshow" title="Slideshow (s)" { "▶" }
+                        button.lb-act.lb-act-tags data-act="tags" title="Edit tags (t)" { "🏷 Tag" }
+                        button.lb-act.lb-act-move data-act="move" title="Move to album (m)" { "📂 Move" }
+                        button.lb-act.lb-act-yandex data-act="yandex" title="Reverse image search on Yandex" { "🔍 Yandex" }
+                    }
                     button.nav.prev aria-label="Previous" { "‹" }
                     img.full id="lb-img" alt="" decoding="async";
                     video.full id="lb-video" playsinline loop controls {}

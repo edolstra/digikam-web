@@ -784,6 +784,12 @@ function initLightbox() {
   // navigates in-page instead of doing a full document load. (`suppressClick`
   // swallows the synthetic click from a touch tap, which the touch handler below
   // already acted on.)
+  // The top-left action buttons (Tag / Move / Yandex), dispatched by data-act.
+  function infoAction(act) {
+    if (act === 'tags' || act === 'move') togglePicker(act);
+    else if (act === 'yandex') yandexSearch();
+  }
+
   infoEl.addEventListener('click', function (e) {
     e.stopPropagation();
     if (tapConsumed()) return;
@@ -1088,10 +1094,12 @@ function initLightbox() {
     if (tapConsumed()) return;
     toggleInfo();
   });
-  lb.querySelector('.search-btn').addEventListener('click', function (e) {
-    e.stopPropagation();
-    if (tapConsumed()) return;
-    yandexSearch();
+  Array.prototype.forEach.call(lb.querySelectorAll('.lb-act'), function (b) {
+    b.addEventListener('click', function (e) {
+      e.stopPropagation();
+      if (tapConsumed()) return;
+      infoAction(b.dataset.act);
+    });
   });
   slideBtn.addEventListener('click', function (e) {
     e.stopPropagation();
@@ -1290,7 +1298,8 @@ function initLightbox() {
     // that album; a tap on the panel itself just keeps it (none count as an
     // off-media letterbox close). The synthetic click is swallowed below.
     if (e.target.closest('.slideshow-btn')) { toggleSlideshow(); suppressClick = true; return; }
-    if (e.target.closest('.search-btn')) { yandexSearch(); suppressClick = true; return; }
+    var act = e.target.closest('.lb-act');
+    if (act) { infoAction(act.dataset.act); suppressClick = true; return; }
     if (e.target.closest('.info')) { toggleInfo(); suppressClick = true; return; }
     if (e.target.closest('#lb-info')) {
       var star = e.target.closest('.rate-star');
