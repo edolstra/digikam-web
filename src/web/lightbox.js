@@ -1165,7 +1165,8 @@ function initLightbox() {
 
   // ----- Touch gestures -----
   // Over the whole lightbox: one-finger swipe up -> random, left/right -> prev/next,
-  // tap -> reveal controls / pause a video / close on the letterbox. Two-finger
+  // tap -> reveal controls / close on the letterbox (a tap on a video is the
+  // browser's: it shows the native control overlay). Two-finger
   // pinch zooms the image (1×–4×); while zoomed, one finger pans and double-tap
   // toggles zoom. A swipe/pinch fires no click, so taps and gestures don't collide;
   // on touch these take over from the native video seek bar (mouse-usable on desktop).
@@ -1311,17 +1312,14 @@ function initLightbox() {
       if (link) jumpToAlbum(link.getAttribute('href')); else wake();
       suppressClick = true; return;
     }
-    // Tap: reveal the controls, then pause a video / close on the letterbox.
-    // Handled here (not via click) because the native video controls swallow the
-    // click on a video; swallow the synthetic click so the mouse handler doesn't
-    // re-fire (which would close on a reveal-tap).
+    // Tap: reveal the controls / close on the letterbox. A tap on a video is
+    // left to the browser: showing/hiding the native control overlay (and
+    // play/pause) is its job — we deliberately don't toggle playback here.
+    // Swallow the synthetic click so the mouse handler doesn't re-fire (which
+    // would close on a reveal-tap); the UA's own tap handling is unaffected.
     var hidden = lb.classList.contains('idle');
     wake();
-    if (onMedia(t.clientX, t.clientY)) {
-      if (activeEl() === vid) togglePlay();
-    } else if (!hidden) {
-      close();
-    }
+    if (!onMedia(t.clientX, t.clientY) && !hidden) close();
     suppressClick = true;
   }, { passive: true });
 
