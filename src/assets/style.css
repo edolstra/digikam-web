@@ -216,6 +216,11 @@ body.modal-open { overflow: hidden; }
 #lb-tags-filter { margin-bottom: 0.4rem; padding: 0.25rem 0.4rem;
                   background: #222; color: #fff; border: 1px solid #555;
                   border-radius: 4px; font: inherit; }
+/* Most-recently-used tags: a flat, full-path list pinned between the filter
+   and the (scrollable) tree; its divider disappears with it when the quick
+   filter leaves it empty. */
+#lb-tags .tag-mru:not(:empty) { border-bottom: 1px solid #444;
+                                margin-bottom: 0.3rem; padding-bottom: 0.3rem; }
 /* The scrollable part; pan-y re-enables native touch scrolling under the
    lightbox's touch-action: none. */
 #lb-tags .tag-list { flex: 1; min-height: 0; overflow-y: auto; touch-action: pan-y; }

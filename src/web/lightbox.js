@@ -318,10 +318,36 @@ function initLightbox() {
   // Esc, Cancel, a click outside, navigating, or dismissing discards them.
   var tagsEl = document.getElementById('lb-tags');
   var tagsFilter = document.getElementById('lb-tags-filter');
+  var tagsMru = tagsEl.querySelector('.tag-mru');
   var tagsList = tagsEl.querySelector('.tag-list');
   var tagsOpen = false;
   var tagsPhoto = null;    // the PhotoSummary the open modal is editing
   var tagsOriginal = {};   // path -> true: the tag set when the modal opened
+
+  // The most-recently-used tags — the last 10 tags *added* to some image
+  // (each use moves it to the front; removals don't touch it). Shown flat, as
+  // full paths, between the quick filter and the tree. Persisted in
+  // localStorage so it survives reloads; unavailable/corrupt storage (private
+  // mode, quota) just degrades to session-only. Entries whose tag no longer
+  // exists in the hierarchy are skipped when the modal is built.
+  var MRU_KEY = 'digikam.tagMru';
+  var mruTags = []; // [{id, path}], most recent first
+  try {
+    var storedMru = JSON.parse(localStorage.getItem(MRU_KEY) || '[]');
+    if (Array.isArray(storedMru)) {
+      mruTags = storedMru.filter(function (t) {
+        return t && typeof t.id === 'number' && typeof t.path === 'string';
+      }).slice(0, 10);
+    }
+  } catch (e) { /* start empty */ }
+  function mruUsed(ids, paths) {
+    ids.forEach(function (id, i) {
+      mruTags = mruTags.filter(function (t) { return t.id !== id; });
+      mruTags.unshift({ id: id, path: paths[i] });
+    });
+    mruTags = mruTags.slice(0, 10);
+    try { localStorage.setItem(MRU_KEY, JSON.stringify(mruTags)); } catch (e) { /* ignore */ }
+  }
 
   function openTags() {
     var p = items[idx] && items[idx].photo;
@@ -349,35 +375,54 @@ function initLightbox() {
     tagsOpen = false;
     tagsPhoto = null;
     lb.classList.remove('tags-open');
+    tagsMru.replaceChildren();
     tagsList.replaceChildren();
   }
   function toggleTags() { if (tagsOpen) closeTags(); else openTags(); }
 
-  // Flatten the tag tree (already name-sorted per level by the server) into
-  // indented checkbox rows, checked for the photo's current tags.
+  // One checkbox row. The same tag can appear twice (MRU + tree); a change
+  // listener on the modal keeps same-id checkboxes in sync, and the apply diff
+  // reads only the tree (every MRU row has a tree twin).
+  function tagRow(id, path, text, depth) {
+    var row = document.createElement('label');
+    row.className = 'tag-row';
+    row.style.setProperty('--depth', depth);
+    var cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.checked = !!tagsOriginal[path];
+    cb.dataset.id = id;
+    cb.dataset.path = path;
+    row.appendChild(cb);
+    row.appendChild(document.createTextNode(text));
+    return row;
+  }
+
+  // Build the MRU rows (flat, full paths) and the tree (already name-sorted
+  // per level by the server) as indented checkbox rows, checked for the
+  // photo's current tags.
   function buildTagRows(tree, currentPaths) {
     tagsOriginal = {};
     currentPaths.forEach(function (t) { tagsOriginal[t] = true; });
+    var treeIds = {};
     var frag = document.createDocumentFragment();
     function walk(nodes, prefix, depth) {
       nodes.forEach(function (n) {
         var path = prefix + '/' + n.name;
-        var row = document.createElement('label');
-        row.className = 'tag-row';
-        row.style.setProperty('--depth', depth);
-        var cb = document.createElement('input');
-        cb.type = 'checkbox';
-        cb.checked = !!tagsOriginal[path];
-        cb.dataset.id = n.id;
-        cb.dataset.path = path;
-        row.appendChild(cb);
-        row.appendChild(document.createTextNode(n.name));
-        frag.appendChild(row);
+        treeIds[n.id] = true;
+        frag.appendChild(tagRow(n.id, path, n.name, depth));
         if (n.children && n.children.length) walk(n.children, path, depth + 1);
       });
     }
     walk(tree, '', 0);
     tagsList.replaceChildren(frag);
+
+    // MRU rows, skipping tags that no longer exist in the hierarchy (so every
+    // MRU checkbox has a tree twin to sync with).
+    var mru = document.createDocumentFragment();
+    mruTags.forEach(function (t) {
+      if (treeIds[t.id]) mru.appendChild(tagRow(t.id, t.path, t.path, 0));
+    });
+    tagsMru.replaceChildren(mru);
   }
 
   // Quick filter: case-insensitive substring match against the tag's full
@@ -386,6 +431,15 @@ function initLightbox() {
   // Non-matching ancestors of a match stay visible for context, dimmed (.ctx).
   function applyTagFilter() {
     var q = tagsFilter.value.trim().toLowerCase();
+    // The MRU rows: a plain path-substring match (flat — no ancestor logic).
+    // The section (and its divider) disappears when nothing in it is visible.
+    var anyMru = false;
+    Array.prototype.forEach.call(tagsMru.children, function (row) {
+      var match = !q || row.firstChild.dataset.path.toLowerCase().indexOf(q) !== -1;
+      row.hidden = !match;
+      anyMru = anyMru || match;
+    });
+    tagsMru.hidden = !anyMru;
     var anc = []; // current ancestor chain, indexed by depth (rows are in DFS order)
     Array.prototype.forEach.call(tagsList.children, function (row) {
       var d = +row.style.getPropertyValue('--depth');
@@ -402,9 +456,12 @@ function initLightbox() {
     });
   }
 
+  // All visible checkboxes in DOM order: the MRU section first, then the tree —
+  // ArrowDown from the filter walks them as one sequence.
   function visibleTagBoxes() {
-    return Array.prototype.slice.call(
-      tagsList.querySelectorAll('.tag-row:not([hidden]) input'));
+    return Array.prototype.slice.call(tagsEl.querySelectorAll(
+      '.tag-mru:not([hidden]) .tag-row:not([hidden]) input, ' +
+      '.tag-list .tag-row:not([hidden]) input'));
   }
 
   // Commit the pending checkbox changes: diff against the set at open time,
@@ -423,6 +480,7 @@ function initLightbox() {
       addPaths.map(function (t) { return '+' + t; })
         .concat(remPaths.map(function (t) { return '−' + t; })).join(' ');
     applyTagChange(p.id, add, addPaths, rem, remPaths).then(function () {
+      mruUsed(add, addPaths); // adds count as "used"; removals don't touch MRU
       closeTags();
       toast(label);
       pushUndo({
@@ -460,7 +518,7 @@ function initLightbox() {
       if (tagsOpen && tagsPhoto && tagsPhoto.id === photoId) {
         removePaths.forEach(function (x) { delete tagsOriginal[x]; });
         addPaths.forEach(function (x) { tagsOriginal[x] = true; });
-        Array.prototype.forEach.call(tagsList.querySelectorAll('.tag-row input'), function (cb) {
+        Array.prototype.forEach.call(tagsEl.querySelectorAll('.tag-row input'), function (cb) {
           if (addPaths.indexOf(cb.dataset.path) !== -1) cb.checked = true;
           if (removePaths.indexOf(cb.dataset.path) !== -1) cb.checked = false;
         });
@@ -484,9 +542,12 @@ function initLightbox() {
       }
     }
   });
-  tagsList.addEventListener('keydown', function (e) {
+  // Keys on the rows (MRU + tree) and buttons. The filter input's own handler
+  // above stopPropagation's, so its keys never reach this one.
+  tagsEl.addEventListener('keydown', function (e) {
     e.stopPropagation();
     if (e.key === 'Escape') { e.preventDefault(); closeTags(); return; }
+    if (e.target.closest('button')) return; // Enter on Cancel/Apply = native click
     if (e.key === 'Enter') { e.preventDefault(); applyTags(); return; }
     if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
       e.preventDefault();
@@ -501,6 +562,15 @@ function initLightbox() {
       }
     }
     // Space is the native checkbox toggle — a local pending change, left alone.
+  });
+  // The same tag can be shown twice (MRU + tree): mirror a toggle onto every
+  // checkbox with the same tag id.
+  tagsEl.addEventListener('change', function (e) {
+    var cb = e.target;
+    if (cb.type !== 'checkbox' || !cb.dataset.id) return;
+    Array.prototype.forEach.call(
+      tagsEl.querySelectorAll('.tag-row input[data-id="' + cb.dataset.id + '"]'),
+      function (other) { other.checked = cb.checked; });
   });
   // Clicks inside the modal stay in it (the lb handler treats any click with
   // the modal open as a discard, see below).

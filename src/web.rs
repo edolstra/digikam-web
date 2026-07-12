@@ -229,6 +229,8 @@ fn page_html(title: &str, body: Markup) -> Markup {
                     // the browser paints.
                     div id="lb-tags" {
                         input id="lb-tags-filter" type="text" placeholder="Filter tags…" aria-label="Filter tags" autocomplete="off";
+                        // Most-recently-used tags (flat, full paths), then the tree.
+                        div.tag-mru {}
                         div.tag-list {}
                         div.tag-actions {
                             button.tag-cancel type="button" { "Cancel" }
