@@ -329,6 +329,8 @@ function initLightbox() {
   var pickerFilter = document.getElementById('lb-picker-filter');
   var pickerMru = pickerEl.querySelector('.picker-mru');
   var pickerList = pickerEl.querySelector('.picker-list');
+  var pickerMruLabel = pickerEl.querySelector('.picker-label-mru');
+  var pickerListLabel = pickerEl.querySelector('.picker-label-list');
   var pickerApplyBtn = pickerEl.querySelector('.picker-apply');
   var pickerOpen = false;
   var pickerMode = null;   // 'tags' | 'move' while open
@@ -377,6 +379,8 @@ function initLightbox() {
     pickerFilter.value = '';
     pickerMru.replaceChildren();
     pickerList.replaceChildren();
+    pickerMruLabel.hidden = true; // shown once the MRU rows are built (if any)
+    pickerListLabel.textContent = mode === 'move' ? 'Albums' : 'Tags';
     // Move mode has no commit step (activating a row IS the action), so the
     // primary footer button only exists for tags mode — and starts disabled
     // there (nothing changed yet).
@@ -539,6 +543,7 @@ function initLightbox() {
       anyMru = anyMru || match;
     });
     pickerMru.hidden = !anyMru;
+    pickerMruLabel.hidden = !anyMru; // the label goes with its section
     var anc = []; // current ancestor chain, indexed by depth (rows are in DFS order)
     Array.prototype.forEach.call(pickerList.children, function (row) {
       var d = +row.style.getPropertyValue('--depth');

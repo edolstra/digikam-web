@@ -217,11 +217,13 @@ body.modal-open { overflow: hidden; }
 #lb-picker-filter { margin-bottom: 0.4rem; padding: 0.25rem 0.4rem;
                     background: #222; color: #fff; border: 1px solid #555;
                     border-radius: 4px; font: inherit; }
+/* Small grey section labels ("Recently used", "Tags"/"Albums") above the MRU
+   and the tree; the MRU label hides together with its (empty/filtered-out)
+   section. */
+#lb-picker .picker-label { font-size: 0.72rem; color: #999; margin: 0.25rem 0 0.1rem; }
 /* Most-recently-used entries: a flat, full-path list pinned between the filter
-   and the (scrollable) tree; its divider disappears with it when the quick
-   filter leaves it empty. */
-#lb-picker .picker-mru:not(:empty) { border-bottom: 1px solid #444;
-                                     margin-bottom: 0.3rem; padding-bottom: 0.3rem; }
+   and the (scrollable) tree. */
+#lb-picker .picker-mru:not(:empty) { margin-bottom: 0.15rem; }
 /* The scrollable part; pan-y re-enables native touch scrolling under the
    lightbox's touch-action: none. */
 #lb-picker .picker-list { flex: 1; min-height: 0; overflow-y: auto; touch-action: pan-y; }

@@ -230,8 +230,12 @@ fn page_html(title: &str, body: Markup) -> Markup {
                     // fullscreen element is the only thing the browser paints.
                     div id="lb-picker" {
                         input id="lb-picker-filter" type="text" placeholder="Filter…" aria-label="Filter" autocomplete="off";
-                        // Most-recently-used entries (flat, full paths), then the tree.
+                        // Most-recently-used entries (flat, full paths), then the
+                        // tree; each under a small grey section label (the tree's
+                        // text is set per mode: "Tags" / "Albums").
+                        div.picker-label.picker-label-mru { "Recently used" }
                         div.picker-mru {}
+                        div.picker-label.picker-label-list {}
                         div.picker-list {}
                         div.picker-actions {
                             button.picker-cancel type="button" { "Cancel" }
