@@ -1148,7 +1148,8 @@ function initLightbox() {
     }
     else if (e.key === 'i' || e.key === 'I') { e.preventDefault(); toggleInfo(); }
     else if (e.key === 't' || e.key === 'T') { e.preventDefault(); togglePicker('tags'); }
-    else if (e.key === 'm' || e.key === 'M') { e.preventDefault(); togglePicker('move'); }
+    // `v` as in `mv` — `m` is taken by video mute (the convention everywhere).
+    else if (e.key === 'v' || e.key === 'V') { e.preventDefault(); togglePicker('move'); }
     else if (e.key === 's' || e.key === 'S') { e.preventDefault(); toggleSlideshow(); }
     else if (e.key === 'f' || e.key === 'F') { e.preventDefault(); toggleFullscreen(); }
     // +/- zoom the image toward the viewport center (like Ctrl+wheel toward the

@@ -223,7 +223,7 @@ fn page_html(title: &str, body: Markup) -> Markup {
                         // clear of a video's native controls.
                         button.slideshow-btn aria-label="Slideshow" title="Slideshow (s)" { "▶" }
                         button.lb-act.lb-act-tags data-act="tags" title="Edit tags (t)" { "🏷 Tag" }
-                        button.lb-act.lb-act-move data-act="move" title="Move to album (m)" { "📂 Move" }
+                        button.lb-act.lb-act-move data-act="move" title="Move to album (v)" { "📂 Move" }
                         button.lb-act.lb-act-yandex data-act="yandex" title="Reverse image search on Yandex" { "🔍 Yandex" }
                     }
                     button.nav.prev aria-label="Previous" { "‹" }
