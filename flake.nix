@@ -29,17 +29,21 @@
         craneLib = (crane.mkLib pkgs).overrideToolchain rustToolchain;
 
         # Keep Cargo sources plus the web assets that `include_str!` pulls in
-        # (cleanCargoSource alone would drop the .css/.js files).
+        # (cleanCargoSource alone would drop the .css/.js files). The Playwright
+        # e2e suite is excluded: its .js files would otherwise churn the Rust
+        # build on every spec edit (it gets its own store copy in checks.e2e).
         src = pkgs.lib.cleanSourceWith {
           src = ./.;
           name = "source";
           filter = path: type:
-            (pkgs.lib.hasSuffix ".css" path)
-            || (pkgs.lib.hasSuffix ".js" path)
-            || (pkgs.lib.hasSuffix ".ico" path)
-            || (pkgs.lib.hasSuffix ".png" path)
-            || (pkgs.lib.hasSuffix ".webmanifest" path)
-            || (craneLib.filterCargoSources path type);
+            !(pkgs.lib.hasInfix "/tests/e2e" path)
+            && ((pkgs.lib.hasSuffix ".css" path)
+              || (pkgs.lib.hasSuffix ".js" path)
+              || (pkgs.lib.hasSuffix ".jpg" path)
+              || (pkgs.lib.hasSuffix ".ico" path)
+              || (pkgs.lib.hasSuffix ".png" path)
+              || (pkgs.lib.hasSuffix ".webmanifest" path)
+              || (craneLib.filterCargoSources path type));
         };
 
         # WebAssembly PGF thumbnail decoder (built from haplo/webpgf). Its
@@ -80,6 +84,30 @@
             inherit cargoArtifacts;
             cargoClippyExtraArgs = "--all-targets -- --deny warnings";
           });
+          # Playwright e2e suite (tests/e2e): drives the real server — seeded
+          # via --seed-fixture — with headless Chromium. playwright-test and
+          # playwright-driver.browsers-chromium come from the same nixpkgs, so
+          # the runner and browser versions always match.
+          e2e = pkgs.runCommand "digikam-web-e2e" {
+            nativeBuildInputs = [ digikam-web pkgs.playwright-test pkgs.nodejs ];
+            PLAYWRIGHT_BROWSERS_PATH = pkgs.playwright-driver.browsers-chromium;
+            PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS = "true";
+            # Real fonts, so the stage screenshots (below) have legible text
+            # instead of tofu boxes.
+            FONTCONFIG_FILE = pkgs.makeFontsConf { fontDirectories = [ pkgs.dejavu_fonts ]; };
+          } ''
+            export HOME=$TMPDIR
+            cp -r ${./tests/e2e} e2e
+            chmod -R u+w e2e
+            cd e2e
+            # Makes require('@playwright/test') in the config/specs resolve.
+            ln -s ${pkgs.playwright-test}/lib/node_modules node_modules
+            # $out is a directory of per-stage screenshots for human review:
+            # `nix build .#checks.<system>.e2e` leaves them under ./result.
+            mkdir $out
+            export E2E_SCREENSHOT_DIR=$out
+            playwright test
+          '';
         };
 
         devShells.default = pkgs.mkShell {
@@ -92,10 +120,16 @@
             pkgs.jq
             pkgs.python3
             pkgs.nodejs
+            pkgs.playwright-test
           ];
           # `cargo build` in the dev shell embeds these the same way `nix build`
           # does (commonArgs.WEBPGF_PATH), so iterating here picks up the assets.
           WEBPGF_PATH = webpgf;
+          # Playwright e2e tests against a local build (see tests/e2e/):
+          #   cargo build && DIGIKAM_WEB_BIN=target/debug/digikam-web playwright test -c tests/e2e
+          PLAYWRIGHT_BROWSERS_PATH = pkgs.playwright-driver.browsers-chromium;
+          PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS = "true";
+          NODE_PATH = "${pkgs.playwright-test}/lib/node_modules";
         };
       });
 }

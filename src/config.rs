@@ -39,6 +39,11 @@ pub struct Config {
     /// return 403.
     #[arg(long, env = "ALLOW_WRITES")]
     pub allow_writes: bool,
+
+    /// Seed a synthetic test fixture (databases + image files) into DIR and
+    /// exit. For the e2e test suite; hidden from --help.
+    #[arg(long, hide = true, value_name = "DIR")]
+    pub seed_fixture: Option<PathBuf>,
 }
 
 impl Config {

@@ -1,6 +1,7 @@
 mod config;
 mod db;
 mod error;
+mod fixture;
 mod handlers;
 mod models;
 mod query;
@@ -31,6 +32,14 @@ async fn main() -> Result<()> {
         .init();
 
     let config = Config::parse();
+
+    // Hidden test-support mode: write the synthetic fixture and exit.
+    if let Some(dir) = &config.seed_fixture {
+        fixture::seed(dir)?;
+        tracing::info!(dir = %dir.display(), "seeded test fixture");
+        return Ok(());
+    }
+
     tracing::info!(
         database = %config.database.display(),
         mode = if config.allow_writes { "read-write; writes enabled" } else { "read-only" },
