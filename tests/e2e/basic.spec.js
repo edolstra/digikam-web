@@ -76,8 +76,9 @@ test('clicking a photo opens it full-screen in the lightbox', async ({ page }) =
 
 test('autoplay=true opens the lightbox in slideshow mode', async ({ page }) => {
   // Images only, so the random start can't land on the video (whose unprompted
-  // play() is subject to the autoplay policy).
-  await page.goto(ALBUM + '?video=false&autoplay=true');
+  // play() is subject to the autoplay policy). `interval=1` shortens the
+  // default 5s image interval so the advance is observable quickly.
+  await page.goto(ALBUM + '?video=false&autoplay=true&interval=1');
 
   const lb = page.locator('#lightbox');
   await expect(lb).toHaveClass(/\bopen\b/);
@@ -87,6 +88,11 @@ test('autoplay=true opens the lightbox in slideshow mode', async ({ page }) => {
   await expect(img).toHaveAttribute('src', /\/api\/photos\/(100|107)\/file$/);
   await expect.poll(() => img.evaluate((el) => el.naturalWidth)).toBeGreaterThan(0);
   await shot(page, '05-autoplay-slideshow');
+
+  // The slideshow advances on its own: with two images it must switch to the
+  // other one within the (1s) interval, well inside the poll timeout.
+  const first = await img.getAttribute('src');
+  await expect.poll(() => img.getAttribute('src'), { timeout: 4000 }).not.toBe(first);
 
   // A page load carries no user gesture, so the browser refuses fullscreen at
   // that point; the first key press stands in for it.

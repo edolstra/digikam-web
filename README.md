@@ -10,7 +10,7 @@ A vibe-coded web interface to [Digikam](https://www.digikam.org/), allowing remo
 * Filter by tag, rating, media type (photos/videos), aspect ratio, and sub-albums
 * Bookmarks (saved album + filter views)
 * Full-screen lightbox: zoom/pan, keyboard navigation, video playback, slideshow, reverse-image-search (Yandex), and a metadata/info panel
-* Screensaver / photo frame modes: `/random` (an endpoint that redirects to a random photo's file) and `autoplay=true` on any album URL (e.g. `/photos/Photos?min_rating=3&recursive=true&autoplay=true`, which opens the lightbox in slideshow mode on load; the first key press or tap makes it fullscreen)
+* Screensaver / photo frame modes: `/random` (an endpoint that redirects to a random photo's file) and `autoplay=true` on any album URL (e.g. `/photos/Photos?min_rating=3&recursive=true&autoplay=true`, which opens the lightbox in slideshow mode on load; the first key press or tap makes it fullscreen; add `interval=10` for 10s per image instead of the default 5)
 * JSON API
 * Installable on Android (and desktop) as a PWA
 

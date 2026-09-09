@@ -227,15 +227,16 @@ function initLightbox() {
   }
   function toggleInfo() { setInfo(!infoOpen); }
 
-  // Slideshow: auto-advance to a random item. Images advance after 5s; a video
-  // plays in full and advances when it ends (the 'ended' listener below) — so its
-  // loop is turned off while a slideshow runs.
+  // Slideshow: auto-advance to a random item. Images advance after
+  // `state.interval` seconds (5 by default; the `interval=` URL parameter); a
+  // video plays in full and advances when it ends (the 'ended' listener below)
+  // — so its loop is turned off while a slideshow runs.
   function clearSlide() { clearTimeout(slideTimer); slideTimer = 0; }
   function scheduleSlide() {
     clearSlide();
     if (!slideshowOn) return;
     var it = items[idx];
-    if (it && !it.video) slideTimer = setTimeout(goRandom, 5000);
+    if (it && !it.video) slideTimer = setTimeout(goRandom, state.interval * 1000);
   }
   function setSlideshow(on) {
     slideshowOn = on;

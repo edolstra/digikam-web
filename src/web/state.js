@@ -45,6 +45,11 @@ function readUrl() {
   // bootstrap in main.js). A one-shot launch instruction, not a filter: it's
   // not part of filters(), so no nav link carries it on.
   state.autoplay = q.get('autoplay') === 'true';
+  // `interval=<seconds>` sets how long the slideshow shows each image (default
+  // 5; any positive number, fractions allowed). Like `autoplay`, a launch
+  // setting rather than a filter: nav links don't carry it on.
+  var iv = parseFloat(q.get('interval'));
+  state.interval = (iv > 0) ? iv : 5;
 }
 
 // The current filters as a plain object, optionally with some keys overridden —
