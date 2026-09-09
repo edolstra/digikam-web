@@ -127,6 +127,22 @@ async function wakeControls(page) {
 }
 
 test('the ▶ button opens the slideshow settings modal', async ({ page }) => {
+  // Stub the Screen Wake Lock API to record requests/releases: a running
+  // slideshow must hold a screen lock (no screensaver / idle suspend).
+  await page.addInitScript(() => {
+    window.__wake = { requests: 0, releases: 0 };
+    Object.defineProperty(navigator, 'wakeLock', {
+      value: {
+        request: async () => {
+          window.__wake.requests++;
+          const lock = new EventTarget();
+          lock.release = async () => { window.__wake.releases++; lock.dispatchEvent(new Event('release')); };
+          return lock;
+        },
+      },
+    });
+  });
+  const wake = () => page.evaluate(() => window.__wake);
   await page.goto(ALBUM + '?video=false');
   await page.locator('#item-100').click();
   const lb = page.locator('#lightbox');
@@ -157,18 +173,23 @@ test('the ▶ button opens the slideshow settings modal', async ({ page }) => {
   await expect(lb).toHaveClass(RUNNING);
   await expect(lb).not.toHaveClass(/\bslideshow-open\b/);
   await expect(lb.locator('.slideshow-btn')).toHaveText('⏸');
+  await expect.poll(wake).toEqual({ requests: 1, releases: 0 }); // screen lock held
   // Grid order is [100, 107]: from 100 it advances to 107, then wraps to 100.
   await expect(img).toHaveAttribute('src', /\/api\/photos\/107\/file$/, { timeout: 4000 });
   await expect(img).toHaveAttribute('src', /\/api\/photos\/100\/file$/, { timeout: 4000 });
 
-  // `s` stops / starts directly, never opening the modal.
+  // `s` stops / starts directly, never opening the modal; the screen lock
+  // follows the slideshow.
   await page.keyboard.press('s');
   await expect(lb).not.toHaveClass(RUNNING);
+  await expect.poll(wake).toEqual({ requests: 1, releases: 1 });
   await page.keyboard.press('s');
   await expect(lb).toHaveClass(RUNNING);
   await expect(lb).not.toHaveClass(/\bslideshow-open\b/);
+  await expect.poll(wake).toEqual({ requests: 2, releases: 1 });
   await page.keyboard.press('s');
   await expect(lb).not.toHaveClass(RUNNING);
+  await expect.poll(wake).toEqual({ requests: 2, releases: 2 });
 
   // Copy slideshow link: the current view + the launch settings — and nothing
   // of that in the page's own URL. Capture the clipboard write in-page (no

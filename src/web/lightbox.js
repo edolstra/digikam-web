@@ -263,10 +263,39 @@ function initLightbox() {
     ssStart.textContent = on ? '⏸ Stop slideshow' : '▶ Start slideshow';
     if (activeEl() === vid) vid.loop = !on;
     if (ssOpen) setSlideshowPanel(false); // Start/Stop (from any path) dismisses the modal
+    if (on) acquireWakeLock(); else releaseWakeLock();
     scheduleSlide();
   }
   function toggleSlideshow() { setSlideshow(!slideshowOn); }
   vid.addEventListener('ended', function () { if (slideshowOn) slideAdvance(); });
+
+  // ----- Screen wake lock -----
+  // Keep the screen on while a slideshow runs: no screensaver, dimming or idle
+  // lock — and on Linux desktops no idle suspend either, since browsers map the
+  // lock to the freedesktop ScreenSaver inhibit. Needs a secure context (HTTPS /
+  // localhost) and browser support; a no-op otherwise. The browser releases
+  // the lock whenever the page is hidden (tab switch, minimize), so it's
+  // re-acquired on becoming visible while the slideshow still runs.
+  var wakeLock = null, wakeLockPending = false;
+  function acquireWakeLock() {
+    if (!navigator.wakeLock || wakeLock || wakeLockPending || document.hidden) return;
+    wakeLockPending = true;
+    navigator.wakeLock.request('screen').then(function (lock) {
+      wakeLockPending = false;
+      wakeLock = lock;
+      lock.addEventListener('release', function () { if (wakeLock === lock) wakeLock = null; });
+      if (!slideshowOn) releaseWakeLock(); // stopped while the request was pending
+    }, function () { wakeLockPending = false; }); // denied (e.g. low battery) / unsupported
+  }
+  function releaseWakeLock() {
+    if (!wakeLock) return;
+    var lock = wakeLock;
+    wakeLock = null;
+    lock.release().catch(function () {});
+  }
+  document.addEventListener('visibilitychange', function () {
+    if (!document.hidden && slideshowOn) acquireWakeLock();
+  });
 
   // ----- Slideshow settings panel -----
   // Open/close the modal under the ▶ button. Opening seeds the controls from
