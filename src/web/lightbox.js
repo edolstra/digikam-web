@@ -23,6 +23,8 @@ function initLightbox() {
   var slideTimer = 0;      // pending image advance (videos advance on 'ended')
   var bag = [];            // remaining indices of the current random permutation
                            // (popped from the end; reshuffled once exhausted)
+  var autoplayed = false;  // opened by autoplay() and still waiting for a user
+                           // gesture to enter fullscreen (see enterFullscreen)
 
   function isOpen() { return lb.classList.contains('open'); }
   function activeEl() { return vid.classList.contains('active') ? vid : img; }
@@ -906,11 +908,40 @@ function initLightbox() {
     show(i, true);
     // Controls start hidden — unless the info panel is open, which pins them.
     if (!infoOpen) lb.classList.add('idle');
-    // Must be requested inside the click gesture. Unsupported on iPhone Safari
-    // (guarded), where the full-viewport overlay alone is used.
+    // Must be requested inside the click gesture.
+    enterFullscreen();
+  }
+
+  // Request browser fullscreen on the lightbox unless already in it. Needs a
+  // user gesture (click / key / tap) or the browser rejects it — silently, as
+  // it's caught; the full-viewport overlay then serves on its own. Unsupported
+  // on iPhone Safari (guarded).
+  function enterFullscreen() {
     if (!document.fullscreenElement && lb.requestFullscreen) {
       lb.requestFullscreen().catch(function () {});
     }
+  }
+
+  // Start a slideshow unprompted — the `autoplay=true` URL parameter: open the
+  // lightbox on a random item with the slideshow running. Returns false when the
+  // grid has nothing to show. The page load carries no user gesture, so the
+  // fullscreen request in open() is refused unless the browser is set up to
+  // allow it (kiosk mode, Chrome's "automatic fullscreen" site setting); the
+  // `autoplayed` flag then makes the first key press or tap on the media enter
+  // fullscreen instead of leaving that to the `f` key.
+  function autoplay() {
+    if (!items.length) return false;
+    open(Math.floor(Math.random() * items.length));
+    setSlideshow(true);
+    autoplayed = true; // (harmless if open()'s own request did succeed)
+    return true;
+  }
+  // The first user gesture after an autoplay doubles as the fullscreen request
+  // (one shot, so a later deliberate `f` exit isn't undone by the next key).
+  function gestureFullscreen() {
+    if (!autoplayed) return;
+    autoplayed = false;
+    enterFullscreen();
   }
 
   // UI dismiss (X / Esc / tapping outside): step back in history so the Back
@@ -926,6 +957,7 @@ function initLightbox() {
 
   function dismiss() {
     closing = false;
+    autoplayed = false;
     clearTimeout(idleTimer);
     if (pickerOpen) closePicker(); // discard pending picker edits
     // Stop any running slideshow and restore the default video looping.
@@ -978,8 +1010,8 @@ function initLightbox() {
         fsToggling = true;
         document.exitFullscreen().catch(function () { fsToggling = false; });
       }
-    } else if (lb.requestFullscreen) {
-      lb.requestFullscreen().catch(function () {});
+    } else {
+      enterFullscreen();
     }
   }
 
@@ -1087,6 +1119,7 @@ function initLightbox() {
     var hidden = lb.classList.contains('idle');
     wake();
     if (!onMedia(e.clientX, e.clientY) && !hidden) close();
+    else gestureFullscreen(); // an autoplay's first gesture (never on a closing click)
   });
   lb.querySelector('.close').addEventListener('click', function (e) { e.stopPropagation(); close(); });
   lb.querySelector('.info').addEventListener('click', function (e) {
@@ -1130,6 +1163,10 @@ function initLightbox() {
     // Leave other modifier combos (reload, tab switching, …) to the browser.
     if (e.ctrlKey || e.altKey || e.metaKey) return;
     if (e.key === 'Escape') { close(); return; }
+    // After an autoplay, this key press is the first user gesture: use it to
+    // enter fullscreen (as well as doing whatever the key does). `f` toggles
+    // fullscreen itself below, so it takes the plain path.
+    if (e.key !== 'f' && e.key !== 'F') gestureFullscreen();
     // Arrows/Home/End navigate between items as usual. preventDefault keeps a
     // focused <video> (it has controls) from also consuming them to seek.
     if (e.key === 'ArrowLeft') { e.preventDefault(); go(-1); }
@@ -1321,6 +1358,7 @@ function initLightbox() {
     var hidden = lb.classList.contains('idle');
     wake();
     if (!onMedia(t.clientX, t.clientY) && !hidden) close();
+    else gestureFullscreen(); // an autoplay's first gesture (never on a closing tap)
     suppressClick = true;
   }, { passive: true });
 
@@ -1379,6 +1417,6 @@ function initLightbox() {
     if (scale > 1) resetZoom(); else zoomTo(2, e.clientX, e.clientY);
   });
 
-  LB = { isOpen: isOpen, dismiss: dismiss, refresh: refresh };
+  LB = { isOpen: isOpen, dismiss: dismiss, refresh: refresh, autoplay: autoplay };
 }
 

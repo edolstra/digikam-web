@@ -73,3 +73,35 @@ test('clicking a photo opens it full-screen in the lightbox', async ({ page }) =
   await expect(lb).toBeHidden();
   await shot(page, '04-lightbox-dismissed');
 });
+
+test('autoplay=true opens the lightbox in slideshow mode', async ({ page }) => {
+  // Images only, so the random start can't land on the video (whose unprompted
+  // play() is subject to the autoplay policy).
+  await page.goto(ALBUM + '?video=false&autoplay=true');
+
+  const lb = page.locator('#lightbox');
+  await expect(lb).toHaveClass(/\bopen\b/);
+  await expect(lb).toHaveClass(/\bslideshow\b/);
+  await expect(lb.locator('.slideshow-btn')).toHaveText('⏸');
+  const img = page.locator('#lb-img');
+  await expect(img).toHaveAttribute('src', /\/api\/photos\/(100|107)\/file$/);
+  await expect.poll(() => img.evaluate((el) => el.naturalWidth)).toBeGreaterThan(0);
+  await shot(page, '05-autoplay-slideshow');
+
+  // A page load carries no user gesture, so the browser refuses fullscreen at
+  // that point; the first key press stands in for it.
+  expect(await page.evaluate(() => document.fullscreenElement)).toBeNull();
+  await page.keyboard.press('ArrowRight');
+  await expect
+    .poll(() =>
+      page.evaluate(() => document.fullscreenElement && document.fullscreenElement.id)
+    )
+    .toBe('lightbox');
+  await expect(lb).toHaveClass(/\bslideshow\b/); // the key press didn't stop it
+
+  // The autoplay pushed the usual lightbox history entry: Back dismisses it and
+  // lands on the album grid, not off the site.
+  await page.goBack();
+  await expect(lb).not.toHaveClass(/\bopen\b/);
+  await expect(page.locator('#photos .grid > img.thumb')).toHaveCount(2);
+});

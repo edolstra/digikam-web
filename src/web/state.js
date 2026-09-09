@@ -41,6 +41,10 @@ function readUrl() {
   state.tags = (q.get('tags') || '').split(',').map(function (s) { return s.trim(); }).filter(Boolean);
   var s = q.get('sort');
   state.sort = (s === 'created' || s === 'name') ? s : 'modified';
+  // `autoplay=true` starts a slideshow once the page has loaded (see the
+  // bootstrap in main.js). A one-shot launch instruction, not a filter: it's
+  // not part of filters(), so no nav link carries it on.
+  state.autoplay = q.get('autoplay') === 'true';
 }
 
 // The current filters as a plain object, optionally with some keys overridden —

@@ -78,7 +78,13 @@ function initNav() {
   initMenu();
   initFilterMenu();
   initGridNav();
-  render();
+  var autoplay = state.autoplay; // consumed once, here (see readUrl)
+  render().then(function () {
+    // `autoplay=true`: once the grid is in, open the lightbox in slideshow mode
+    // (for a photo frame / screensaver: bookmark an album + filter URL and let it
+    // play). Only on the initial load — later navigations drop the parameter.
+    if (autoplay && !LB.autoplay()) toast('Nothing to play', true);
+  });
 })();
 
 // Register the service worker (makes the app installable as a PWA). Deferred to
