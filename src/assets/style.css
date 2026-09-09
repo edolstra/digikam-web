@@ -140,7 +140,15 @@ body.modal-open { overflow: hidden; }
 /* Zoomed image: a grab cursor (grabbing while dragging to pan). */
 .lightbox.zoomed #lb-img { cursor: grab; }
 .lightbox.panning #lb-img { cursor: grabbing; }
+/* Slideshow crossfade overlay: the incoming image, laid over #lb-img (same
+   letterboxing), invisible until web.js adds `.show` once it's decoded (then a
+   0.4s fade-in); `.snap` hides it instantly, without a transition. */
+#lb-fade { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain;
+           opacity: 0; transition: opacity 0.4s ease; pointer-events: none; }
+#lb-fade.show { opacity: 1; }
+#lb-fade.snap { transition: none; }
 .lightbox .close { position: absolute; top: 0.25rem; right: 0.75rem;
+                   z-index: 10; /* above the (later, positioned) #lb-fade overlay */
                    font-size: 2.5rem; line-height: 1; }
 /* Top-left action row: the ⓘ info toggle, the ▶ slideshow button (which drops
    down the slideshow settings panel, below) + per-photo operations (Tag / Move /

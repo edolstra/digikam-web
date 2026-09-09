@@ -250,6 +250,9 @@ fn page_html(title: &str, body: Markup) -> Markup {
                     button.nav.prev aria-label="Previous" { "‹" }
                     img.full id="lb-img" alt="" decoding="async";
                     video.full id="lb-video" playsinline loop controls {}
+                    // Slideshow crossfade overlay: the incoming image, faded in
+                    // over #lb-img once decoded (see web.js startFade).
+                    img id="lb-fade" alt="" decoding="async";
                     button.nav.next aria-label="Next" { "›" }
                     // Metadata overlay, filled + toggled by web.js (hidden by default).
                     div id="lb-info" {}

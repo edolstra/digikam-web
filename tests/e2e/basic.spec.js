@@ -175,7 +175,15 @@ test('the ▶ button opens the slideshow settings modal', async ({ page }) => {
   await expect(lb.locator('.slideshow-btn')).toHaveText('⏸');
   await expect.poll(wake).toEqual({ requests: 1, releases: 0 }); // screen lock held
   // Grid order is [100, 107]: from 100 it advances to 107, then wraps to 100.
+  // Image -> image advances crossfade: the incoming image first appears in the
+  // #lb-fade overlay (visible, `.show`, once decoded) and only then lands in
+  // #lb-img.
+  const fade = page.locator('#lb-fade');
+  await expect(fade).toHaveAttribute('src', /\/api\/photos\/107\/file$/, { timeout: 4000 });
+  await expect(img).toHaveAttribute('src', /\/api\/photos\/100\/file$/); // still the outgoing one
+  await expect(fade).toHaveClass(/\bshow\b/);
   await expect(img).toHaveAttribute('src', /\/api\/photos\/107\/file$/, { timeout: 4000 });
+  await expect(fade).not.toHaveClass(/\bshow\b/);
   await expect(img).toHaveAttribute('src', /\/api\/photos\/100\/file$/, { timeout: 4000 });
 
   // `s` stops / starts directly, never opening the modal; the screen lock

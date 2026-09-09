@@ -246,14 +246,23 @@ function initLightbox() {
   // runs.
   function clearSlide() { clearTimeout(slideTimer); slideTimer = 0; }
   function slideAdvance() {
-    if (state.shuffle) goRandom();
-    else if (items.length) show((idx + 1) % items.length, true);
+    if (state.shuffle) goRandom(true);
+    else if (items.length) show((idx + 1) % items.length, true, true);
+  }
+  // The item the next slideshow advance will land on (for preloading; -1 if
+  // none). Under shuffle this normalizes the bag so its top is that item.
+  function peekNext() {
+    if (items.length <= 1) return -1;
+    if (!state.shuffle) return (idx + 1) % items.length;
+    ensureBag();
+    return bag[bag.length - 1];
   }
   function scheduleSlide() {
     clearSlide();
     if (!slideshowOn) return;
     var it = items[idx];
     if (it && !it.video) slideTimer = setTimeout(slideAdvance, state.interval * 1000);
+    preload(peekNext()); // so the crossfade (which waits for the load) starts on time
   }
   function setSlideshow(on) {
     slideshowOn = on;
@@ -975,7 +984,50 @@ function initLightbox() {
     }
   }
 
-  function show(i, play) {
+  // ----- Slideshow crossfade -----
+  // A slideshow advance from one image to another dissolves instead of cutting:
+  // the incoming image loads in an overlay (#lb-fade) above the current one,
+  // invisible, and only once fully decoded fades in (a CSS transition); then
+  // it's committed to the real #lb-img (a cache hit, so no flicker) and the
+  // overlay is hidden instantly. Videos never fade, on either side. The timer
+  // for the following advance is armed at commit, so loading + fading don't
+  // eat into the interval. Any navigation, dismiss, or a newer fade cancels an
+  // in-flight one (the token).
+  var fadeEl = document.getElementById('lb-fade');
+  var fadeToken = 0;
+  var FADE_MS = 400; // keep in sync with #lb-fade's transition
+  function whenLoaded(el) {
+    if (el.decode) return el.decode();
+    return new Promise(function (res) { el.onload = res; el.onerror = res; });
+  }
+  function cancelFade() {
+    fadeToken++;
+    fadeEl.classList.add('snap');
+    fadeEl.classList.remove('show');
+    fadeEl.removeAttribute('src');
+    void fadeEl.offsetWidth; // flush, so the .show removal doesn't animate later
+    fadeEl.classList.remove('snap');
+  }
+  function startFade(it) {
+    var token = ++fadeToken;
+    fadeEl.src = it.src;
+    fadeEl.alt = it.alt;
+    function commit() {
+      if (token !== fadeToken) return;
+      img.src = it.src;
+      img.alt = it.alt;
+      // Keep the overlay up until the real element shows the (cached) image.
+      var done = function () { if (token === fadeToken) { cancelFade(); scheduleSlide(); } };
+      whenLoaded(img).then(done, done);
+    }
+    whenLoaded(fadeEl).then(function () {
+      if (token !== fadeToken) return;
+      fadeEl.classList.add('show');
+      setTimeout(commit, FADE_MS);
+    }, commit); // a broken image: just cut to it (the alt text), as without a fade
+  }
+
+  function show(i, play, fade) {
     if (i < 0 || i >= items.length) return;
     idx = i;
     var it = items[i];
@@ -983,6 +1035,9 @@ function initLightbox() {
     resetZoom(); // start each item un-zoomed
     lb.classList.toggle('is-video', it.video); // hides the reverse-search button
     vid.pause(); // stop any previously-playing video before switching
+    // Crossfade only image -> image (the outgoing #lb-img must be showing an image).
+    var fading = fade && !it.video && activeEl() === img && !!img.getAttribute('src');
+    cancelFade(); // an in-flight fade is superseded either way
     if (it.video) {
       vid.src = it.src;
       vid.loop = !slideshowOn; // in a slideshow, play once then advance on 'ended'
@@ -997,8 +1052,8 @@ function initLightbox() {
         });
       }
     } else {
-      img.src = it.src;
-      img.alt = it.alt;
+      if (fading) startFade(it); // #lb-img keeps the outgoing image until the commit
+      else { img.src = it.src; img.alt = it.alt; }
       img.classList.add('active');
       vid.classList.remove('active');
       vid.removeAttribute('src');
@@ -1010,7 +1065,7 @@ function initLightbox() {
     document.body.classList.add('modal-open');
     if (infoOpen) renderInfo(); // keep the panel in sync while navigating
     setSelected(tiles[i]);      // track the grid selection (revealed on dismiss)
-    scheduleSlide();            // (re)arm the slideshow advance for this item
+    if (!fading) scheduleSlide(); // (re)arm the slideshow advance for this item (a fade arms it at commit)
     preload(i + 1);
     preload(i - 1);
   }
@@ -1081,6 +1136,7 @@ function initLightbox() {
     // survive into the closed state.
     if (ssOpen) setSlideshowPanel(false);
     clearTimeout(idleTimer);
+    cancelFade(); // an in-flight crossfade must not commit into a closed lightbox
     if (pickerOpen) closePicker(); // discard pending picker edits
     // Stop any running slideshow (resets ▶ + the panel's Start/Stop label) and
     // restore the default video looping.
@@ -1172,8 +1228,7 @@ function initLightbox() {
   // time and only reshuffled once exhausted, so every item is shown once before
   // any repeats — no more re-seeing items mid-shuffle. Guards against re-showing
   // the current item (e.g. when manual nav landed on a still-queued index).
-  function goRandom() {
-    if (items.length <= 1) return;
+  function ensureBag() {
     if (!bag.length) {
       bag = items.map(function (_, n) { return n; });
       for (var k = bag.length - 1; k > 0; k--) { // Fisher-Yates
@@ -1181,9 +1236,14 @@ function initLightbox() {
         var t = bag[k]; bag[k] = bag[j]; bag[j] = t;
       }
     }
-    var n = bag.pop();
-    if (n === idx && bag.length) { bag.unshift(n); n = bag.pop(); }
-    show(n, true);
+    // The top is next; don't let it be the current item (e.g. manual nav
+    // landed on a still-queued index) — rotate it to the bottom.
+    if (bag[bag.length - 1] === idx && bag.length > 1) bag.unshift(bag.pop());
+  }
+  function goRandom(fade) {
+    if (items.length <= 1) return;
+    ensureBag();
+    show(bag.pop(), true, fade);
   }
 
   // Open the lightbox on a clicked grid tile. Delegated (not per-tile) so it keeps
