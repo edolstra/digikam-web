@@ -219,9 +219,30 @@ fn page_html(title: &str, body: Markup) -> Markup {
                     // here, hidden for videos). One uniform row of buttons.
                     div.lb-actions {
                         button.info aria-label="Image info" title="Image info (i)" { "ⓘ" }
-                        // Slideshow lives up here (not bottom-left) so it stays
-                        // clear of a video's native controls.
-                        button.slideshow-btn aria-label="Slideshow" title="Slideshow (s)" { "▶" }
+                        // Slideshow: ▶ (⏸ + gold while running) opens the settings
+                        // panel below it (`#lb-slideshow`, a modal toggled via
+                        // `.slideshow-open`); the `s` key starts/stops directly.
+                        // Lives up here (not bottom-left) so it stays clear of a
+                        // video's native controls. The wrapper is the panel's
+                        // positioning context.
+                        div.slideshow-menu {
+                            button.slideshow-btn aria-label="Slideshow settings" title="Slideshow settings (s starts/stops)" aria-haspopup="true" aria-expanded="false" { "▶" }
+                            div id="lb-slideshow" {
+                                label.ss-row {
+                                    span.ss-label { "Seconds per image" }
+                                    input.ss-interval type="number" min="1" step="any" inputmode="decimal" aria-label="Seconds per image";
+                                }
+                                div.ss-row {
+                                    span.ss-label { "Shuffle" }
+                                    span.seg.ss-shuffle {
+                                        button type="button" data-shuffle="true" title="Random order" { "On" }
+                                        button type="button" data-shuffle="false" title="Grid order" { "Off" }
+                                    }
+                                }
+                                button.ss-copy type="button" title="Copy a link to this view that starts the slideshow on load" { "⧉ Copy slideshow link" }
+                                button.ss-start type="button" { "▶ Start slideshow" }
+                            }
+                        }
                         button.lb-act.lb-act-tags data-act="tags" title="Edit tags (t)" { "🏷 Tag" }
                         button.lb-act.lb-act-move data-act="move" title="Move to album (v)" { "📂 Move" }
                         button.lb-act.lb-act-yandex data-act="yandex" title="Reverse image search on Yandex" { "🔍 Yandex" }

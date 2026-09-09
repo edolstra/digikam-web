@@ -19,7 +19,12 @@ var DEFAULT_FILTERS = { minRating: 0, includeImages: true, includeVideo: true, r
 // filter is two booleans, both true by default (include images / include video);
 // `recursive` extends the grid to all sub-albums' items; `aspect` is the
 // aspect-ratio filter ('all' | 'portrait' | 'landscape').
-var state = Object.assign({ album: [] }, DEFAULT_FILTERS);
+// `interval` (seconds per slideshow image) and `shuffle` (random vs grid order)
+// are the slideshow settings: seeded from the URL when present (readUrl), then
+// changed only by the lightbox's slideshow settings panel — never written back
+// to the URL or persisted, and kept across in-page navigation (readUrl leaves
+// them alone when the new URL doesn't mention them).
+var state = Object.assign({ album: [], interval: 5, shuffle: true }, DEFAULT_FILTERS);
 // Bumped on every render(); a fetch that resolves after a newer navigation
 // compares against it and bails before touching the DOM (see render/buildGrid).
 var renderToken = 0;
@@ -46,10 +51,15 @@ function readUrl() {
   // not part of filters(), so no nav link carries it on.
   state.autoplay = q.get('autoplay') === 'true';
   // `interval=<seconds>` sets how long the slideshow shows each image (default
-  // 5; any positive number, fractions allowed). Like `autoplay`, a launch
-  // setting rather than a filter: nav links don't carry it on.
-  var iv = parseFloat(q.get('interval'));
-  state.interval = (iv > 0) ? iv : 5;
+  // 5; any positive number, fractions allowed); `shuffle=false` plays in grid
+  // order instead of random. Like `autoplay`, launch settings rather than
+  // filters: nav links don't carry them on, and a URL without them keeps the
+  // current (possibly panel-set) values.
+  if (q.has('interval')) {
+    var iv = parseFloat(q.get('interval'));
+    state.interval = (iv > 0) ? iv : 5;
+  }
+  if (q.has('shuffle')) state.shuffle = q.get('shuffle') !== 'false';
 }
 
 // The current filters as a plain object, optionally with some keys overridden —

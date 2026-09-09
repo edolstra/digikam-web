@@ -25,6 +25,15 @@ function initLightbox() {
                            // (popped from the end; reshuffled once exhausted)
   var autoplayed = false;  // opened by autoplay() and still waiting for a user
                            // gesture to enter fullscreen (see enterFullscreen)
+  // The slideshow settings panel (#lb-slideshow): a small modal hanging from the
+  // ▶ button. Its values are state.interval / state.shuffle (in memory only —
+  // never the URL or storage; "Copy slideshow link" is the one thing that turns
+  // them into a URL). While open the controls stay pinned like the info panel.
+  var ssPanel = document.getElementById('lb-slideshow');
+  var ssInput = ssPanel.querySelector('.ss-interval');
+  var ssShuffle = ssPanel.querySelector('.ss-shuffle');
+  var ssStart = ssPanel.querySelector('.ss-start');
+  var ssOpen = false;
 
   function isOpen() { return lb.classList.contains('open'); }
   function activeEl() { return vid.classList.contains('active') ? vid : img; }
@@ -65,11 +74,13 @@ function initLightbox() {
   function wake() {
     lb.classList.remove('idle');
     clearTimeout(idleTimer);
-    // While the info panel is open the controls stay pinned (no auto-hide).
-    if (isOpen() && !infoOpen) idleTimer = setTimeout(function () {
-      if (isOpen() && !infoOpen) lb.classList.add('idle');
+    // While the info panel or the slideshow settings modal is open the controls
+    // stay pinned (no auto-hide).
+    if (isOpen() && !pinned()) idleTimer = setTimeout(function () {
+      if (isOpen() && !pinned()) lb.classList.add('idle');
     }, 2000);
   }
+  function pinned() { return infoOpen || ssOpen; }
 
   // Human-readable file size and a tidied modification date for the info panel.
   function fmtBytes(n) {
@@ -227,27 +238,89 @@ function initLightbox() {
   }
   function toggleInfo() { setInfo(!infoOpen); }
 
-  // Slideshow: auto-advance to a random item. Images advance after
-  // `state.interval` seconds (5 by default; the `interval=` URL parameter); a
-  // video plays in full and advances when it ends (the 'ended' listener below)
-  // — so its loop is turned off while a slideshow runs.
+  // Slideshow: auto-advance — to a random item (state.shuffle, the default) or
+  // the next one in grid order, wrapping at the end. Images advance after
+  // `state.interval` seconds (5 by default; the settings panel or the
+  // `interval=` URL parameter); a video plays in full and advances when it ends
+  // (the 'ended' listener below) — so its loop is turned off while a slideshow
+  // runs.
   function clearSlide() { clearTimeout(slideTimer); slideTimer = 0; }
+  function slideAdvance() {
+    if (state.shuffle) goRandom();
+    else if (items.length) show((idx + 1) % items.length, true);
+  }
   function scheduleSlide() {
     clearSlide();
     if (!slideshowOn) return;
     var it = items[idx];
-    if (it && !it.video) slideTimer = setTimeout(goRandom, state.interval * 1000);
+    if (it && !it.video) slideTimer = setTimeout(slideAdvance, state.interval * 1000);
   }
   function setSlideshow(on) {
     slideshowOn = on;
     lb.classList.toggle('slideshow', on);
     slideBtn.textContent = on ? '⏸' : '▶';
-    slideBtn.title = (on ? 'Stop slideshow' : 'Slideshow') + ' (s)';
+    slideBtn.title = (on ? 'Slideshow running — settings' : 'Slideshow settings') + ' (s starts/stops)';
+    ssStart.textContent = on ? '⏸ Stop slideshow' : '▶ Start slideshow';
     if (activeEl() === vid) vid.loop = !on;
+    if (ssOpen) setSlideshowPanel(false); // Start/Stop (from any path) dismisses the modal
     scheduleSlide();
   }
   function toggleSlideshow() { setSlideshow(!slideshowOn); }
-  vid.addEventListener('ended', function () { if (slideshowOn) goRandom(); });
+  vid.addEventListener('ended', function () { if (slideshowOn) slideAdvance(); });
+
+  // ----- Slideshow settings panel -----
+  // Open/close the modal under the ▶ button. Opening seeds the controls from
+  // `state` (the panel is the only writer, so nothing else can be stale) and,
+  // with a real keyboard, focuses the interval box with its value selected (not
+  // on touch: that would pop the on-screen keyboard). wake() at the end: on open
+  // it reveals the controls and — since pinned() now holds — arms no idle
+  // timer; on close it re-arms the usual 2s auto-hide.
+  function setSlideshowPanel(on) {
+    ssOpen = on;
+    lb.classList.toggle('slideshow-open', on);
+    slideBtn.setAttribute('aria-expanded', on ? 'true' : 'false');
+    if (on) {
+      ssInput.value = state.interval;
+      renderShuffle();
+      if (window.matchMedia && matchMedia('(hover: hover)').matches) { ssInput.focus(); ssInput.select(); }
+    } else if (ssPanel.contains(document.activeElement)) {
+      document.activeElement.blur();
+    }
+    wake();
+  }
+  function renderShuffle() {
+    Array.prototype.forEach.call(ssShuffle.children, function (b) {
+      b.classList.toggle('on', b.dataset.shuffle === String(state.shuffle));
+    });
+  }
+  // Apply the typed interval. Only in-memory state; a running slideshow re-arms
+  // with the new value (the countdown restarts). Invalid/empty input changes
+  // nothing (the box shows :invalid via its min). A showing video is left alone:
+  // its advance comes from 'ended', and re-arming would cancel the 1.5s
+  // unplayable-video fallback.
+  function applyInterval() {
+    var s = parseFloat(ssInput.value);
+    if (!(s > 0)) return;
+    state.interval = s;
+    if (!(items[idx] && items[idx].video)) scheduleSlide();
+  }
+  // The current view (album + filters — what every nav link carries) plus the
+  // slideshow launch settings. Deliberately NOT part of setFilterParams, so no
+  // nav link ever picks them up: this is the one place they're written to a
+  // URL. Built from `state`, not `location`, so a page loaded with them doesn't
+  // duplicate them (and the #item-… fragment is dropped).
+  function slideshowLink() {
+    var u = new URL(photosUrl(state.album, filters()), location.origin);
+    u.searchParams.set('autoplay', 'true');
+    if (state.interval !== 5) u.searchParams.set('interval', String(state.interval));
+    if (!state.shuffle) u.searchParams.set('shuffle', 'false');
+    return u.href;
+  }
+  function copySlideshowLink(btn) {
+    copyText(slideshowLink(), btn, '✓ Copied').then(function (ok) {
+      toast(ok ? 'Link copied' : 'copy failed', !ok);
+    });
+  }
 
   // Jump from the info panel's album link to that album. The lightbox pushed a
   // URL-less history entry on open; repurpose it (replaceState) as the target so
@@ -375,6 +448,7 @@ function initLightbox() {
   function openPicker(mode) {
     var p = items[idx] && items[idx].photo;
     if (!p) return;
+    if (ssOpen) setSlideshowPanel(false); // one modal at a time
     pickerMode = mode;
     pickerPhoto = p;
     pickerOpen = true;
@@ -820,29 +894,43 @@ function initLightbox() {
     window.open('/api/photos/' + it.photo.id + '/reverse-search?engine=yandex', '_blank', 'noopener');
   }
 
-  // Copy a tile's absolute server path to the clipboard, with a brief ✓ flash.
-  // Falls back to a hidden-textarea execCommand where the async clipboard API is
-  // unavailable (e.g. a non-secure context).
-  function copyPath(btn) {
-    var path = btn.dataset.path;
-    if (!path) return;
-    var flash = function () {
+  // Copy `text` to the clipboard, flashing `btn` (`.copied` + `flashLabel`,
+  // default ✓) for 1.2s on success before restoring its label. Resolves to
+  // true/false, never rejects. Falls back to a hidden-textarea execCommand where
+  // the async clipboard API is unavailable (e.g. a non-secure context).
+  function copyText(text, btn, flashLabel) {
+    function flash() {
+      // Capture the label once: a re-click mid-flash must not capture "✓".
+      if (btn._label == null) btn._label = btn.textContent;
+      clearTimeout(btn._flashTimer);
       btn.classList.add('copied');
-      btn.textContent = '✓';
-      setTimeout(function () { btn.textContent = '⧉'; btn.classList.remove('copied'); }, 1200);
-    };
+      btn.textContent = flashLabel || '✓';
+      btn._flashTimer = setTimeout(function () {
+        btn.textContent = btn._label;
+        btn._label = null;
+        btn.classList.remove('copied');
+      }, 1200);
+    }
     if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(path).then(flash, function () {});
-      return;
+      return navigator.clipboard.writeText(text).then(
+        function () { flash(); return true; },
+        function () { return false; });
     }
     var ta = document.createElement('textarea');
-    ta.value = path;
+    ta.value = text;
     ta.style.position = 'fixed';
     ta.style.opacity = '0';
     document.body.appendChild(ta);
     ta.select();
-    try { document.execCommand('copy'); flash(); } catch (err) { /* ignore */ }
+    var ok = false;
+    try { ok = document.execCommand('copy'); } catch (err) { /* ignore */ }
     document.body.removeChild(ta);
+    if (ok) flash();
+    return Promise.resolve(ok);
+  }
+  // The info panel's ⧉: copies the tile's absolute server path.
+  function copyPath(btn) {
+    if (btn.dataset.path) copyText(btn.dataset.path, btn);
   }
   // Mouse/pen movement reveals the controls; touch is handled by the gestures
   // below (a tap reveals; a swipe doesn't).
@@ -876,7 +964,7 @@ function initLightbox() {
         var p = vid.play();
         if (p && p.catch) p.catch(function () {
           // Couldn't play (e.g. an unsupported codec) — don't stall the slideshow.
-          if (slideshowOn) { clearSlide(); slideTimer = setTimeout(goRandom, 1500); }
+          if (slideshowOn) { clearSlide(); slideTimer = setTimeout(slideAdvance, 1500); }
         });
       }
     } else {
@@ -924,15 +1012,15 @@ function initLightbox() {
   }
 
   // Start a slideshow unprompted — the `autoplay=true` URL parameter: open the
-  // lightbox on a random item with the slideshow running. Returns false when the
-  // grid has nothing to show. The page load carries no user gesture, so the
+  // lightbox on a random item (the first one with `shuffle=false`) with the
+  // slideshow running. Returns false when the grid has nothing to show. The page load carries no user gesture, so the
   // fullscreen request in open() is refused unless the browser is set up to
   // allow it (kiosk mode, Chrome's "automatic fullscreen" site setting); the
   // `autoplayed` flag then makes the first key press or tap on the media enter
   // fullscreen instead of leaving that to the `f` key.
   function autoplay() {
     if (!items.length) return false;
-    open(Math.floor(Math.random() * items.length));
+    open(state.shuffle ? Math.floor(Math.random() * items.length) : 0);
     setSlideshow(true);
     autoplayed = true; // (harmless if open()'s own request did succeed)
     return true;
@@ -959,13 +1047,15 @@ function initLightbox() {
   function dismiss() {
     closing = false;
     autoplayed = false;
+    // The settings modal doesn't outlive the session. Closed before the idle
+    // timer is cleared: closing it re-arms that timer (wake), which must not
+    // survive into the closed state.
+    if (ssOpen) setSlideshowPanel(false);
     clearTimeout(idleTimer);
     if (pickerOpen) closePicker(); // discard pending picker edits
-    // Stop any running slideshow and restore the default video looping.
-    clearSlide();
-    slideshowOn = false;
-    lb.classList.remove('slideshow');
-    slideBtn.textContent = '▶';
+    // Stop any running slideshow (resets ▶ + the panel's Start/Stop label) and
+    // restore the default video looping.
+    setSlideshow(false);
     vid.loop = true;
     lb.classList.remove('idle');
     lb.classList.remove('open');
@@ -1032,9 +1122,10 @@ function initLightbox() {
     setTimeout(function () {
       if (isOpen() && !document.fullscreenElement && !document.hidden && document.hasFocus()) {
         // In fullscreen the browser swallows the Esc keydown to exit; that Esc
-        // lands here. With the picker open it means "discard the picker",
-        // not "dismiss the lightbox".
+        // lands here. With the picker / slideshow settings open it means
+        // "close that", not "dismiss the lightbox".
         if (pickerOpen) { closePicker(); return; }
+        if (ssOpen) { setSlideshowPanel(false); return; }
         close();
       }
     }, 0);
@@ -1135,10 +1226,44 @@ function initLightbox() {
       infoAction(b.dataset.act);
     });
   });
+  // ▶ opens the slideshow settings modal (the `s` key starts/stops directly).
+  // With the modal already open, the click never gets here: the capture-phase
+  // outside-click listener below consumes it (closing the modal).
   slideBtn.addEventListener('click', function (e) {
     e.stopPropagation();
     if (tapConsumed()) return;
-    toggleSlideshow();
+    setSlideshowPanel(true);
+  });
+  // Any click outside the open modal closes it and does nothing else — the
+  // picker's click-outside rule. Capture phase, so it runs before the control
+  // handlers (X, ⓘ, Tag/Move, ‹ ›, ▶ itself), which stop propagation. Touch
+  // taps outside reach here via their synthetic click (the touchend handler
+  // leaves them alone while the modal is open).
+  lb.addEventListener('click', function (e) {
+    if (!ssOpen || e.target.closest('#lb-slideshow')) return;
+    e.stopPropagation();
+    setSlideshowPanel(false);
+  }, true);
+  // Clicks inside the modal stay inside it (never the letterbox-close handler).
+  ssPanel.addEventListener('click', function (e) {
+    e.stopPropagation();
+    if (tapConsumed()) return;
+    wake();
+    var seg = e.target.closest('.ss-shuffle button');
+    if (seg) { state.shuffle = seg.dataset.shuffle === 'true'; renderShuffle(); return; }
+    if (e.target.closest('.ss-start')) toggleSlideshow();
+    else if (e.target.closest('.ss-copy')) copySlideshowLink(e.target.closest('.ss-copy'));
+  });
+  ssInput.addEventListener('input', applyInterval);
+  ssInput.addEventListener('change', applyInterval);
+  // The modal owns the keyboard while focus is inside it: the document-level
+  // lightbox bindings (i/t/v/s/f/r/…) must not fire on typed digits or letters.
+  // Enter in the number box starts the slideshow with the typed interval (on a
+  // focused button it stays the native click); Esc just closes.
+  ssPanel.addEventListener('keydown', function (e) {
+    e.stopPropagation();
+    if (e.key === 'Enter' && e.target === ssInput) { e.preventDefault(); applyInterval(); setSlideshow(true); }
+    else if (e.key === 'Escape') { e.preventDefault(); setSlideshowPanel(false); }
   });
   prev.addEventListener('click', function (e) { e.stopPropagation(); go(-1); });
   next.addEventListener('click', function (e) { e.stopPropagation(); go(1); });
@@ -1163,7 +1288,7 @@ function initLightbox() {
     }
     // Leave other modifier combos (reload, tab switching, …) to the browser.
     if (e.ctrlKey || e.altKey || e.metaKey) return;
-    if (e.key === 'Escape') { close(); return; }
+    if (e.key === 'Escape') { if (ssOpen) setSlideshowPanel(false); else close(); return; }
     // After an autoplay, this key press is the first user gesture: use it to
     // enter fullscreen (as well as doing whatever the key does). `f` toggles
     // fullscreen itself below, so it takes the plain path.
@@ -1233,6 +1358,9 @@ function initLightbox() {
   }
   // Zoom to `s` (clamped 1..ZMAX) keeping the point (fx, fy) fixed on screen.
   function zoomTo(s, fx, fy) {
+    // `.zoomed` hides the action row, which hosts the slideshow settings modal:
+    // zooming past an open modal dismisses it.
+    if (ssOpen) setSlideshowPanel(false);
     s = Math.max(1, Math.min(ZMAX, s));
     var k = s / scale;
     tx = fx - (fx - tx) * k;
@@ -1283,9 +1411,10 @@ function initLightbox() {
   }, { passive: false });
 
   lb.addEventListener('touchend', function (e) {
-    // Touches ending on the picker are left entirely to native behavior: taps
-    // click checkboxes/rows/buttons, drags scroll the list (touch-action: pan-y).
-    if (e.target.closest('#lb-picker')) return;
+    // Touches ending on the picker / the slideshow settings modal are left
+    // entirely to native behavior: taps click checkboxes/rows/buttons/inputs,
+    // drags scroll the list (touch-action: pan-y).
+    if (e.target.closest('#lb-picker') || e.target.closest('#lb-slideshow')) return;
     lastTouch = e.timeStamp; // suppress the ghost mouse events that follow a tap
     // A finger lifted but others remain: if a pinch dropped to one finger and
     // we're still zoomed, continue as a pan from that finger.
@@ -1309,6 +1438,11 @@ function initLightbox() {
     // Any touch outside the open picker discards it (the touch counterpart
     // of the click-outside rule above); swipes don't navigate past it either.
     if (pickerOpen) { closePicker(); suppressClick = true; return; }
+    // A tap outside the open slideshow settings modal: leave it to its synthetic
+    // click, which the capture-phase listener consumes to close the modal (one
+    // code path for mouse and touch; and no suppressClick, which would outlive
+    // this tap). Swipes still navigate with the modal open.
+    if (ssOpen && !moved && !wasMulti) return;
 
     // Double-tap an image (directly on it — not an overlaid control like the
     // ‹ › chevrons) toggles zoom: to 2× at the tap point, or back to fit.
@@ -1337,7 +1471,7 @@ function initLightbox() {
     // A tap on the info button toggles the panel; a tap on its album link jumps to
     // that album; a tap on the panel itself just keeps it (none count as an
     // off-media letterbox close). The synthetic click is swallowed below.
-    if (e.target.closest('.slideshow-btn')) { toggleSlideshow(); suppressClick = true; return; }
+    if (e.target.closest('.slideshow-btn')) { setSlideshowPanel(true); suppressClick = true; return; }
     var act = e.target.closest('.lb-act');
     if (act) { infoAction(act.dataset.act); suppressClick = true; return; }
     if (e.target.closest('.info')) { toggleInfo(); suppressClick = true; return; }
@@ -1369,8 +1503,9 @@ function initLightbox() {
   // wheel does nothing (pan by dragging instead).
   var lastWheel = 0;
   lb.addEventListener('wheel', function (e) {
-    // Let the picker's list scroll natively instead of flipping photos.
-    if (e.target.closest('#lb-picker')) return;
+    // Let the picker's list scroll natively (and a wheel over the slideshow
+    // settings' number box adjust it) instead of flipping photos.
+    if (e.target.closest('#lb-picker') || e.target.closest('#lb-slideshow')) return;
     if (!e.deltaY) return; // ignore purely-horizontal scroll
     e.preventDefault();
     if (e.ctrlKey) {
