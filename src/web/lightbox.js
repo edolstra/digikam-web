@@ -1357,6 +1357,20 @@ function initLightbox() {
   prev.addEventListener('click', function (e) { e.stopPropagation(); go(-1); });
   next.addEventListener('click', function (e) { e.stopPropagation(); go(1); });
 
+  // Classify a keydown as a media-transport key, or null. Desktop keyboards
+  // report a named `key`; a TV remote (LG webOS, and other CE-HTML remotes)
+  // delivers its transport buttons with `key` "Unidentified" and only the
+  // legacy keyCode — 413 Stop, 412 Rewind, 417 Fast forward. Deliberately no
+  // Play/Pause: on webOS those two never reach the page as key events (verified
+  // on an LG C5 — the platform routes them to the active media session
+  // instead), and faking a media session just for them isn't worth it.
+  var MEDIA_KEYS = { MediaStop: 'stop', MediaRewind: 'prev', MediaFastForward: 'next',
+                     MediaTrackPrevious: 'prev', MediaTrackNext: 'next' };
+  var MEDIA_KEYCODES = { 413: 'stop', 412: 'prev', 417: 'next' };
+  function mediaKey(e) {
+    return MEDIA_KEYS[e.key] || MEDIA_KEYCODES[e.keyCode] || null;
+  }
+
   document.addEventListener('keydown', function (e) {
     if (!isOpen()) return;
     // The picker owns the keyboard while open. Its own listeners handle (and
@@ -1382,6 +1396,17 @@ function initLightbox() {
     // enter fullscreen (as well as doing whatever the key does). `f` toggles
     // fullscreen itself below, so it takes the plain path.
     if (e.key !== 'f' && e.key !== 'F') gestureFullscreen();
+    // Media keys — a TV remote's Stop/⏪/⏩ or a keyboard's — stop the slideshow
+    // and step items (see mediaKey). The remote's Back button is left to the
+    // browser: it becomes history navigation, i.e. popstate → dismiss.
+    var media = mediaKey(e);
+    if (media) {
+      e.preventDefault();
+      if (media === 'stop') setSlideshow(false);
+      else if (media === 'prev') go(-1);
+      else if (media === 'next') go(1);
+      return;
+    }
     // Arrows/Home/End navigate between items as usual. preventDefault keeps a
     // focused <video> (it has controls) from also consuming them to seek.
     if (e.key === 'ArrowLeft') { e.preventDefault(); go(-1); }

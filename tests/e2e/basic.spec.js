@@ -199,6 +199,22 @@ test('the ▶ button opens the slideshow settings modal', async ({ page }) => {
   await expect(lb).not.toHaveClass(RUNNING);
   await expect.poll(wake).toEqual({ requests: 2, releases: 2 });
 
+  // A TV remote's media keys (LG webOS sends only the legacy keyCode — 413
+  // Stop, 412 Rewind, 417 Fast forward — with `key` unidentified).
+  const remote = (keyCode) => page.evaluate((k) => {
+    document.dispatchEvent(new KeyboardEvent('keydown', { keyCode: k, bubbles: true, cancelable: true }));
+  }, keyCode);
+  await page.keyboard.press('s');
+  await expect(lb).toHaveClass(RUNNING);
+  await remote(413); // stop
+  await expect(lb).not.toHaveClass(RUNNING);
+  await page.keyboard.press('Home'); // a known position: item 100 (first)
+  await expect(img).toHaveAttribute('src', /\/api\/photos\/100\/file$/);
+  await remote(417); // fast forward = next item
+  await expect(img).toHaveAttribute('src', /\/api\/photos\/107\/file$/);
+  await remote(412); // rewind = previous
+  await expect(img).toHaveAttribute('src', /\/api\/photos\/100\/file$/);
+
   // Copy slideshow link: the current view + the launch settings — and nothing
   // of that in the page's own URL. Capture the clipboard write in-page (no
   // clipboard permission needed).
