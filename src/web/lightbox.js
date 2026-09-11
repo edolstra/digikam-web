@@ -23,6 +23,8 @@ function initLightbox() {
   var slideTimer = 0;      // pending image advance (videos advance on 'ended')
   var bag = [];            // remaining indices of the current random permutation
                            // (popped from the end; reshuffled once exhausted)
+  var trail = [];          // indices already shown by random navigation, oldest
+                           // first — what "previous" walks back through under shuffle
   var autoplayed = false;  // opened by autoplay() and still waiting for a user
                            // gesture to enter fullscreen (see enterFullscreen)
   // The slideshow settings panel (#lb-slideshow): a small modal hanging from the
@@ -64,7 +66,7 @@ function initLightbox() {
       };
     });
     idx = -1;
-    bag = []; // indices changed -> drop the stale permutation
+    bag = []; trail = []; // indices changed -> drop the stale permutation + trail
   }
 
   // The close/nav controls start hidden (open() adds `.idle`); a mouse/pen move
@@ -1077,7 +1079,7 @@ function initLightbox() {
   // is the user gesture, so audio is allowed), and we enter fullscreen.
   function open(i) {
     if (!isOpen()) history.pushState({ lightbox: true }, '');
-    bag = []; // each lightbox session gets a fresh random permutation
+    bag = []; trail = []; // each lightbox session gets a fresh random permutation
     show(i, true);
     // Controls start hidden — unless the info panel is open, which pins them.
     if (!infoOpen) lb.classList.add('idle');
@@ -1216,11 +1218,24 @@ function initLightbox() {
     }, 0);
   });
 
-  // Navigation (arrows / chevrons / swipe) auto-plays a video it lands on
-  // (the click/key/swipe is a user gesture, so playback with audio is allowed).
+  // Navigation (arrows / chevrons / wheel / swipe / remote ⏪⏩) auto-plays a
+  // video it lands on (the click/key/swipe is a user gesture, so playback with
+  // audio is allowed). While a slideshow runs with Shuffle on, next/previous
+  // follow the shuffle instead of grid order: next is the slideshow's own
+  // advance (the bag's top), previous walks back along the trail of items the
+  // random navigation showed — so back then next returns to the same item.
   function go(d) {
+    if (slideshowOn && state.shuffle) {
+      if (d > 0) goRandom(); else goBack();
+      return;
+    }
     var n = idx + d;
     if (n >= 0 && n < items.length) show(n, true);
+  }
+  function goBack() {
+    if (!trail.length) return;
+    bag.push(idx); // so a subsequent next returns here
+    show(trail.pop(), true);
   }
 
   // Advance to the next item of a random permutation of all items (the `r` key, a
@@ -1243,6 +1258,8 @@ function initLightbox() {
   function goRandom(fade) {
     if (items.length <= 1) return;
     ensureBag();
+    trail.push(idx);
+    if (trail.length > 1000) trail.shift(); // a frame running for days: bound it
     show(bag.pop(), true, fade);
   }
 

@@ -253,3 +253,29 @@ test('the ▶ button opens the slideshow settings modal', async ({ page }) => {
   await page.keyboard.press('Escape');
   await expect(lb).not.toHaveClass(OPEN);
 });
+
+test('next/previous follow the shuffle while a slideshow runs', async ({ page }) => {
+  // interval=60 so the slideshow doesn't advance on its own during the test.
+  await page.goto(ALBUM + '?video=false&interval=60');
+  await page.locator('#item-107').click(); // the LAST grid item (order is [100, 107])
+  const lb = page.locator('#lightbox');
+  const img = page.locator('#lb-img');
+  await expect(img).toHaveAttribute('src', /\/api\/photos\/107\/file$/);
+
+  // Slideshow stopped: → at the last item is a no-op (plain grid order).
+  await page.keyboard.press('ArrowRight');
+  await expect(img).toHaveAttribute('src', /\/api\/photos\/107\/file$/);
+
+  // Slideshow running, Shuffle on (the default): → goes to a random other item
+  // (with two items, deterministically 100), ← walks back along the trail, and
+  // → again returns to the item we came back from.
+  await page.keyboard.press('s');
+  await expect(lb).toHaveClass(RUNNING);
+  await page.keyboard.press('ArrowRight');
+  await expect(img).toHaveAttribute('src', /\/api\/photos\/100\/file$/);
+  await page.keyboard.press('ArrowLeft');
+  await expect(img).toHaveAttribute('src', /\/api\/photos\/107\/file$/);
+  await page.keyboard.press('ArrowRight');
+  await expect(img).toHaveAttribute('src', /\/api\/photos\/100\/file$/);
+  await expect(lb).toHaveClass(RUNNING); // navigating didn't stop it
+});
