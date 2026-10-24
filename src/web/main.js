@@ -14,6 +14,8 @@ function render() {
     buildGrid(photosHost, token)
   ]).then(function () {
     if (token !== renderToken) return; // superseded by a newer navigation
+    // No photos below the sub-albums: nothing to collapse them out of the way of.
+    if (!photosHost.querySelector('.grid > img.thumb, .grid > .vtile')) uncollapseSubalbums();
     ensureDecoder();
     observeTiles(collectThumbs());
     LB.refresh();

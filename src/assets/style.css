@@ -80,6 +80,7 @@ body { font-family: sans-serif; margin: 1rem; background: #111; color: #eee; }
   .menu-add:hover { color: #9df; }
   .menu-item:hover { background: #3a3a3a; }
   .filter-btn:not(.active):hover { color: #fff; }
+  .albums-toggle:hover { border-color: #6cf; }
 }
 h2 { font-size: 1rem; margin: 1.5rem 0 0.5rem; padding-bottom: 0.25rem;
      border-bottom: 1px solid #333; color: #aaa; }
@@ -100,6 +101,18 @@ h2 { font-size: 1rem; margin: 1.5rem 0 0.5rem; padding-bottom: 0.25rem;
 .album:hover .caption { background: rgba(0, 0, 0, 0.45); }
 .album .title { font-weight: bold; }
 .album .cnt { font-size: 0.8rem; }
+/* Collapsed sub-album grid (grid.js clips it to the first rows with an inline
+   max-height): fade the bottom edge as a hint that more tiles follow, and pull
+   the "Show all" toggle up under it. */
+.albums.collapsed { overflow: hidden;
+                    mask-image: linear-gradient(to bottom, #000 calc(100% - 1.5rem), transparent); }
+.albums:has(+ .albums-toggle:not([hidden])) { margin-bottom: 0.5rem; }
+/* A bar spanning the tile rows (grid.js sets its width from the layout). */
+.albums-toggle { display: block; box-sizing: border-box; margin: 0 0 1.5rem;
+                 padding: 0.4rem 0.8rem; background: #1a1a1a;
+                 border: 1px solid #444; border-radius: 5px; color: #6cf;
+                 font: inherit; font-size: 0.9rem; text-align: center; cursor: pointer; }
+.albums-toggle[hidden] { display: none; }
 .grid { display: flex; flex-wrap: wrap; gap: 4px; align-items: flex-end; }
 .grid img { height: 200px; width: auto; display: block; background: #222; cursor: pointer;
             touch-action: manipulation; }

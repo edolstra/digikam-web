@@ -6,8 +6,11 @@
 var GRID_SEL = '.albums > a.album, .grid > img.thumb, .grid > .vtile';
 var selected = null;
 
+// The navigable tiles, minus those clipped away by a collapsed sub-album grid
+// (so Down from its last visible row continues into the photos).
 function navItems() {
-  return Array.prototype.slice.call(document.querySelectorAll(GRID_SEL));
+  return Array.prototype.filter.call(document.querySelectorAll(GRID_SEL),
+    function (el) { return !isClippedTile(el); });
 }
 
 // Move the `.selected` highlight to `el` (no scroll, no URL change). The lightbox
@@ -87,11 +90,16 @@ function pageNeighbor(items, cur, down) {
 }
 
 // Re-apply the selection named by the URL fragment after a render (so it survives
-// reload / Back/Forward); a hash-less URL (a normal navigation) clears it.
+// reload / Back/Forward); a hash-less URL (a normal navigation) clears it. A
+// sub-album hidden in the collapsed grid (e.g. Back from it) expands the grid.
 function restoreSelection() {
   var id = location.hash.slice(1);
   var el = id ? document.getElementById(id) : null;
-  if (el && el.matches && el.matches(GRID_SEL)) { setSelected(el); scrollToSelected(); }
+  if (el && el.matches && el.matches(GRID_SEL)) {
+    if (isClippedTile(el)) el.parentNode.__setExpanded(true);
+    setSelected(el);
+    scrollToSelected();
+  }
   else setSelected(null);
 }
 

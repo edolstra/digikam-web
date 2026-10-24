@@ -234,9 +234,14 @@ function createLoader(thumbs, dec) {
 
   // Kick off the first rows' fetches synchronously, during initial parse, when
   // Firefox dispatches promptly — requests issued later (from the async observer
-  // callback) get held ~150ms during page load. The observer handles the rest.
+  // callback) get held ~150ms during page load. The observer handles the rest —
+  // including the covers clipped away by a collapsed sub-album grid, which are
+  // skipped here so they don't hog the eager slots ahead of the photos.
   var EAGER = 24;
-  for (var ei = 0; ei < thumbs.length && ei < EAGER; ei++) { thumbs[ei].__sched = 1; schedule(thumbs[ei]); }
+  for (var ei = 0, ne = 0; ei < thumbs.length && ne < EAGER; ei++) {
+    if (isClippedTile(thumbs[ei].parentNode)) continue;
+    thumbs[ei].__sched = 1; schedule(thumbs[ei]); ne++;
+  }
 
   // Decode well ahead of the viewport so paging down lands on already-decoded
   // images: trigger ~1 screen above and ~2.5 screens below the viewport, and only
