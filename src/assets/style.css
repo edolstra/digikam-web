@@ -90,7 +90,7 @@ h2 { font-size: 1rem; margin: 1.5rem 0 0.5rem; padding-bottom: 0.25rem;
          text-decoration: none; border-radius: 4px; overflow: hidden; background: #222; }
 .album img { width: 200px; height: 150px; object-fit: cover; display: block;
              background: #222; }
-/* Hide the cover until web.js paints it (no empty-<img> frame); the .album tile
+/* Hide the cover until thumbnails.js paints it (no empty-<img> frame); the .album tile
    keeps its dark background + caption underneath. */
 .album img.thumb:not([src]) { visibility: hidden; }
 .album .caption { position: absolute; inset: 0; display: flex;
@@ -116,7 +116,7 @@ h2 { font-size: 1rem; margin: 1.5rem 0 0.5rem; padding-bottom: 0.25rem;
 .grid { display: flex; flex-wrap: wrap; gap: 4px; align-items: flex-end; }
 .grid img { height: 200px; width: auto; display: block; background: #222; cursor: pointer;
             touch-action: manipulation; }
-/* Thumbnails start src-less (web.js paints the decoded PGF). Until a tile has a
+/* Thumbnails start src-less (thumbnails.js paints the decoded PGF). Until a tile has a
    src it's hidden entirely — invisible, with none of the placeholder box/frame a
    browser draws for an empty <img> — while the reserved width still holds its
    place so the layout doesn't reflow. Floor the width for unknown-aspect tiles.
@@ -154,7 +154,7 @@ body.modal-open { overflow: hidden; }
 .lightbox.zoomed #lb-img { cursor: grab; }
 .lightbox.panning #lb-img { cursor: grabbing; }
 /* Slideshow crossfade overlay: the incoming image, laid over #lb-img (same
-   letterboxing), invisible until web.js adds `.show` once it's decoded (then a
+   letterboxing), invisible until lightbox-slideshow.js adds `.show` once it's decoded (then a
    0.4s fade-in); `.snap` hides it instantly, without a transition. */
 #lb-fade { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain;
            opacity: 0; transition: opacity 0.4s ease; pointer-events: none; }
@@ -182,12 +182,12 @@ body.modal-open { overflow: hidden; }
 .lightbox.is-video .lb-act-yandex { display: none; }
 /* Slideshow button (▶, ⏸ while running): opens the settings panel; gold while
    the slideshow runs. Its wrapper is the panel's positioning context; the caret
-   is a pseudo-element so web.js overwriting the glyph (▶/⏸) leaves it alone. */
+   is a pseudo-element so the script overwriting the glyph (▶/⏸) leaves it alone. */
 .lightbox .slideshow-menu { position: relative; }
 .lightbox .slideshow-btn::after { content: ' ▾'; font-size: 0.7em; opacity: 0.7; }
 .lightbox.slideshow-open .slideshow-btn { opacity: 1; border-color: #bbb; }
 .lightbox.slideshow .slideshow-btn { opacity: 1; color: #f5c518; border-color: #f5c518; }
-/* Slideshow settings panel: a small modal hanging from the ▶ button (web.js
+/* Slideshow settings panel: a small modal hanging from the ▶ button (the script
    toggles `.slideshow-open`; while open the controls stay pinned like with the
    info panel). Overlays #lb-info by virtue of the action row's z-index. */
 #lb-slideshow { position: absolute; top: 100%; left: 0; margin-top: 0.4rem;
@@ -230,7 +230,7 @@ body.modal-open { overflow: hidden; }
                    text-shadow: 0 0 6px rgba(0, 0, 0, 0.9), 0 0 2px rgba(0, 0, 0, 0.9); }
 .lightbox button:hover { opacity: 1; }
 .lightbox button[disabled] { opacity: 0.15; cursor: default; }
-/* Image-info overlay (top-left), filled + shown by web.js when `.info-open`. */
+/* Image-info overlay (top-left), filled + shown by lightbox-info.js when `.info-open`. */
 /* `width: max-content` makes the box hug its longest line (so a filename stays on
    one line) up to the cap; the cap then forces wrapping. A grid with a `display:
    contents` row sizes the label/value columns predictably (flex's intrinsic width
@@ -273,8 +273,8 @@ body.modal-open { overflow: hidden; }
          opacity: 0; pointer-events: none; transition: opacity 0.25s ease; }
 #toast.show { opacity: 1; }
 #toast.failed { color: #f66; }
-/* Picker modal (`t` = tags, `m` = move to album): quick filter on top, MRU,
-   scrollable tree, Cancel/Apply(-or-Move) footer. Toggled via
+/* Picker modal (`t` = tags, `v` = move to album): quick filter on top, MRU,
+   scrollable tree, Cancel(/Apply in tags mode) footer. Toggled via
    `.lightbox.picker-open` like the info panel. */
 #lb-picker { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
              z-index: 20; /* above the action row (z 10), which it can overlap on short screens */
@@ -321,8 +321,8 @@ body.modal-open { overflow: hidden; }
   #lb-picker .picker-actions button:hover { filter: brightness(1.15); }
 }
 
-/* Auto-hide the controls after inactivity (web.js toggles `.idle`); they fade
-   back on any pointer move / touch / key. */
+/* Auto-hide the controls after inactivity (lightbox.js toggles `.idle`); they
+   fade back on a mouse/pen move or a tap (deliberately not on keys or swipes). */
 .lightbox .close, .lightbox .lb-actions, .lightbox .nav { transition: opacity 0.25s ease; }
 /* Hidden controls don't capture taps — a tap there reveals them (and pauses a
    video / closes on the letterbox) rather than navigating/closing via the button.

@@ -142,11 +142,11 @@ pub struct SubalbumParams {
     sort: Sort,
 }
 
-/// `GET /subalbums?album=/Root/rel&min_rating=&images=&video=` — direct sub-albums
-/// of an album, each with a cover (newest photo in its subtree) and recursive photo
-/// count, sorted by most recent photo. `min_rating` and the `images`/`video`
-/// media-type filter constrain the cover and count alike. An absent/empty `album`
-/// lists the album roots.
+/// `GET /subalbums?album=/Root/rel&min_rating=&images=&video=&aspect=&tags=&sort=` —
+/// direct sub-albums of an album, each with a cover and recursive photo count.
+/// The cover and the order follow `sort` (see [`query::list_subalbums`]); the
+/// filters constrain the cover, count, and which sub-albums appear alike. An
+/// absent/empty `album` lists the album roots.
 pub async fn list_subalbums(
     State(state): State<AppState>,
     Query(params): Query<SubalbumParams>,

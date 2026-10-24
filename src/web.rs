@@ -1,5 +1,5 @@
-//! Server-rendered HTML frontend, built with [`maud`] (compile-time templates
-//! with automatic escaping). This is the seed of the browsing UI.
+//! The HTML frontend: the static SPA shell, built with [`maud`] (compile-time
+//! templates with automatic escaping), plus the embedded static assets.
 
 use axum::body::{Body, Bytes};
 use axum::http::{header, HeaderMap, HeaderValue};
@@ -188,10 +188,11 @@ const SCRIPT: &str = concat!(
     "\n",
 );
 
-/// Assemble the full HTML page shell. The navbar's breadcrumb (`.crumb`) and
-/// rating selector (`.rating`) are emitted **empty**; the SPA (`src/web/`) fills them
-/// from the URL on load and rebuilds them on each in-page navigation (the page is
-/// a client-side SPA, so the shell is identical for every album/filter).
+/// Assemble the full HTML page shell. The navbar's bookmarks menu (`.menu`),
+/// breadcrumb (`.crumb`) and filters menu (`.filter-menu`) are emitted **empty**;
+/// the SPA (`src/web/`) fills them from the URL on load and rebuilds them on each
+/// in-page navigation (the page is a client-side SPA, so the shell is identical
+/// for every album/filter).
 fn page_html(title: &str, body: Markup) -> Markup {
     html! {
         (DOCTYPE)
@@ -201,7 +202,7 @@ fn page_html(title: &str, body: Markup) -> Markup {
                 meta name="viewport" content="width=device-width, initial-scale=1";
                 link rel="icon" href="/favicon.ico" type="image/x-icon";
                 // PWA: installable web app (manifest + icons; service worker
-                // registered from web.js). theme-color tints the system UI.
+                // registered from main.js). theme-color tints the system UI.
                 link rel="manifest" href="/manifest.webmanifest";
                 meta name="theme-color" content="#1a1a1a";
                 link rel="apple-touch-icon" href="/icon-192.png";
@@ -220,7 +221,7 @@ fn page_html(title: &str, body: Markup) -> Markup {
                 div.lightbox id="lightbox" {
                     button.close aria-label="Close" { "×" }
                     // Top-left action row: the ⓘ info toggle plus the per-photo
-                    // operations (same as the t / m keys; Yandex lives only
+                    // operations (same as the t / v keys; Yandex lives only
                     // here, hidden for videos). One uniform row of buttons.
                     div.lb-actions {
                         button.info aria-label="Image info" title="Image info (i)" { "ⓘ" }
@@ -256,15 +257,15 @@ fn page_html(title: &str, body: Markup) -> Markup {
                     img.full id="lb-img" alt="" decoding="async";
                     video.full id="lb-video" playsinline loop controls {}
                     // Slideshow crossfade overlay: the incoming image, faded in
-                    // over #lb-img once decoded (see web.js startFade).
+                    // over #lb-img once decoded (see startFade in lightbox-slideshow.js).
                     img id="lb-fade" alt="" decoding="async";
                     button.nav.next aria-label="Next" { "›" }
-                    // Metadata overlay, filled + toggled by web.js (hidden by default).
+                    // Metadata overlay, filled + toggled by lightbox-info.js (hidden by default).
                     div id="lb-info" {}
-                    // Picker modal (`t` = tags, `m` = move to album): quick filter
+                    // Picker modal (`t` = tags, `v` = move to album): quick filter
                     // + MRU + scrollable tree + footer (Cancel always; Apply in
                     // tags mode only — move-mode rows activate directly), filled +
-                    // toggled by web.js per mode. Must live inside #lightbox — a
+                    // toggled by lightbox-picker.js per mode. Must live inside #lightbox — a
                     // fullscreen element is the only thing the browser paints.
                     div id="lb-picker" {
                         input id="lb-picker-filter" type="text" placeholder="Filter…" aria-label="Filter" autocomplete="off";
@@ -308,8 +309,8 @@ pub async fn album_page() -> impl IntoResponse {
 /// Render the album browsing page **shell**. No DB work and no album/filter logic
 /// happens here: the navbar, sub-album tiles, and photo grid are all built
 /// client-side (see `src/web/`) into the empty navbar / `#subalbums` /
-/// `#photos` containers. The `<title>` is a constant placeholder that web.js
-/// replaces with the album path on first render.
+/// `#photos` containers. The `<title>` is a constant placeholder that the SPA
+/// (navbar.js) replaces with the album path on first render.
 fn render() -> Markup {
     let body = html! {
         // Empty containers the client fills from /api/subalbums and /api/photos.

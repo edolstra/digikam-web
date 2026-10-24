@@ -116,8 +116,9 @@ pub struct TagNode {
     pub children: Vec<TagNode>,
 }
 
-/// The cover item used to represent a sub-album — the newest image **or video**
-/// in its subtree (videos have stored thumbnails the client can render).
+/// The cover item used to represent a sub-album — the first image **or video** in
+/// its subtree under the active sort (newest by the sort's date, or first by name
+/// under `sort=name`); videos have stored thumbnails the client can render.
 #[derive(Debug, Serialize)]
 pub struct Cover {
     pub id: u64,
@@ -136,7 +137,8 @@ pub struct SubAlbum {
     pub path: String,
     /// Number of visible photos in the sub-album's whole subtree.
     pub photo_count: u64,
-    /// Most recent image in the subtree, or `None` if it contains only videos.
+    /// The subtree's cover (see [`Cover`]). Always present in practice — a
+    /// sub-album with no matching items isn't listed at all.
     pub cover: Option<Cover>,
 }
 
@@ -155,7 +157,7 @@ pub struct Bookmark {
 /// Request body for `PATCH /api/photos/:id` — a partial update, so every field
 /// is double-wrapped to distinguish **absent** (leave unchanged) from **`null`**
 /// (clear): `None` = not mentioned, `Some(None)` = clear, `Some(Some(v))` = set.
-/// Designed to grow (tags, album, …) as more write operations are added.
+/// (The tag deltas are plain lists instead: absent or empty = no change.)
 #[derive(Debug, Deserialize)]
 pub struct PatchPhoto {
     /// New rating (0..=5), or `null` to clear back to Digikam's "unrated" (-1).

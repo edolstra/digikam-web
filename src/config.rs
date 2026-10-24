@@ -22,7 +22,8 @@ pub struct Config {
     pub thumbnail_database: Option<PathBuf>,
 
     /// Path to the writable bookmarks DB (`web.sql`). Defaults to a `web.sql`
-    /// next to `--database`; created if absent. This is the only DB we write.
+    /// next to `--database`; created if absent. Without `--allow-writes`, this is
+    /// the only DB we write.
     #[arg(long, env = "WEB_DB")]
     pub web_database: Option<PathBuf>,
 

@@ -9,7 +9,7 @@ use crate::error::{AppError, AppResult};
 use crate::models::{Bookmark, CreateBookmark, Filters};
 use crate::query::{self, Rating};
 
-/// Like [`run_blocking`], but against the writable bookmarks pool (`web.sql`).
+/// Like [`run_blocking`](super::run_blocking), but against the writable bookmarks pool (`web.sql`).
 /// Errors if that DB couldn't be opened.
 async fn run_web<F, T>(state: &AppState, f: F) -> AppResult<T>
 where

@@ -1,5 +1,5 @@
 //! The HTTP handlers, split by area: listing/browsing ([`browse`]), photo detail
-//! ([`detail`]), the write endpoint ([`write`]), original/thumbnail/reverse-search
+//! ([`detail`]), the write endpoint ([`write`](mod@write)), original/thumbnail/reverse-search
 //! serving ([`media`]), and bookmarks ([`bookmarks`]). This module holds the
 //! plumbing they share.
 

@@ -312,9 +312,8 @@ pub fn list_photos(
     roots: &HashMap<i64, AlbumRoot>,
     q: &PhotoQuery,
 ) -> AppResult<Page<PhotoSummary>> {
-    // The virtual root (no album segments) has no photos of its own; an empty,
-    // non-recursive album is simply empty. (A future recursive flag would
-    // aggregate the whole collection from the root.)
+    // The virtual root (no album segments) has no photos of its own, so without
+    // `recursive` it's simply empty. (With it, the root spans every album root.)
     if q.album.is_empty() && !q.filters.recursive {
         return Ok(Page {
             incomplete: false,
@@ -336,9 +335,9 @@ pub fn list_photos(
          LIMIT ? OFFSET ?"
     );
     let mut select_params = params;
-    // Fetch one row past the limit to detect whether more results exist.
-    // `saturating_add` keeps `u64::MAX` (the "list everything" sentinel) at -1,
-    // which SQLite treats as no limit (rather than overflowing to LIMIT 0).
+    // Fetch one row past the limit to detect whether more results exist. (The
+    // handler clamps `limit` to MAX_LIMIT; `saturating_add` just keeps a huge
+    // value from wrapping around to LIMIT 0.)
     select_params.push(Value::Integer(q.limit.saturating_add(1) as i64));
     select_params.push(Value::Integer(q.offset as i64));
 

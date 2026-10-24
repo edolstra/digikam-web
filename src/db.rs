@@ -32,7 +32,7 @@ pub struct AppState {
     pub allow_writes: bool,
 }
 
-/// Natural ("version") comparison of two strings, used as the SQLite `NATURAL`
+/// Natural ("version") comparison of two strings, used as the SQLite `NATSORT`
 /// collation for the `name` sort. Maximal runs of ASCII digits compare by numeric
 /// value (so `9_foo` sorts before `10_bar`); everything else compares
 /// case-insensitively (ASCII, like SQLite's built-in `NOCASE`). Separators such as

@@ -10,7 +10,7 @@ it is) survive.
 The delay was **not** decode or server cost — it was **how Firefox schedules
 `fetch()` requests during page load**. Three independent behaviours each added
 latency; fixing all three took first paint from **~500ms to ~120ms**. The fixes
-live in [`src/web.js`](../src/web.js); see the "Fixes" section.
+live in [`src/web/thumbnails.js`](../src/web/thumbnails.js); see the "Fixes" section.
 
 ## How the grid loads a thumbnail
 
@@ -58,7 +58,7 @@ instantly — Firefox just wasn't sending the requests.
    requests issued later from the `IntersectionObserver` callback (a few ms later)
    were held ~130ms — far more than the few-ms difference in issue time.
 
-## Fixes (in `src/web.js`)
+## Fixes (in `src/web/thumbnails.js`)
 
 1. **Cap concurrent thumbnail fetches at 6** (`MAXFETCH`), matching the HTTP/1.1
    per-host connection limit. A small queue (`waiting`) feeds the next fetch as
@@ -99,7 +99,7 @@ good as plain HTTP/1.1 gets. To go lower would need a structural change:
 
 - Temporary in-page timing marks (a `performance.now()`-based `console.log`
   helper) at each pipeline stage, plus a `setInterval` heartbeat to detect
-  main-thread blocks. Removed after diagnosis; re-add to `src/web.js` if needed.
+  main-thread blocks. Removed after diagnosis; re-add to `src/web/thumbnails.js` if needed.
 - Server-side burst check: fire ~170 concurrent thumbnail requests with
   `curl --parallel --parallel-max 6` and time wall-clock (was ~89ms — proves the
   server isn't the bottleneck).
