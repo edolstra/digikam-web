@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::Json;
-use rusqlite::OptionalExtension;
+use rusqlite::{OptionalExtension, TransactionBehavior};
 
 use super::{load_image, run_blocking, INTERNAL_TAG_ROOT};
 use crate::db::{image_abs_path, AppState, PooledConn};
@@ -51,7 +51,11 @@ pub async fn patch_photo(
     }
 
     run_blocking(&state, move |conn, state| {
-        let tx = conn.unchecked_transaction()?;
+        // IMMEDIATE: take the write lock up front, waiting (busy timeout) for a
+        // concurrent writer such as Digikam. A deferred transaction would read
+        // first and then fail to upgrade with SQLITE_BUSY at once — SQLite skips
+        // the busy handler for that upgrade, as waiting could deadlock.
+        let tx = rusqlite::Transaction::new_unchecked(conn, TransactionBehavior::Immediate)?;
 
         let img = load_image(conn, id)?;
 

@@ -116,3 +116,28 @@ async fn forbidden_without_allow_writes() {
     // Nothing changed.
     assert_eq!(rating_of(&fx, 101).await, json!(3));
 }
+
+#[tokio::test]
+async fn waits_for_a_concurrent_writer() {
+    let fx = Fixture::new();
+    // Another writer (think: a running Digikam) holds the write lock when the
+    // PATCH arrives, and commits a moment later. The PATCH must wait for it
+    // (busy timeout) rather than fail: a transaction that took a read lock first
+    // and then tried to upgrade would get SQLITE_BUSY at once (SQLite skips the
+    // busy handler there, since waiting could deadlock).
+    let other = fx.state.pool.get().unwrap();
+    other
+        .execute_batch("BEGIN IMMEDIATE; UPDATE Images SET name = name WHERE id = 107;")
+        .unwrap();
+    let writer = std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        other.execute_batch("COMMIT").unwrap();
+    });
+
+    let (status, body) = fx
+        .patch_json("/api/photos/101", &json!({ "rating": 1 }))
+        .await;
+    writer.join().unwrap();
+    assert_eq!(status, StatusCode::NO_CONTENT, "{body}");
+    assert_eq!(rating_of(&fx, 101).await, json!(1));
+}
