@@ -3,8 +3,8 @@ use std::fmt;
 
 use rusqlite::types::Value;
 use rusqlite::Connection;
-use serde::de::{self, Deserialize, Deserializer};
-use serde::{Serialize, Serializer};
+use serde::de::{self, DeserializeOwned, Deserializer, IntoDeserializer};
+use serde::{Deserialize, Serialize, Serializer};
 
 use crate::db::{album_display_path, AlbumRoot};
 use crate::error::AppResult;
@@ -52,11 +52,27 @@ impl<'de> Deserialize<'de> for Rating {
     }
 }
 
+/// The serde name of a unit-variant enum value (`Aspect::Portrait` →
+/// `"portrait"`), for storing it as plain text (the bookmark rows).
+pub fn variant_name<T: Serialize>(value: &T) -> String {
+    match serde_json::to_value(value) {
+        Ok(serde_json::Value::String(s)) => s,
+        _ => unreachable!("unit enum variants serialize as strings"),
+    }
+}
+
+/// The inverse of [`variant_name`]: parse a stored name, `None` if unknown.
+pub fn parse_variant<T: DeserializeOwned>(name: &str) -> Option<T> {
+    let d: de::value::StrDeserializer<de::value::Error> = name.into_deserializer();
+    T::deserialize(d).ok()
+}
+
 /// The aspect-ratio filter. `Portrait` is `height >= width`, `Landscape` is
 /// `width >= height`, so a square matches both. Modeled as an enum (rather than
 /// two booleans) so it can grow to exact ratios (e.g. 16:9) later. The default,
-/// `All`, applies no constraint.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+/// `All`, applies no constraint. (De)serialized as the lowercase variant name.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum Aspect {
     #[default]
     All,
@@ -75,45 +91,14 @@ impl Aspect {
             Aspect::Landscape => " AND ii.width >= ii.height",
         }
     }
-
-    /// The canonical string form (matches the query-string / JSON values).
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Aspect::All => "all",
-            Aspect::Portrait => "portrait",
-            Aspect::Landscape => "landscape",
-        }
-    }
-
-    /// Parse the canonical string form, e.g. when reading a stored bookmark.
-    pub fn parse(s: &str) -> Option<Aspect> {
-        match s {
-            "all" => Some(Aspect::All),
-            "portrait" => Some(Aspect::Portrait),
-            "landscape" => Some(Aspect::Landscape),
-            _ => None,
-        }
-    }
-}
-
-impl Serialize for Aspect {
-    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
-        s.serialize_str(self.as_str())
-    }
-}
-
-impl<'de> Deserialize<'de> for Aspect {
-    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        Aspect::parse(&String::deserialize(d)?)
-            .ok_or_else(|| de::Error::custom("aspect must be all, portrait, or landscape"))
-    }
 }
 
 /// The photo sort order. `Modified` (the default) and `Created` are newest-first
 /// by `Images.modificationDate` / `ImageInformation.creationDate`; `Name` is
 /// ascending by `Images.name`. Modeled as an enum (like [`Aspect`]) so it can
-/// grow more orderings later.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+/// grow more orderings later. (De)serialized as the lowercase variant name.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum Sort {
     #[default]
     Modified,
@@ -131,38 +116,6 @@ impl Sort {
             Sort::Created => "ii.creationDate DESC, i.id DESC",
             Sort::Name => "i.name COLLATE NATSORT ASC, i.id ASC",
         }
-    }
-
-    /// The canonical string form (matches the query-string / JSON values).
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Sort::Modified => "modified",
-            Sort::Created => "created",
-            Sort::Name => "name",
-        }
-    }
-
-    /// Parse the canonical string form, e.g. when reading a stored bookmark.
-    pub fn parse(s: &str) -> Option<Sort> {
-        match s {
-            "modified" => Some(Sort::Modified),
-            "created" => Some(Sort::Created),
-            "name" => Some(Sort::Name),
-            _ => None,
-        }
-    }
-}
-
-impl Serialize for Sort {
-    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
-        s.serialize_str(self.as_str())
-    }
-}
-
-impl<'de> Deserialize<'de> for Sort {
-    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        Sort::parse(&String::deserialize(d)?)
-            .ok_or_else(|| de::Error::custom("sort must be modified, created, or name"))
     }
 }
 
@@ -696,6 +649,28 @@ mod tests {
         let (sql, params) = tag_filter_sql(&[]);
         assert!(sql.is_empty());
         assert!(params.is_empty());
+    }
+
+    #[test]
+    fn variant_names_round_trip() {
+        // These are the values stored in existing bookmark rows: keep them stable.
+        for (aspect, name) in [
+            (Aspect::All, "all"),
+            (Aspect::Portrait, "portrait"),
+            (Aspect::Landscape, "landscape"),
+        ] {
+            assert_eq!(variant_name(&aspect), name);
+            assert_eq!(parse_variant::<Aspect>(name), Some(aspect));
+        }
+        for (sort, name) in [
+            (Sort::Modified, "modified"),
+            (Sort::Created, "created"),
+            (Sort::Name, "name"),
+        ] {
+            assert_eq!(variant_name(&sort), name);
+            assert_eq!(parse_variant::<Sort>(name), Some(sort));
+        }
+        assert_eq!(parse_variant::<Sort>("bogus"), None);
     }
 
     #[test]

@@ -930,10 +930,10 @@ fn row_to_bookmark(row: &rusqlite::Row) -> rusqlite::Result<Bookmark> {
             min_rating: Rating::new(row.get::<_, i64>(3)?).unwrap_or_default(),
             include_images: row.get::<_, i64>(4)? != 0,
             include_video: row.get::<_, i64>(5)? != 0,
-            aspect: Aspect::parse(&row.get::<_, String>(6)?).unwrap_or_default(),
+            aspect: query::parse_variant(&row.get::<_, String>(6)?).unwrap_or_default(),
             // tags stored as a JSON array; tolerate anything unexpected as empty.
             tags: serde_json::from_str(&row.get::<_, String>(7)?).unwrap_or_default(),
-            sort: Sort::parse(&row.get::<_, String>(8)?).unwrap_or_default(),
+            sort: query::parse_variant(&row.get::<_, String>(8)?).unwrap_or_default(),
         },
     })
 }
@@ -1002,9 +1002,9 @@ pub async fn create_bookmark(
                 b.filters.min_rating.get(),
                 b.filters.include_images as i64,
                 b.filters.include_video as i64,
-                b.filters.aspect.as_str(),
+                query::variant_name(&b.filters.aspect),
                 tags_json,
-                b.filters.sort.as_str(),
+                query::variant_name(&b.filters.sort),
             ],
         )
         .map_err(|e| match &e {
