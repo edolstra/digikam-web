@@ -9,8 +9,7 @@ license = "Unlicense"
 axum = "0.7"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal"] }
 tower = "0.5"
-tower-http = { version = "0.6", features = ["cors", "trace", "fs"] }
-hyper = "1"
+tower-http = { version = "0.6", features = ["trace", "fs"] }
 
 rusqlite = { version = "0.32", features = ["bundled", "trace", "collation"] }
 r2d2 = "0.8"

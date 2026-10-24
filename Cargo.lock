@@ -270,7 +270,6 @@ dependencies = [
  "anyhow",
  "axum",
  "clap",
- "hyper",
  "maud",
  "mime_guess",
  "r2d2",
