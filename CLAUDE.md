@@ -190,7 +190,11 @@ To make the *first* paint snappy, the decoder assets are fetched **once** (not o
     - `navbar.js` — breadcrumb + the bookmarks & funnel-filter dropdown menus
     - `thumbnails.js` — PGF decoder worker pool + per-render IntersectionObserver loader
     - `grid.js` — day-grouped photo grid + sub-album tiles (buildGrid/buildSubalbums)
-    - `lightbox.js` — the full-screen lightbox (initLightbox/LB) — one closure
+    - `lightbox.js` — the full-screen lightbox core (initLightbox/LB): item list, show/open/dismiss, navigation + shuffle bag, fullscreen, auto-hide, click/keyboard dispatch; builds the `core` object the feature modules below share (each an `initLightbox*(core)` factory returning its API, reaching the others via `core.info` / `core.slideshow` / `core.picker` / `core.zoom`)
+    - `lightbox-info.js` — the ⓘ info panel + rating (stars, Ctrl+0..5), the per-id PhotoDetail cache
+    - `lightbox-slideshow.js` — slideshow auto-advance, wake lock, settings modal, crossfade
+    - `lightbox-picker.js` — the `t`/`v` tags / move picker modal (+ MRU lists)
+    - `lightbox-gestures.js` — zoom/pan and the touch / wheel / mouse gestures
     - `gridnav.js` — arrow-key grid selection (initGridNav)
     - `main.js` — render() orchestrator, nav controller, bootstrap IIFE + SW (loaded LAST)
   - `manifest.webmanifest` — PWA manifest (include_str!), served at /manifest.webmanifest
