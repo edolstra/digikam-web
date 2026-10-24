@@ -107,6 +107,11 @@ function initLightboxPicker(core) {
     pickerOpen = false;
     pickerMode = null;
     pickerPhoto = null;
+    // Drop focus from the (now hidden) picker: left on the filter input, its
+    // keydown handler swallows every key, so the lightbox's own bindings
+    // (arrows, i, s, …) go dead — until the browser gets round to blurring the
+    // hidden element (Chrome: its next rendering update; not every browser).
+    if (pickerEl.contains(document.activeElement)) document.activeElement.blur();
     lb.classList.remove('picker-open');
     pickerMru.replaceChildren();
     pickerList.replaceChildren();

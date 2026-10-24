@@ -279,3 +279,26 @@ test('next/previous follow the shuffle while a slideshow runs', async ({ page })
   await expect(img).toHaveAttribute('src', /\/api\/photos\/100\/file$/);
   await expect(lb).toHaveClass(RUNNING); // navigating didn't stop it
 });
+
+test('closing the picker with Esc gives the keyboard back to the lightbox', async ({ page }) => {
+  await page.goto(ALBUM);
+  await page.locator('#item-100').click();
+  const lb = page.locator('#lightbox');
+
+  // Both modes: Esc typed in the (focused) filter closes the picker, and the
+  // very next key must reach the lightbox. Focus left on the now-hidden filter
+  // input would swallow it (its keydown handler stops propagation; Chrome only
+  // blurs a hidden focused element at its next rendering update, so the key is
+  // sent immediately — no retrying assertion in between).
+  for (const key of ['t', 'v']) {
+    await page.keyboard.press(key);
+    await expect(lb).toHaveClass(/picker-open/);
+    await expect(page.locator('#lb-picker-filter')).toBeFocused();
+    await page.keyboard.press('Escape');
+    await page.keyboard.press('i');
+    await expect(lb).not.toHaveClass(/picker-open/);
+    await expect(lb).toHaveClass(/info-open/);
+    await page.keyboard.press('i'); // close the panel again for the next round
+    await expect(lb).not.toHaveClass(/info-open/);
+  }
+});
