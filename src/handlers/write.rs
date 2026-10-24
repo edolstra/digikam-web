@@ -25,7 +25,8 @@ use crate::query::Rating;
 ///   one transaction).
 /// - `album`: target album id (from `/api/albums`) — **moves** the photo: the
 ///   `Images.album` row and the **file on disk** (a same-filesystem move
-///   only, never replacing an existing file — see [`move_no_clobber`]; cross-device is a 409, as are a name collision, a missing target
+///   only, never replacing an existing file — see [`move_no_clobber`] — and
+///   taking its XMP sidecars along, see [`files_to_move`]; cross-device is a 409, as are a name collision, a missing target
 ///   directory, and a source file missing on disk). The current album is a
 ///   silent no-op. `modificationDate`/`uniqueHash` are untouched (the move
 ///   keeps content and mtime), so thumbnails keep working.
@@ -127,8 +128,8 @@ pub async fn patch_photo(
 
         // The move comes LAST: its filesystem move must sit between the final
         // DB statement and the commit — a failed move drops the transaction
-        // (DB rolled back, disk untouched), a failed commit moves the file back.
-        let mut moved: Option<(PathBuf, PathBuf)> = None;
+        // (DB rolled back, disk untouched), a failed commit moves the files back.
+        let mut moved: Vec<(PathBuf, PathBuf)> = Vec::new();
         if let Some(target) = patch.album {
             if target != img.album {
                 let (t_root, t_rel): (i64, String) = conn
@@ -174,21 +175,22 @@ pub async fn patch_photo(
                         }
                         e => e.into(),
                     })?;
-                move_no_clobber(&old_abs, &new_abs)
-                    .map_err(|e| move_error(e, &old_abs, name))?;
+                // The image and its XMP sidecars move together, all or nothing.
+                let old_dir = old_abs.parent().expect("image path has a parent");
+                let files = files_to_move(old_dir, new_dir, name);
+                move_all(&files)?;
                 tracing::info!(id, from = %old_abs.display(), to = %new_abs.display(), "photo moved");
-                moved = Some((old_abs, new_abs));
+                for (from, to) in &files[1..] {
+                    tracing::info!(id, from = %from.display(), to = %to.display(), "sidecar moved");
+                }
+                moved = files;
             }
         }
 
         if let Err(e) = tx.commit() {
-            // The file already moved; put it back (best effort) so disk
+            // The files already moved; put them back (best effort) so disk
             // matches the rolled-back DB.
-            if let Some((old_abs, new_abs)) = &moved {
-                if let Err(e2) = move_no_clobber(new_abs, old_abs) {
-                    tracing::error!(id, error = %e2, "could not move file back after failed commit");
-                }
-            }
+            undo_moves(&moved);
             return Err(e.into());
         }
         Ok(())
@@ -196,6 +198,76 @@ pub async fn patch_photo(
     .await?;
 
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// The files that moving the image `name` from `old_dir` to `new_dir` must
+/// carry along, as `(from, to)` pairs: the image first, then its XMP sidecars.
+/// Digikam writes `img.jpg.xmp` by default, or `img.xmp` with its "sidecar file
+/// names compatible with commercial programs" option. The latter can be shared
+/// by a RAW + JPEG pair, so it only goes along when no other file in the folder
+/// has that stem — moving it would orphan the other photo's metadata.
+fn files_to_move(
+    old_dir: &std::path::Path,
+    new_dir: &std::path::Path,
+    name: &str,
+) -> Vec<(PathBuf, PathBuf)> {
+    let pair = |file: &str| (old_dir.join(file), new_dir.join(file));
+    let mut files = vec![pair(name)];
+    let full = format!("{name}.xmp");
+    if old_dir.join(&full).is_file() {
+        files.push(pair(&full));
+    }
+    if let Some(stem) = std::path::Path::new(name)
+        .file_stem()
+        .and_then(|s| s.to_str())
+    {
+        let short = format!("{stem}.xmp");
+        if short != full
+            && old_dir.join(&short).is_file()
+            && !stem_shared(old_dir, stem, &[name, &short])
+        {
+            files.push(pair(&short));
+        }
+    }
+    files
+}
+
+/// Does a file in `dir` other than `except` have the stem `stem`? (`true` when
+/// the directory can't be read: then leave a possibly-shared sidecar alone.)
+fn stem_shared(dir: &std::path::Path, stem: &str, except: &[&str]) -> bool {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return true;
+    };
+    entries.filter_map(Result::ok).any(|entry| {
+        let file = entry.file_name();
+        let file = file.to_string_lossy();
+        !except.contains(&&*file)
+            && std::path::Path::new(&*file)
+                .file_stem()
+                .is_some_and(|s| s == stem)
+    })
+}
+
+/// Move each `(from, to)` pair with [`move_no_clobber`], all or nothing: if one
+/// fails, the ones already moved go back before the error is returned.
+fn move_all(files: &[(PathBuf, PathBuf)]) -> AppResult<()> {
+    for (i, (from, to)) in files.iter().enumerate() {
+        if let Err(e) = move_no_clobber(from, to) {
+            undo_moves(&files[..i]);
+            return Err(move_error(e, from, to));
+        }
+    }
+    Ok(())
+}
+
+/// Move already-moved `(from, to)` pairs back, last first (best effort: a
+/// failure is logged, as the request is failing anyway).
+fn undo_moves(files: &[(PathBuf, PathBuf)]) {
+    for (from, to) in files.iter().rev() {
+        if let Err(e) = move_no_clobber(to, from) {
+            tracing::error!(file = %to.display(), error = %e, "could not move file back");
+        }
+    }
 }
 
 /// Move the file `from` to `to` without ever replacing whatever is at `to`
@@ -235,10 +307,11 @@ fn move_no_clobber(from: &std::path::Path, to: &std::path::Path) -> io::Result<(
 /// Map a failed move to a client-facing error: an existing file at the target,
 /// a cross-filesystem move, or a source file missing on disk is a 409 (the
 /// request conflicts with the state of the world), anything else is a 500.
-fn move_error(e: io::Error, from: &std::path::Path, name: &str) -> AppError {
+fn move_error(e: io::Error, from: &std::path::Path, to: &std::path::Path) -> AppError {
     match e.kind() {
         ErrorKind::AlreadyExists => AppError::Conflict(format!(
-            "a file named \"{name}\" already exists in the target album"
+            "a file named \"{}\" already exists in the target album",
+            to.file_name().unwrap_or_default().to_string_lossy()
         )),
         ErrorKind::CrossesDevices => {
             AppError::Conflict("moving across filesystems is not supported (yet)".into())

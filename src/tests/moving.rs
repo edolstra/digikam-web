@@ -207,3 +207,83 @@ async fn forbidden_without_allow_writes() {
     assert_eq!(status, StatusCode::FORBIDDEN);
     assert_eq!(db_album(&fx, 100), 2);
 }
+
+#[tokio::test]
+async fn moves_xmp_sidecar_along() {
+    // Digikam's default sidecar name: the image's full name + `.xmp`.
+    let fx = Fixture::new();
+    let (animals, beach) = (fx.root_base.join("Animals"), fx.root_base.join("Beach"));
+    std::fs::create_dir_all(&beach).unwrap();
+    std::fs::write(animals.join("img001.jpg.xmp"), b"<x:xmpmeta/>").unwrap();
+
+    let (status, _) = fx
+        .patch_json("/api/photos/100", &json!({ "album": 4 }))
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    assert!(beach.join("img001.jpg").exists() && beach.join("img001.jpg.xmp").exists());
+    assert!(!animals.join("img001.jpg.xmp").exists());
+
+    // And back (the undo direction).
+    let (status, _) = fx
+        .patch_json("/api/photos/100", &json!({ "album": 2 }))
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    assert!(animals.join("img001.jpg.xmp").exists() && !beach.join("img001.jpg.xmp").exists());
+}
+
+#[tokio::test]
+async fn short_sidecar_moves_only_when_not_shared() {
+    // The "compatible" sidecar name (`img001.xmp`) can belong to several files
+    // with that stem (RAW + JPEG): it only goes along when nothing shares it.
+    let fx = Fixture::new();
+    let (animals, beach) = (fx.root_base.join("Animals"), fx.root_base.join("Beach"));
+    std::fs::create_dir_all(&beach).unwrap();
+    std::fs::write(animals.join("img001.xmp"), b"<x:xmpmeta/>").unwrap();
+    std::fs::write(animals.join("img001.raw"), b"raw").unwrap();
+
+    // Shared with img001.raw: stays put.
+    let (status, _) = fx
+        .patch_json("/api/photos/100", &json!({ "album": 4 }))
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    assert!(animals.join("img001.xmp").exists() && !beach.join("img001.xmp").exists());
+
+    // Back again, now without the RAW: the sidecar is img001.jpg's alone.
+    std::fs::remove_file(animals.join("img001.raw")).unwrap();
+    let (status, _) = fx
+        .patch_json("/api/photos/100", &json!({ "album": 2 }))
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (status, _) = fx
+        .patch_json("/api/photos/100", &json!({ "album": 4 }))
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    assert!(beach.join("img001.xmp").exists() && !animals.join("img001.xmp").exists());
+}
+
+#[tokio::test]
+async fn sidecar_collision_rolls_back_the_whole_move() {
+    // The image could move, but its sidecar's name is taken in the target:
+    // a 409, and the image goes back too — the pair never ends up split.
+    let fx = Fixture::new();
+    let (animals, beach) = (fx.root_base.join("Animals"), fx.root_base.join("Beach"));
+    std::fs::create_dir_all(&beach).unwrap();
+    std::fs::write(animals.join("img001.jpg.xmp"), b"mine").unwrap();
+    std::fs::write(beach.join("img001.jpg.xmp"), b"someone else's").unwrap();
+
+    let (status, body) = fx
+        .patch_json("/api/photos/100", &json!({ "album": 4 }))
+        .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert!(body["error"].as_str().unwrap().contains("img001.jpg.xmp"));
+    assert_eq!(db_album(&fx, 100), 2);
+    assert!(animals.join("img001.jpg").exists() && !beach.join("img001.jpg").exists());
+    assert_eq!(
+        std::fs::read(animals.join("img001.jpg.xmp")).unwrap(),
+        b"mine"
+    );
+    assert_eq!(
+        std::fs::read(beach.join("img001.jpg.xmp")).unwrap(),
+        b"someone else's"
+    );
+}
