@@ -2,11 +2,11 @@
 //! with automatic escaping). This is the seed of the browsing UI.
 
 use axum::body::{Body, Bytes};
-use axum::http::{header, HeaderMap, HeaderValue, StatusCode};
+use axum::http::{header, HeaderMap, HeaderValue};
 use axum::response::{IntoResponse, Response};
 use maud::{html, Markup, PreEscaped, DOCTYPE};
 
-use crate::handlers::{if_none_match_matches, IMMUTABLE_CACHE_CONTROL};
+use crate::http::{self, IMMUTABLE_CACHE_CONTROL};
 
 /// The webpgf wasm PGF decoder, embedded at build time. `WEBPGF_PATH` is set by
 /// the flake (and the dev shell) to the `nix build .#webpgf` output directory.
@@ -128,21 +128,18 @@ fn static_asset(
     cache_control: &'static str,
 ) -> Response {
     let etag = HeaderValue::from_str(&format!("\"{etag_id}\""));
-    let cache_control = HeaderValue::from_static(cache_control);
     if let Ok(etag) = &etag {
-        if if_none_match_matches(headers, etag) {
-            let mut not_modified = Response::new(Body::empty());
-            *not_modified.status_mut() = StatusCode::NOT_MODIFIED;
-            let h = not_modified.headers_mut();
-            h.insert(header::ETAG, etag.clone());
-            h.insert(header::CACHE_CONTROL, cache_control);
+        if let Some(not_modified) = http::not_modified(headers, etag, Some(cache_control)) {
             return not_modified;
         }
     }
     let mut response = Response::new(Body::from(Bytes::from_static(bytes)));
     let h = response.headers_mut();
     h.insert(header::CONTENT_TYPE, HeaderValue::from_static(content_type));
-    h.insert(header::CACHE_CONTROL, cache_control);
+    h.insert(
+        header::CACHE_CONTROL,
+        HeaderValue::from_static(cache_control),
+    );
     if let Ok(etag) = etag {
         h.insert(header::ETAG, etag);
     }

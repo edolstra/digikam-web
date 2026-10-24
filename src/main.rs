@@ -3,6 +3,7 @@ mod db;
 mod error;
 mod fixture;
 mod handlers;
+mod http;
 mod models;
 mod query;
 mod web;

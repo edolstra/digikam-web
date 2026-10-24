@@ -13,6 +13,7 @@ use tower_http::services::ServeFile;
 
 use crate::db::{album_display_path, image_abs_path, AlbumRoot, AppState, PooledConn};
 use crate::error::{AppError, AppResult};
+use crate::http::{self, IMMUTABLE_CACHE_CONTROL};
 use crate::models::{
     AlbumNode, Bookmark, CreateBookmark, Filters, Page, PatchPhoto, PhotoDetail, PhotoSummary,
     SubAlbum, TagNode,
@@ -574,12 +575,7 @@ pub async fn get_photo_file(
 
     // If the client already holds this exact content, don't re-send it.
     if let Some(etag) = &etag {
-        if if_none_match_matches(request.headers(), etag) {
-            let mut not_modified = Response::new(axum::body::Body::empty());
-            *not_modified.status_mut() = StatusCode::NOT_MODIFIED;
-            not_modified
-                .headers_mut()
-                .insert(header::ETAG, etag.clone());
+        if let Some(not_modified) = http::not_modified(request.headers(), etag, None) {
             return Ok(not_modified);
         }
     }
@@ -622,34 +618,6 @@ fn content_disposition(name: &str) -> Option<HeaderValue> {
         "inline; filename=\"{ascii}\"; filename*=UTF-8''{encoded}"
     ))
     .ok()
-}
-
-/// `Cache-Control` for content-addressed, effectively-immutable assets (the PGF
-/// thumbnails — keyed by `uniqueHash` — and the embedded webpgf module): cache
-/// hard for a year and don't revalidate, so the browser stops re-requesting them
-/// on every page load. The strong `ETag` still backs a forced reload / expired
-/// entry with a cheap `304`. (A re-edited image keeps its id but gets a new
-/// `uniqueHash`/ETag; an `immutable` cache won't notice until a hard refresh.)
-pub(crate) const IMMUTABLE_CACHE_CONTROL: &str = "public, max-age=31536000, immutable";
-
-/// Does the request's `If-None-Match` header match `etag` (or `*`)?
-pub(crate) fn if_none_match_matches(headers: &HeaderMap, etag: &HeaderValue) -> bool {
-    let Some(value) = headers
-        .get(header::IF_NONE_MATCH)
-        .and_then(|v| v.to_str().ok())
-    else {
-        return false;
-    };
-    let want = strip_weak(etag.to_str().unwrap_or_default());
-    value
-        .split(',')
-        .map(str::trim)
-        .any(|candidate| candidate == "*" || strip_weak(candidate) == want)
-}
-
-/// Strip a weak-validator `W/` prefix for comparison purposes.
-fn strip_weak(tag: &str) -> &str {
-    tag.strip_prefix("W/").unwrap_or(tag)
 }
 
 /// `GET /photos/:id/thumbnail` — serve Digikam's stored thumbnail **as-is**: the
@@ -697,15 +665,9 @@ pub async fn get_photo_thumbnail(
     // Content-based ETag (distinct from the /file ETag via the suffix).
     let etag = HeaderValue::from_str(&format!("\"{hash}-thumb\"")).ok();
     if let Some(etag) = &etag {
-        if if_none_match_matches(&headers, etag) {
-            let mut not_modified = Response::new(axum::body::Body::empty());
-            *not_modified.status_mut() = StatusCode::NOT_MODIFIED;
-            let h = not_modified.headers_mut();
-            h.insert(header::ETAG, etag.clone());
-            h.insert(
-                header::CACHE_CONTROL,
-                HeaderValue::from_static(IMMUTABLE_CACHE_CONTROL),
-            );
+        if let Some(not_modified) =
+            http::not_modified(&headers, etag, Some(IMMUTABLE_CACHE_CONTROL))
+        {
             return Ok(not_modified);
         }
     }

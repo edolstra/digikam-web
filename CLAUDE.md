@@ -176,6 +176,7 @@ To make the *first* paint snappy, the decoder assets are fetched **once** (not o
   - `models.rs` — serde types (PhotoSummary, PhotoDetail, AlbumNode, SubAlbum, TagNode, Page<T>, Filters, Bookmark, PatchPhoto)
   - `query.rs` — /photos + /subalbums SQL + param building; Rating/Aspect/Sort types (+ unit tests)
   - `handlers.rs` — axum JSON API handlers (incl. bookmarks), run_blocking/run_web DB helpers
+  - `http.rs` — HTTP caching helpers (`If-None-Match` → `304` via `not_modified`, `IMMUTABLE_CACHE_CONTROL`), shared by handlers.rs and web.rs
   - `web.rs` — static SPA shell (navbar + empty containers) + static asset handlers, maud
   - `web/` — the SPA, split by concern and concat!'d into SCRIPT (web.rs), in order:
     - `state.js` — app state + URL/filter model (state, readUrl, filters, photosUrl, apiParams)
