@@ -302,3 +302,26 @@ test('closing the picker with Esc gives the keyboard back to the lightbox', asyn
     await expect(lb).not.toHaveClass(/info-open/);
   }
 });
+
+test('a failed metadata fetch is retried, not cached', async ({ page }) => {
+  // 107 (tagged.jpg) has the tag /places/beach/sunset. Its detail request fails
+  // once; after that the info panel must still get its tags on a later render
+  // instead of showing the photo as untagged for the rest of the session.
+  let failures = 1;
+  await page.route(/\/api\/photos\/107$/, (route) =>
+    failures-- > 0 ? route.fulfill({ status: 500, body: '{}' }) : route.continue()
+  );
+  await page.goto(ALBUM + '?video=false'); // grid order is [100, 107]
+  await page.locator('#item-107').click();
+  const info = page.locator('#lb-info');
+  await page.keyboard.press('i');
+  await expect(info).toContainText('tagged.jpg');
+  await expect.poll(() => failures).toBeLessThan(1); // the failing request happened
+  await expect(info).not.toContainText('/places/beach/sunset');
+
+  // Navigate away and back with the panel open: the re-render refetches.
+  await page.keyboard.press('ArrowLeft');
+  await expect(info).toContainText('img001.jpg');
+  await page.keyboard.press('ArrowRight');
+  await expect(info).toContainText('/places/beach/sunset');
+});

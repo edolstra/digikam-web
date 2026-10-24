@@ -30,14 +30,25 @@ function initLightboxInfo(core) {
 
   // The PhotoDetail fields not in the PhotoSummary (creation_date, tags as absolute
   // paths, lat/long) come from /api/photos/:id — fetched lazily, only while the info
-  // panel is open, and cached per id for the session.
+  // panel is open, and cached per id for the session. Only successes are cached:
+  // a failed fetch (network error, non-2xx) rejects, and the next render retries
+  // — caching a fallback would show the photo as untagged until a reload. A
+  // request already in flight for the id is shared rather than repeated.
   var metaCache = {};
+  var metaPending = {};
   function loadMeta(id) {
     if (metaCache[id] !== undefined) return Promise.resolve(metaCache[id]);
-    return fetch('/api/photos/' + id)
-      .then(function (r) { return r.json(); })
-      .then(function (m) { metaCache[id] = m; return m; })
-      .catch(function () { metaCache[id] = { tags: [] }; return metaCache[id]; });
+    if (metaPending[id]) return metaPending[id];
+    var req = fetch('/api/photos/' + id)
+      .then(function (r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+      })
+      .then(function (m) { metaCache[id] = m; return m; });
+    metaPending[id] = req;
+    function settle() { delete metaPending[id]; }
+    req.then(settle, settle);
+    return req;
   }
 
   // Fill the info panel from the current item's PhotoSummary (skipping any
@@ -148,10 +159,11 @@ function initLightboxInfo(core) {
 
     // First time we show this item's panel: fetch its metadata, then re-render to
     // add the Tags row — but only if it's still the item on screen with the panel open.
+    // On failure the panel just keeps the summary fields (the next render retries).
     if (meta === undefined) {
       loadMeta(p.id).then(function () {
         renderIfShowing(p.id);
-      });
+      }, function () {});
     }
   }
 
