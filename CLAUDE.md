@@ -126,14 +126,14 @@ The app is a Progressive Web App, so it can be "installed" (Android home screen,
 
 ## Architecture & design choices
 
-- **Stack**: `axum` + `tokio`; `rusqlite` (feature `bundled`, so SQLite is compiled in — no system lib / pkg-config) behind an `r2d2` connection pool. rusqlite is blocking, so every DB call runs inside `tokio::task::spawn_blocking` (see `run_blocking` in [src/handlers.rs](src/handlers.rs)). The app is otherwise network-isolated except for **one outbound call**: the Yandex reverse-search upload (`reqwest` with `rustls-tls` + bundled webpki roots, so no system TLS/OpenSSL dep), used only by `/api/photos/:id/reverse-search`.
+- **Stack**: `axum` + `tokio`; `rusqlite` (feature `bundled`, so SQLite is compiled in — no system lib / pkg-config) behind an `r2d2` connection pool. rusqlite is blocking, so every DB call runs inside `tokio::task::spawn_blocking` (see `run_blocking` in [src/handlers/mod.rs](src/handlers/mod.rs)). The app is otherwise network-isolated except for **one outbound call**: the Yandex reverse-search upload (`reqwest` with `rustls-tls` + bundled webpki roots, so no system TLS/OpenSSL dep), used only by `/api/photos/:id/reverse-search`.
 - **HTML rendering**: the page **shell** uses [`maud`](https://maud.lang.rs/) (compile-time `html!` templates with automatic escaping). `album_page` returns `maud::Markup` (its axum feature makes it `IntoResponse`). The shell is static — all album/filter rendering moved client-side ([src/web/](src/web/)), so maud now just emits the fixed navbar/container scaffolding. `assets/style.css` and the `concat!`-ed `web/*.js` (`STYLE` / `SCRIPT`) are emitted inside `<style>`/`<script>` via `PreEscaped` (trusted, must not be escaped).
 - **Read-only by default & safe alongside running Digikam**: connections open with `SQLITE_OPEN_READ_ONLY`, set `PRAGMA query_only=ON`, and a 5s `busy_timeout` so reads don't fail while Digikam writes. We deliberately do **not** use `immutable=1` (Digikam may be modifying the file concurrently). With the opt-in `--allow-writes` the same single pool opens `SQLITE_OPEN_READ_WRITE` (never CREATE) without `query_only`, `AppState.allow_writes` gates the write handlers (`403` otherwise), and the `busy_timeout` makes our writes contend politely with Digikam's. See `build_pool` in [src/db.rs](src/db.rs).
 - **One writable DB — `web.sql`** (bookmarks): the sole exception to read-only. `build_web_pool` in [src/db.rs](src/db.rs) opens *our own* `web.sql` with `SQLITE_OPEN_READ_WRITE | SQLITE_OPEN_CREATE` and **no** `query_only`, then runs a `CREATE TABLE IF NOT EXISTS bookmarks(...)` migration. It's optional (`AppState.web: Option<Pool>`, graceful like `thumbs`); the bookmark handlers run via a `run_web` helper. Never points at a Digikam DB.
 - **Path resolution** ([src/db.rs](src/db.rs)): an image's absolute path is `AlbumRoots` base + `Albums.relativePath` + `/` + `Images.name`. The root base is parsed from the album-root identifier (percent-decoded), joined with `specificPath`: local volumes use `volumeid:?path=…&fileuuid=…`, network shares use `networkshareid:?mountpath=…&fileuuid=…` — we accept either `path=` or `mountpath=` (a root whose identifier has neither is skipped with a warning). The root album has `relativePath == "/"`.
 - **Visibility filter**: only `Images.status = 1` (visible) is returned; 3 (trashed) and 4 (obsolete) are excluded.
 - **Ratings/dimensions**: `rating`, `width`, `height`, `file_size`, `id` are `u64`. Digikam stores `-1` for "unrated"; that (and any negative) maps to JSON `null`.
-- **Tags tree** ([src/handlers.rs](src/handlers.rs)): built in memory from `Tags(id, pid, name)`; top-level nodes have `pid = 0`. The internal `_Digikam_Internal_Tags_` subtree (id `1`, which holds Color/Pick-label tags) is excluded from `/tags`.
+- **Tags tree** (`list_tags` in [src/handlers/browse.rs](src/handlers/browse.rs)): built in memory from `Tags(id, pid, name)`; top-level nodes have `pid = 0`. The internal `_Digikam_Internal_Tags_` subtree (id `1`, which holds Color/Pick-label tags) is excluded from `/tags`.
 - **Request logging**: a `tower_http` `TraceLayer` logs every HTTP request (method + URI) and its response (status + latency) at `info`. `--trace-sql` additionally logs the SQL each request runs.
 - **No CORS layer**: the frontend is served same-origin by this server, so CORS is unneeded. It was removed because `CorsLayer::permissive()` emits `Vary: origin, …`, which made the browser refuse to reuse the cached (immutable) thumbnails and webpgf assets — it re-`GET`s them every page load. (Re-add a scoped CORS layer only if a *separate-origin* frontend ever consumes `/api`.)
 
@@ -175,8 +175,14 @@ To make the *first* paint snappy, the decoder assets are fetched **once** (not o
   - `db.rs` — read-only pools + writable web.sql pool, album-root loading, path resolution (+ unit tests)
   - `models.rs` — serde types (PhotoSummary, PhotoDetail, AlbumNode, SubAlbum, TagNode, Page<T>, Filters, Bookmark, PatchPhoto)
   - `query.rs` — /photos + /subalbums SQL + param building; Rating/Aspect/Sort types (+ unit tests)
-  - `handlers.rs` — axum JSON API handlers (incl. bookmarks), run_blocking/run_web DB helpers
-  - `http.rs` — HTTP caching helpers (`If-None-Match` → `304` via `not_modified`, `IMMUTABLE_CACHE_CONTROL`), shared by handlers.rs and web.rs
+  - `handlers/` — the axum JSON API handlers, split by area:
+    - `mod.rs` — shared plumbing: `run_blocking`, `load_image`/`ImageRow`, `INTERNAL_TAG_ROOT`; `/health`
+    - `browse.rs` — listings: `/photos`, `/random`, `/subalbums`, `/albums`, `/tags`
+    - `detail.rs` — `GET /photos/:id` (PhotoDetail)
+    - `write.rs` — `PATCH /photos/:id` (rating, tags, move)
+    - `media.rs` — `/file`, `/thumbnail`, `/reverse-search`
+    - `bookmarks.rs` — the bookmark endpoints + `run_web` (the `web.sql` pool)
+  - `http.rs` — HTTP caching helpers (`If-None-Match` → `304` via `not_modified`, `IMMUTABLE_CACHE_CONTROL`), shared by `handlers/` and web.rs
   - `web.rs` — static SPA shell (navbar + empty containers) + static asset handlers, maud
   - `web/` — the SPA, split by concern and concat!'d into SCRIPT (web.rs), in order:
     - `state.js` — app state + URL/filter model (state, readUrl, filters, photosUrl, apiParams)

@@ -109,26 +109,28 @@ async fn main() -> Result<()> {
 /// `/api`, the SPA shell + static assets at the root, the `/random` redirect, and
 /// the request-logging `TraceLayer`. Shared by `main` and the integration tests.
 pub(crate) fn build_router(state: AppState) -> Router {
+    use handlers::{bookmarks, browse, detail, media, write};
+
     let api = Router::new()
         .route("/health", get(handlers::health))
-        .route("/photos", get(handlers::list_photos))
+        .route("/photos", get(browse::list_photos))
         .route(
             "/photos/:id",
-            get(handlers::get_photo).patch(handlers::patch_photo),
+            get(detail::get_photo).patch(write::patch_photo),
         )
-        .route("/photos/:id/file", get(handlers::get_photo_file))
-        .route("/photos/:id/reverse-search", get(handlers::reverse_search))
-        .route("/photos/:id/thumbnail", get(handlers::get_photo_thumbnail))
-        .route("/albums", get(handlers::list_albums))
-        .route("/subalbums", get(handlers::list_subalbums))
-        .route("/tags", get(handlers::list_tags))
+        .route("/photos/:id/file", get(media::get_photo_file))
+        .route("/photos/:id/reverse-search", get(media::reverse_search))
+        .route("/photos/:id/thumbnail", get(media::get_photo_thumbnail))
+        .route("/albums", get(browse::list_albums))
+        .route("/subalbums", get(browse::list_subalbums))
+        .route("/tags", get(browse::list_tags))
         .route(
             "/bookmarks",
-            get(handlers::list_bookmarks).post(handlers::create_bookmark),
+            get(bookmarks::list_bookmarks).post(bookmarks::create_bookmark),
         )
         .route(
             "/bookmarks/:name",
-            axum::routing::delete(handlers::delete_bookmark),
+            axum::routing::delete(bookmarks::delete_bookmark),
         );
 
     Router::new()
@@ -136,7 +138,7 @@ pub(crate) fn build_router(state: AppState) -> Router {
         .route("/", get(web::album_page))
         .route("/photos", get(web::album_page))
         .route("/photos/*path", get(web::album_page))
-        .route("/random", get(handlers::random_photo))
+        .route("/random", get(browse::random_photo))
         .route("/webpgf.js", get(web::webpgf_js))
         .route("/webpgf.wasm", get(web::webpgf_wasm))
         .route("/favicon.ico", get(web::favicon))
