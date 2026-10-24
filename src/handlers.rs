@@ -11,7 +11,7 @@ use serde_json::json;
 use tower::ServiceExt;
 use tower_http::services::ServeFile;
 
-use crate::db::{album_display_path, image_abs_path, AppState, PooledConn};
+use crate::db::{album_display_path, image_abs_path, AlbumRoot, AppState, PooledConn};
 use crate::error::{AppError, AppResult};
 use crate::models::{
     AlbumNode, Bookmark, CreateBookmark, Filters, Page, PatchPhoto, PhotoDetail, PhotoSummary,
@@ -195,12 +195,8 @@ pub async fn get_photo(
                     longitude: row.get(11)?,
                 })
             })
-            .map_err(|e| match e {
-                rusqlite::Error::QueryReturnedNoRows => {
-                    AppError::NotFound(format!("photo {id} not found"))
-                }
-                other => AppError::from(other),
-            })?;
+            .optional()?
+            .ok_or_else(|| photo_not_found(id))?;
 
         // Each tag as its absolute path (e.g. `/vacation/2020/beach`): walk up the
         // `pid` chain prepending each ancestor's name to the top-level (pid 0).
@@ -268,46 +264,25 @@ pub async fn patch_photo(
     run_blocking(&state, move |conn, state| {
         let tx = conn.unchecked_transaction()?;
 
-        let (album_root, relative_path, name, old, cur_album): (
-            i64,
-            String,
-            String,
-            Option<i64>,
-            i64,
-        ) = conn
-            .query_row(
-                "SELECT a.albumRoot, a.relativePath, i.name, ii.rating, i.album FROM Images i \
-                 JOIN Albums a ON a.id = i.album \
-                 LEFT JOIN ImageInformation ii ON ii.imageid = i.id \
-                 WHERE i.id = ?1 AND i.status = 1",
-                [id],
-                |row| {
-                    Ok((
-                        row.get(0)?,
-                        row.get(1)?,
-                        row.get(2)?,
-                        row.get(3)?,
-                        row.get(4)?,
-                    ))
-                },
-            )
-            .map_err(|e| match e {
-                rusqlite::Error::QueryReturnedNoRows => {
-                    AppError::NotFound(format!("photo {id} not found"))
-                }
-                other => AppError::from(other),
-            })?;
+        let img = load_image(conn, id)?;
 
         // The path is best-effort, for the change log only: fall back to the
         // album-relative path when the root is unknown.
-        let path = match state.roots.get(&album_root) {
-            Some(root) => image_abs_path(root, &relative_path, &name)
-                .to_string_lossy()
-                .into_owned(),
-            None => format!("root{album_root}:{relative_path}/{name}"),
+        let path = match img.abs_path(&state.roots) {
+            Ok(p) => p.to_string_lossy().into_owned(),
+            Err(_) => format!("root{}:{}/{}", img.album_root, img.relative_path, img.name),
         };
 
         if let Some(rating) = patch.rating {
+            // The current rating, for the change log (no row / NULL = unrated).
+            let old: Option<i64> = conn
+                .query_row(
+                    "SELECT rating FROM ImageInformation WHERE imageid = ?1",
+                    [id],
+                    |r| r.get(0),
+                )
+                .optional()?
+                .flatten();
             let new = rating.map_or(-1, Rating::get);
             // Upsert: an image may have no ImageInformation row yet.
             conn.execute(
@@ -360,7 +335,7 @@ pub async fn patch_photo(
         // (DB rolled back, disk untouched), a commit failure renames back.
         let mut moved: Option<(PathBuf, PathBuf)> = None;
         if let Some(target) = patch.album {
-            if target != cur_album {
+            if target != img.album {
                 let (t_root, t_rel): (i64, String) = conn
                     .query_row(
                         "SELECT albumRoot, relativePath FROM Albums WHERE id = ?1",
@@ -371,14 +346,15 @@ pub async fn patch_photo(
                     .ok_or_else(|| {
                         AppError::Unprocessable(format!("unknown album id {target}"))
                     })?;
-                let src_root = state.roots.get(&album_root).ok_or_else(|| {
-                    AppError::Unprocessable(format!("album root {album_root} unknown"))
+                let src_root = state.roots.get(&img.album_root).ok_or_else(|| {
+                    AppError::Unprocessable(format!("album root {} unknown", img.album_root))
                 })?;
                 let dst_root = state.roots.get(&t_root).ok_or_else(|| {
                     AppError::Unprocessable(format!("album root {t_root} unknown"))
                 })?;
-                let old_abs = image_abs_path(src_root, &relative_path, &name);
-                let new_abs = image_abs_path(dst_root, &t_rel, &name);
+                let name = &img.name;
+                let old_abs = image_abs_path(src_root, &img.relative_path, name);
+                let new_abs = image_abs_path(dst_root, &t_rel, name);
                 // Preflight: refuse DB/filesystem drift rather than papering
                 // over it, and never overwrite an existing file.
                 let new_dir = new_abs.parent().expect("image path has a parent");
@@ -505,25 +481,8 @@ pub async fn reverse_search(
 
     // Resolve the original's absolute path (as `get_photo_file` does).
     let (path, name) = run_blocking(&state, move |conn, state| {
-        let (album_root, relative_path, name): (i64, String, String) = conn
-            .query_row(
-                "SELECT a.albumRoot, a.relativePath, i.name FROM Images i \
-                 JOIN Albums a ON a.id = i.album \
-                 WHERE i.id = ?1 AND i.status = 1",
-                [id],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-            )
-            .map_err(|e| match e {
-                rusqlite::Error::QueryReturnedNoRows => {
-                    AppError::NotFound(format!("photo {id} not found"))
-                }
-                other => AppError::from(other),
-            })?;
-        let root = state
-            .roots
-            .get(&album_root)
-            .ok_or_else(|| AppError::NotFound(format!("album root {album_root} unknown")))?;
-        Ok((image_abs_path(root, &relative_path, &name), name))
+        let img = load_image(conn, id)?;
+        Ok((img.abs_path(&state.roots)?, img.name))
     })
     .await?;
 
@@ -600,32 +559,16 @@ pub async fn get_photo_file(
     request: Request<axum::body::Body>,
 ) -> AppResult<Response> {
     let (path, etag, name) = run_blocking(&state, move |conn, state| {
-        let (album_root, relative_path, name, unique_hash): (i64, String, String, Option<String>) =
-            conn.query_row(
-                "SELECT a.albumRoot, a.relativePath, i.name, i.uniqueHash FROM Images i \
-                 JOIN Albums a ON a.id = i.album \
-                 WHERE i.id = ?1 AND i.status = 1",
-                [id],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
-            )
-            .map_err(|e| match e {
-                rusqlite::Error::QueryReturnedNoRows => {
-                    AppError::NotFound(format!("photo {id} not found"))
-                }
-                other => AppError::from(other),
-            })?;
-
-        let root = state
-            .roots
-            .get(&album_root)
-            .ok_or_else(|| AppError::NotFound(format!("album root {album_root} unknown")))?;
+        let img = load_image(conn, id)?;
 
         // Build a strong ETag from the content hash; skip if Digikam has none.
-        let etag = unique_hash
+        let etag = img
+            .unique_hash
+            .as_deref()
             .filter(|h| !h.is_empty())
             .and_then(|h| HeaderValue::from_str(&format!("\"{h}\"")).ok());
 
-        Ok((image_abs_path(root, &relative_path, &name), etag, name))
+        Ok((img.abs_path(&state.roots)?, etag, img.name))
     })
     .await?;
 
@@ -724,16 +667,9 @@ pub async fn get_photo_thumbnail(
 ) -> AppResult<Response> {
     let (hash, data, orientation) = run_blocking(&state, move |conn, state| {
         // The image's content key (uniqueHash + fileSize) from the main DB.
-        let row: Option<(Option<String>, Option<i64>)> = conn
-            .query_row(
-                "SELECT uniqueHash, fileSize FROM Images WHERE id = ?1 AND status = 1",
-                [id],
-                |r| Ok((r.get(0)?, r.get(1)?)),
-            )
-            .optional()?;
-        let (hash, size) = match row {
-            Some((Some(hash), Some(size))) => (hash, size),
-            _ => return Err(AppError::NotFound(format!("photo {id} not found"))),
+        let img = load_image(conn, id)?;
+        let (Some(hash), Some(size)) = (img.unique_hash, img.file_size) else {
+            return Err(AppError::NotFound(format!("no thumbnail for photo {id}")));
         };
 
         let Some(thumbs) = state.thumbs.as_ref() else {
@@ -935,6 +871,57 @@ pub async fn list_tags(State(state): State<AppState>) -> AppResult<Json<Vec<TagN
 /// Map a non-negative integer column to `Option<u64>`, treating negatives as absent.
 fn opt_u64(v: Option<i64>) -> Option<u64> {
     v.and_then(|n| u64::try_from(n).ok())
+}
+
+/// A visible photo's `Images` row plus its album location — the columns the
+/// per-photo handlers (file, thumbnail, reverse search, PATCH) share.
+struct ImageRow {
+    /// `Images.album`, the album id.
+    album: i64,
+    album_root: i64,
+    /// The album's `relativePath` (`"/"` for a root album).
+    relative_path: String,
+    name: String,
+    file_size: Option<i64>,
+    unique_hash: Option<String>,
+}
+
+impl ImageRow {
+    /// Absolute path of the original on disk; a 404 if its album root is
+    /// unknown (e.g. skipped at startup for an unparseable identifier).
+    fn abs_path(&self, roots: &HashMap<i64, AlbumRoot>) -> AppResult<PathBuf> {
+        let root = roots
+            .get(&self.album_root)
+            .ok_or_else(|| AppError::NotFound(format!("album root {} unknown", self.album_root)))?;
+        Ok(image_abs_path(root, &self.relative_path, &self.name))
+    }
+}
+
+/// Load a visible (`status = 1`) photo's [`ImageRow`]; a 404 for an unknown,
+/// trashed, or obsolete id.
+fn load_image(conn: &PooledConn, id: i64) -> AppResult<ImageRow> {
+    conn.prepare_cached(
+        "SELECT i.album, a.albumRoot, a.relativePath, i.name, i.fileSize, i.uniqueHash \
+         FROM Images i JOIN Albums a ON a.id = i.album \
+         WHERE i.id = ?1 AND i.status = 1",
+    )?
+    .query_row([id], |row| {
+        Ok(ImageRow {
+            album: row.get(0)?,
+            album_root: row.get(1)?,
+            relative_path: row.get(2)?,
+            name: row.get(3)?,
+            file_size: row.get(4)?,
+            unique_hash: row.get(5)?,
+        })
+    })
+    .optional()?
+    .ok_or_else(|| photo_not_found(id))
+}
+
+/// The 404 for a photo id that doesn't exist or isn't visible.
+fn photo_not_found(id: i64) -> AppError {
+    AppError::NotFound(format!("photo {id} not found"))
 }
 
 /// Run a blocking database closure on the blocking thread pool.
