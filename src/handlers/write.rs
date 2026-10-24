@@ -158,7 +158,20 @@ pub async fn patch_photo(
                         "a file named \"{name}\" already exists in the target album"
                     )));
                 }
-                conn.execute("UPDATE Images SET album = ?1 WHERE id = ?2", [target, id])?;
+                // Digikam's UNIQUE (album, name) also covers rows with no file
+                // on disk (e.g. trashed items), which the check above can't see.
+                conn.execute("UPDATE Images SET album = ?1 WHERE id = ?2", [target, id])
+                    .map_err(|e| match e {
+                        rusqlite::Error::SqliteFailure(f, _)
+                            if f.code == rusqlite::ErrorCode::ConstraintViolation =>
+                        {
+                            AppError::Conflict(format!(
+                                "the target album already has an item named \"{name}\" \
+                                 (possibly trashed)"
+                            ))
+                        }
+                        e => e.into(),
+                    })?;
                 std::fs::rename(&old_abs, &new_abs).map_err(|e| rename_error(e, &old_abs))?;
                 tracing::info!(id, from = %old_abs.display(), to = %new_abs.display(), "photo moved");
                 moved = Some((old_abs, new_abs));

@@ -92,6 +92,33 @@ async fn name_collision_is_a_conflict() {
 }
 
 #[tokio::test]
+async fn name_taken_in_target_album_db_is_a_conflict() {
+    // The target album already has a DB row by that name — here a trashed item,
+    // so there's no file on disk to collide with. Digikam's UNIQUE (album, name)
+    // still forbids the move: a 409 like a file collision, not a 500.
+    let fx = Fixture::new();
+    std::fs::create_dir_all(fx.root_base.join("Beach")).unwrap();
+    fx.state
+        .pool
+        .get()
+        .unwrap()
+        .execute(
+            "INSERT INTO Images(id, album, name, status) VALUES (200, 4, 'img001.jpg', 3)",
+            [],
+        )
+        .unwrap();
+
+    let (status, body) = fx
+        .patch_json("/api/photos/100", &json!({ "album": 4 }))
+        .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert!(body["error"].as_str().unwrap().contains("img001.jpg"));
+    // Nothing moved.
+    assert_eq!(db_album(&fx, 100), 2);
+    assert!(fx.root_base.join("Animals/img001.jpg").exists());
+}
+
+#[tokio::test]
 async fn missing_target_directory_is_a_conflict() {
     let fx = Fixture::new();
     // Album 4 (/Beach) exists in the DB but its directory was never created.

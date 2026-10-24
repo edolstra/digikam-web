@@ -87,9 +87,13 @@ pub fn seed(dir: &Path) -> Result<()> {
 pub fn seed_main(conn: &Connection, root_base: &str) {
     conn.execute_batch(
         "CREATE TABLE AlbumRoots(id INTEGER PRIMARY KEY, label TEXT, identifier TEXT, specificPath TEXT);
-         CREATE TABLE Albums(id INTEGER PRIMARY KEY, albumRoot INTEGER, relativePath TEXT);
+         -- The UNIQUE constraints are Digikam's own (so the tests see the same
+         -- conflicts a real collection would raise).
+         CREATE TABLE Albums(id INTEGER PRIMARY KEY, albumRoot INTEGER, relativePath TEXT,
+                             UNIQUE (albumRoot, relativePath));
          CREATE TABLE Images(id INTEGER PRIMARY KEY, album INTEGER, name TEXT, status INTEGER,
-                             fileSize INTEGER, uniqueHash TEXT, modificationDate TEXT, category INTEGER);
+                             fileSize INTEGER, uniqueHash TEXT, modificationDate TEXT, category INTEGER,
+                             UNIQUE (album, name));
          CREATE TABLE ImageInformation(imageid INTEGER PRIMARY KEY, rating INTEGER, creationDate TEXT,
                              width INTEGER, height INTEGER, format TEXT);
          CREATE TABLE ImageComments(id INTEGER PRIMARY KEY, imageid INTEGER, type INTEGER, language TEXT, comment TEXT);
