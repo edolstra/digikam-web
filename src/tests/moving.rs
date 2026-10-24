@@ -91,6 +91,32 @@ async fn name_collision_is_a_conflict() {
     assert!(fx.root_base.join("Animals/img001.jpg").exists());
 }
 
+#[cfg(unix)]
+#[tokio::test]
+async fn dangling_symlink_in_target_is_a_conflict() {
+    // A dangling symlink is "nothing there" to `Path::exists`, but a plain rename
+    // would replace it. The move must refuse, like for any existing entry.
+    let fx = Fixture::new();
+    let beach = fx.root_base.join("Beach");
+    std::fs::create_dir_all(&beach).unwrap();
+    std::os::unix::fs::symlink("/nonexistent", beach.join("img001.jpg")).unwrap();
+
+    let (status, body) = fx
+        .patch_json("/api/photos/100", &json!({ "album": 4 }))
+        .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert!(body["error"].as_str().unwrap().contains("img001.jpg"));
+    // Nothing moved, and the symlink is still a symlink.
+    assert_eq!(db_album(&fx, 100), 2);
+    assert!(fx.root_base.join("Animals/img001.jpg").exists());
+    assert!(beach
+        .join("img001.jpg")
+        .symlink_metadata()
+        .unwrap()
+        .file_type()
+        .is_symlink());
+}
+
 #[tokio::test]
 async fn name_taken_in_target_album_db_is_a_conflict() {
     // The target album already has a DB row by that name — here a trashed item,

@@ -1,6 +1,8 @@
 //! `PATCH /photos/:id`: rating, tag, and album (file move) changes.
 
 use std::collections::HashSet;
+use std::fs;
+use std::io::{self, ErrorKind};
 use std::path::PathBuf;
 
 use axum::extract::{Path, State};
@@ -22,10 +24,10 @@ use crate::query::Rating;
 ///   Digikam-internal tag id is a 422 (nothing is applied — the whole patch is
 ///   one transaction).
 /// - `album`: target album id (from `/api/albums`) — **moves** the photo: the
-///   `Images.album` row and the **file on disk** (a same-filesystem `rename`
-///   only; cross-device is a 409, as are a name collision, a missing target
+///   `Images.album` row and the **file on disk** (a same-filesystem move
+///   only, never replacing an existing file — see [`move_no_clobber`]; cross-device is a 409, as are a name collision, a missing target
 ///   directory, and a source file missing on disk). The current album is a
-///   silent no-op. `modificationDate`/`uniqueHash` are untouched (a rename
+///   silent no-op. `modificationDate`/`uniqueHash` are untouched (the move
 ///   keeps content and mtime), so thumbnails keep working.
 ///
 /// `{}` is a valid no-op. Requires the server to have been started with
@@ -123,9 +125,9 @@ pub async fn patch_photo(
             }
         }
 
-        // The move comes LAST: its filesystem rename must sit between the final
-        // DB statement and the commit — a rename failure drops the transaction
-        // (DB rolled back, disk untouched), a commit failure renames back.
+        // The move comes LAST: its filesystem move must sit between the final
+        // DB statement and the commit — a failed move drops the transaction
+        // (DB rolled back, disk untouched), a failed commit moves the file back.
         let mut moved: Option<(PathBuf, PathBuf)> = None;
         if let Some(target) = patch.album {
             if target != img.album {
@@ -149,7 +151,8 @@ pub async fn patch_photo(
                 let old_abs = image_abs_path(src_root, &img.relative_path, name);
                 let new_abs = image_abs_path(dst_root, &t_rel, name);
                 // Preflight: refuse DB/filesystem drift rather than papering
-                // over it, and never overwrite an existing file.
+                // over it. (An existing file at the target is refused by the
+                // no-clobber move itself — a separate check would be racy.)
                 let new_dir = new_abs.parent().expect("image path has a parent");
                 if !new_dir.is_dir() {
                     return Err(AppError::Conflict(format!(
@@ -157,13 +160,8 @@ pub async fn patch_photo(
                         new_dir.display()
                     )));
                 }
-                if new_abs.exists() {
-                    return Err(AppError::Conflict(format!(
-                        "a file named \"{name}\" already exists in the target album"
-                    )));
-                }
                 // Digikam's UNIQUE (album, name) also covers rows with no file
-                // on disk (e.g. trashed items), which the check above can't see.
+                // on disk (e.g. trashed items), which the move can't see.
                 conn.execute("UPDATE Images SET album = ?1 WHERE id = ?2", [target, id])
                     .map_err(|e| match e {
                         rusqlite::Error::SqliteFailure(f, _)
@@ -176,18 +174,19 @@ pub async fn patch_photo(
                         }
                         e => e.into(),
                     })?;
-                std::fs::rename(&old_abs, &new_abs).map_err(|e| rename_error(e, &old_abs))?;
+                move_no_clobber(&old_abs, &new_abs)
+                    .map_err(|e| move_error(e, &old_abs, name))?;
                 tracing::info!(id, from = %old_abs.display(), to = %new_abs.display(), "photo moved");
                 moved = Some((old_abs, new_abs));
             }
         }
 
         if let Err(e) = tx.commit() {
-            // The rename already happened; put the file back (best effort) so
-            // disk matches the rolled-back DB.
+            // The file already moved; put it back (best effort) so disk
+            // matches the rolled-back DB.
             if let Some((old_abs, new_abs)) = &moved {
-                if let Err(e2) = std::fs::rename(new_abs, old_abs) {
-                    tracing::error!(id, error = %e2, "could not rename file back after failed commit");
+                if let Err(e2) = move_no_clobber(new_abs, old_abs) {
+                    tracing::error!(id, error = %e2, "could not move file back after failed commit");
                 }
             }
             return Err(e.into());
@@ -199,18 +198,55 @@ pub async fn patch_photo(
     Ok(StatusCode::NO_CONTENT)
 }
 
-/// Map a failed move `rename` to a client-facing error: a cross-filesystem move
-/// or a source file missing on disk is a 409 (the request conflicts with the
-/// state of the world), anything else is a 500.
-fn rename_error(e: std::io::Error, from: &std::path::Path) -> AppError {
+/// Move the file `from` to `to` without ever replacing whatever is at `to`
+/// (including a dangling symlink, which `Path::exists` doesn't see). A plain
+/// `rename` silently replaces the target, so instead hard-link the file into
+/// place — which fails with `AlreadyExists`, atomically, if `to` exists — and
+/// then drop the old link. Same-filesystem only, like `rename`; the inode is
+/// unchanged, so content, mtime (and thus `uniqueHash`/thumbnails) are kept.
+///
+/// Filesystems without hard links (FAT/exFAT, some network mounts) fall back to
+/// a checked `rename`, which narrows the race but can't close it.
+fn move_no_clobber(from: &std::path::Path, to: &std::path::Path) -> io::Result<()> {
+    match fs::hard_link(from, to) {
+        Ok(()) => {
+            if let Err(e) = fs::remove_file(from) {
+                // Keep a single copy: undo the new link (best effort).
+                let _ = fs::remove_file(to);
+                return Err(e);
+            }
+            Ok(())
+        }
+        Err(e)
+            if matches!(
+                e.kind(),
+                ErrorKind::Unsupported | ErrorKind::PermissionDenied
+            ) =>
+        {
+            if to.symlink_metadata().is_ok() {
+                return Err(ErrorKind::AlreadyExists.into());
+            }
+            fs::rename(from, to)
+        }
+        Err(e) => Err(e),
+    }
+}
+
+/// Map a failed move to a client-facing error: an existing file at the target,
+/// a cross-filesystem move, or a source file missing on disk is a 409 (the
+/// request conflicts with the state of the world), anything else is a 500.
+fn move_error(e: io::Error, from: &std::path::Path, name: &str) -> AppError {
     match e.kind() {
-        std::io::ErrorKind::CrossesDevices => {
+        ErrorKind::AlreadyExists => AppError::Conflict(format!(
+            "a file named \"{name}\" already exists in the target album"
+        )),
+        ErrorKind::CrossesDevices => {
             AppError::Conflict("moving across filesystems is not supported (yet)".into())
         }
-        std::io::ErrorKind::NotFound => {
+        ErrorKind::NotFound => {
             AppError::Conflict(format!("file missing on disk: {}", from.display()))
         }
-        _ => AppError::Internal(anyhow::anyhow!("renaming {}: {e}", from.display())),
+        _ => AppError::Internal(anyhow::anyhow!("moving {}: {e}", from.display())),
     }
 }
 
