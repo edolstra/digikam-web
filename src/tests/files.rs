@@ -92,6 +92,14 @@ async fn reverse_search_unsupported_engine_is_400() {
 }
 
 #[tokio::test]
+async fn reverse_search_rejects_videos() {
+    let fx = Fixture::new();
+    // 102 is a video: refused before the file is read or anything is uploaded.
+    let (status, _h, _b) = fx.get("/api/photos/102/reverse-search?engine=yandex").await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+#[tokio::test]
 async fn reverse_search_unknown_id_is_404() {
     let fx = Fixture::new();
     // Unknown id fails path resolution before the (real) Yandex upload is attempted.

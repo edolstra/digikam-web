@@ -68,7 +68,7 @@ All endpoints are under `/api`, except the root-level `/random`. Album paths are
 | `PATCH /api/photos/:id` | Partial update (needs `--allow-writes`, else `403`): `rating` (0–5, or `null` = unrated), `tags_add` / `tags_remove` (tag ids), `album` (move to that album id). Absent fields are left alone; all-or-nothing. `422` for invalid values / unknown or internal tags / unknown album, `409` when a move conflicts with the disk, `404` for an unknown photo. |
 | `GET /api/photos/:id/file` | The original file (range requests, `ETag` revalidation, original filename for saving). |
 | `GET /api/photos/:id/thumbnail` | Digikam's stored thumbnail (raw PGF) with its EXIF orientation; `404` if none. |
-| `GET /api/photos/:id/reverse-search?engine=yandex` | Uploads the image to Yandex and redirects to the results. |
+| `GET /api/photos/:id/reverse-search?engine=yandex` | Uploads the image to Yandex and redirects to the results. Images only (`422` for a video). |
 | `GET /api/albums` | All albums, flat (`{id, path, root}`). |
 | `GET /api/subalbums?album=&…filters…&sort=` | Direct sub-albums of an album (or the album roots, for an empty `album`), each with a recursive item count and a cover. The filters constrain counts, covers, and which sub-albums appear. Ordered newest-first, or A–Z under `sort=name`; the cover is the first item under the same sort. |
 | `GET /api/tags` | The tag tree. |

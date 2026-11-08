@@ -42,9 +42,17 @@ pub async fn reverse_search(
         )));
     }
 
-    // Resolve the original's absolute path (as `get_photo_file` does).
+    // Resolve the original's absolute path (as `get_photo_file` does). Images
+    // only: Yandex searches by still image, and a video would be a pointless
+    // (possibly huge) upload — the UI hides the button for videos, this guards
+    // direct requests.
     let (path, name) = run_blocking(&state, move |conn, state| {
         let img = load_image(conn, id)?;
+        if img.is_video {
+            return Err(AppError::Unprocessable(format!(
+                "photo {id} is a video; reverse image search needs an image"
+            )));
+        }
         Ok((img.abs_path(&state.roots)?, img.name))
     })
     .await?;

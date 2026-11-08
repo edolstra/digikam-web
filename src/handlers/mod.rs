@@ -42,6 +42,8 @@ struct ImageRow {
     name: String,
     file_size: Option<i64>,
     unique_hash: Option<String>,
+    /// A video (Digikam `category = 2`) rather than an image.
+    is_video: bool,
 }
 
 impl ImageRow {
@@ -59,7 +61,8 @@ impl ImageRow {
 /// trashed, or obsolete id.
 fn load_image(conn: &PooledConn, id: i64) -> AppResult<ImageRow> {
     conn.prepare_cached(
-        "SELECT i.album, a.albumRoot, a.relativePath, i.name, i.fileSize, i.uniqueHash \
+        "SELECT i.album, a.albumRoot, a.relativePath, i.name, i.fileSize, i.uniqueHash, \
+                i.category \
          FROM Images i JOIN Albums a ON a.id = i.album \
          WHERE i.id = ?1 AND i.status = 1",
     )?
@@ -71,6 +74,7 @@ fn load_image(conn: &PooledConn, id: i64) -> AppResult<ImageRow> {
             name: row.get(3)?,
             file_size: row.get(4)?,
             unique_hash: row.get(5)?,
+            is_video: row.get::<_, Option<i64>>(6)? == Some(2),
         })
     })
     .optional()?
