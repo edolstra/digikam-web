@@ -294,6 +294,8 @@ test('closing the picker with Esc gives the keyboard back to the lightbox', asyn
     await page.keyboard.press(key);
     await expect(lb).toHaveClass(/picker-open/);
     await expect(page.locator('#lb-picker-filter')).toBeFocused();
+    await expect(page.locator('#lb-picker .picker-list .picker-row').first()).toBeVisible();
+    await shot(page, key === 't' ? 'picker-tags' : 'picker-move');
     await page.keyboard.press('Escape');
     await page.keyboard.press('i');
     await expect(lb).not.toHaveClass(/picker-open/);
@@ -301,6 +303,28 @@ test('closing the picker with Esc gives the keyboard back to the lightbox', asyn
     await page.keyboard.press('i'); // close the panel again for the next round
     await expect(lb).not.toHaveClass(/info-open/);
   }
+});
+
+test('the picker arrow keys cycle through the rows and the filter below them', async ({ page }) => {
+  await page.goto(ALBUM);
+  await page.locator('#item-100').click();
+  await page.keyboard.press('v');
+  const filter = page.locator('#lb-picker-filter');
+  await expect(filter).toBeFocused();
+  const rows = page.locator('#lb-picker .picker-list .picker-row');
+  await expect(rows.first()).toBeVisible();
+
+  // ArrowUp from the filter: the row just above it (the last one; no MRU yet).
+  await page.keyboard.press('ArrowUp');
+  await expect(rows.last()).toBeFocused();
+  // ArrowDown off the last row: back to the filter.
+  await page.keyboard.press('ArrowDown');
+  await expect(filter).toBeFocused();
+  // ArrowDown from the filter wraps to the first row; ArrowUp returns.
+  await page.keyboard.press('ArrowDown');
+  await expect(rows.first()).toBeFocused();
+  await page.keyboard.press('ArrowUp');
+  await expect(filter).toBeFocused();
 });
 
 test('a failed metadata fetch is retried, not cached', async ({ page }) => {

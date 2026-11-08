@@ -33,7 +33,7 @@ function initLightboxPicker(core) {
 
   // A most-recently-used list — the last 10 tags added / move targets (each
   // use moves it to the front; tag removals don't touch it). Shown flat, as
-  // full paths, between the quick filter and the tree. Persisted in
+  // full paths, below the tree. Persisted in
   // localStorage so it survives reloads; unavailable/corrupt storage (private
   // mode, quota) just degrades to session-only. Entries that no longer exist
   // in the hierarchy are skipped when the picker is built.
@@ -275,14 +275,14 @@ function initLightboxPicker(core) {
     if (pickerMode === 'tags') pickerApplyBtn.disabled = !tagsDirty();
   }
 
-  // All visible focus targets in DOM order (the MRU section first, then the
-  // tree — ArrowDown from the filter walks them as one sequence): the
-  // checkboxes in tags mode, the rows themselves in move mode.
+  // All visible focus targets in DOM order (the tree first, then the MRU
+  // section — the arrow keys walk them as one sequence): the checkboxes in
+  // tags mode, the rows themselves in move mode.
   function visiblePickerBoxes() {
     var suffix = pickerMode === 'move' ? '' : ' input';
     return Array.prototype.slice.call(pickerEl.querySelectorAll(
-      '.picker-mru:not([hidden]) .picker-row:not([hidden])' + suffix + ', ' +
-      '.picker-list .picker-row:not([hidden])' + suffix));
+      '.picker-list .picker-row:not([hidden])' + suffix + ', ' +
+      '.picker-mru:not([hidden]) .picker-row:not([hidden])' + suffix));
   }
 
   // Tags mode commit: diff the checkboxes against the set at open time, send
@@ -413,20 +413,24 @@ function initLightboxPicker(core) {
         // empty filter must not move anything.
         if (pickerFilter.value.trim()) {
           var hit = pickerEl.querySelector(
-            '.picker-mru:not([hidden]) .picker-row:not([hidden]), ' +
-            '.picker-list .picker-row:not([hidden]):not(.ctx)');
+            '.picker-list .picker-row:not([hidden]):not(.ctx), ' +
+            '.picker-mru:not([hidden]) .picker-row:not([hidden])');
           if (hit) moveToRow(hit);
         }
       } else {
         pickerApply();
       }
     }
-    else if (e.key === 'ArrowDown') {
+    else if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+      // The filter sits below the rows, and the arrows cycle through
+      // rows + filter: ArrowUp goes to the row just above (the last one),
+      // ArrowDown wraps around to the first.
       e.preventDefault();
-      var first = visiblePickerBoxes()[0];
-      if (first) {
-        first.focus();
-        first.closest('.picker-row').scrollIntoView({ block: 'nearest' });
+      var boxes = visiblePickerBoxes();
+      var target = e.key === 'ArrowUp' ? boxes[boxes.length - 1] : boxes[0];
+      if (target) {
+        target.focus();
+        target.closest('.picker-row').scrollIntoView({ block: 'nearest' });
       }
     }
   });
@@ -448,11 +452,10 @@ function initLightboxPicker(core) {
       var i = boxes.indexOf(document.activeElement);
       if (i === -1) return;
       var n = i + (e.key === 'ArrowDown' ? 1 : -1);
-      if (n < 0) { pickerFilter.focus(); return; }
-      if (n < boxes.length) {
-        boxes[n].focus();
-        boxes[n].closest('.picker-row').scrollIntoView({ block: 'nearest' });
-      }
+      // Off either end: back to the filter (the cycle described above).
+      if (n < 0 || n >= boxes.length) { pickerFilter.focus(); return; }
+      boxes[n].focus();
+      boxes[n].closest('.picker-row').scrollIntoView({ block: 'nearest' });
     }
     // Space is the native checkbox toggle (tags mode) — a local pending
     // change, left alone. Move-mode rows don't react to Space.

@@ -273,8 +273,8 @@ body.modal-open { overflow: hidden; }
          opacity: 0; pointer-events: none; transition: opacity 0.25s ease; }
 #toast.show { opacity: 1; }
 #toast.failed { color: #f66; }
-/* Picker modal (`t` = tags, `v` = move to album): quick filter on top, MRU,
-   scrollable tree, Cancel(/Apply in tags mode) footer. Toggled via
+/* Picker modal (`t` = tags, `v` = move to album): scrollable tree, MRU, quick
+   filter, Cancel(/Apply in tags mode) footer. Toggled via
    `.lightbox.picker-open` like the info panel. */
 #lb-picker { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
              z-index: 20; /* above the action row (z 10), which it can overlap on short screens */
@@ -285,15 +285,15 @@ body.modal-open { overflow: hidden; }
              background: rgba(0, 0, 0, 0.75); color: #fff; font-size: 0.9rem;
              text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9); }
 .lightbox.picker-open #lb-picker { display: flex; }
-#lb-picker-filter { margin-bottom: 0.4rem; padding: 0.25rem 0.4rem;
+#lb-picker-filter { margin-top: 0.4rem; padding: 0.25rem 0.4rem;
                     background: #222; color: #fff; border: 1px solid #555;
                     border-radius: 4px; font: inherit; }
-/* Small grey section labels ("Recently used", "Tags"/"Albums") above the MRU
-   and the tree; the MRU label hides together with its (empty/filtered-out)
+/* Small grey section labels ("Tags"/"Albums", "Recently used") above the tree
+   and the MRU; the MRU label hides together with its (empty/filtered-out)
    section. */
 #lb-picker .picker-label { font-size: 0.72rem; color: #999; margin: 0.25rem 0 0.1rem; }
-/* Most-recently-used entries: a flat, full-path list pinned between the filter
-   and the (scrollable) tree. */
+/* Most-recently-used entries: a flat, full-path list pinned between the
+   (scrollable) tree and the filter. */
 #lb-picker .picker-mru:not(:empty) { margin-bottom: 0.15rem; }
 /* The scrollable part; pan-y re-enables native touch scrolling under the
    lightbox's touch-action: none. */
