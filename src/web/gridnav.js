@@ -3,7 +3,7 @@
 // the photo/video grid); Enter activates the selected tile (open the lightbox, or
 // enter the sub-album); the selection is mirrored to the URL fragment (#item-<id>)
 // and restored after each render.
-var GRID_SEL = '.albums > a.album, .grid > img.thumb, .grid > .vtile';
+var GRID_SEL = '.albums > a.album, ' + TILE_SEL;
 var selected = null;
 
 // The navigable tiles, minus those clipped away by a collapsed sub-album grid
@@ -105,7 +105,7 @@ function restoreSelection() {
 
 function initGridNav() {
   document.addEventListener('keydown', function (e) {
-    if (LB && LB.isOpen()) return;                 // the lightbox owns keys then
+    if ((LB && LB.isOpen()) || PICKER.isOpen()) return; // they own the keys then
     if (e.altKey || e.ctrlKey || e.metaKey) return; // leave Alt+Up etc. alone
     var ae = document.activeElement;
     var tag = ae && ae.tagName;

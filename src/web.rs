@@ -172,17 +172,21 @@ const SCRIPT: &str = concat!(
     "\n",
     include_str!("web/grid.js"),
     "\n",
+    include_str!("web/meta.js"),
+    "\n",
+    include_str!("web/picker.js"),
+    "\n",
     include_str!("web/lightbox.js"),
     "\n",
     include_str!("web/lightbox-info.js"),
     "\n",
     include_str!("web/lightbox-slideshow.js"),
     "\n",
-    include_str!("web/lightbox-picker.js"),
-    "\n",
     include_str!("web/lightbox-gestures.js"),
     "\n",
     include_str!("web/gridnav.js"),
+    "\n",
+    include_str!("web/selection.js"),
     "\n",
     include_str!("web/main.js"),
     "\n",
@@ -215,6 +219,9 @@ fn page_html(title: &str, body: Markup) -> Markup {
                 header.navbar {
                     span.menu {}
                     span.crumb {}
+                    // Selection mode's controls (filled by selection.js),
+                    // shown in place of the breadcrumb while that mode is on.
+                    span.select-bar {}
                     span.filter-menu {}
                 }
                 (body)
@@ -262,12 +269,17 @@ fn page_html(title: &str, body: Markup) -> Markup {
                     button.nav.next aria-label="Next" { "›" }
                     // Metadata overlay, filled + toggled by lightbox-info.js (hidden by default).
                     div id="lb-info" {}
-                    // Picker modal (`t` = tags, `v` = move to album): scrollable
-                    // tree + MRU + quick filter + footer (Cancel always; Apply in
-                    // tags mode only — move-mode rows activate directly), filled +
-                    // toggled by lightbox-picker.js per mode. Must live inside #lightbox — a
-                    // fullscreen element is the only thing the browser paints.
-                    div id="lb-picker" {
+                }
+                // Picker modal (`t` = tags, `v` = move to album), shared by the
+                // lightbox and the grid's selection mode: a full-screen backdrop
+                // around the dialog box — scrollable tree + MRU + quick filter +
+                // footer (Cancel always; Apply in tags mode only — move-mode
+                // rows activate directly), filled + toggled by picker.js per
+                // mode. picker.js moves it into #lightbox while that is
+                // fullscreen — a fullscreen element is the only thing the
+                // browser paints.
+                div id="picker" {
+                    div.picker-box role="dialog" {
                         // The tree, then the most-recently-used entries (flat,
                         // full paths); each under a small grey section label (the
                         // tree's text is set per mode: "Tags" / "Albums"). The
@@ -276,7 +288,7 @@ fn page_html(title: &str, body: Markup) -> Markup {
                         div.picker-list {}
                         div.picker-label.picker-label-mru { "Recently used" }
                         div.picker-mru {}
-                        input id="lb-picker-filter" type="text" placeholder="Filter…" aria-label="Filter" autocomplete="off";
+                        input id="picker-filter" type="text" placeholder="Filter…" aria-label="Filter" autocomplete="off";
                         div.picker-actions {
                             button.picker-cancel type="button" { "Cancel" }
                             button.picker-apply type="button" { "Apply" }

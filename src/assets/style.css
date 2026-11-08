@@ -16,6 +16,22 @@ body { font-family: sans-serif; margin: 1rem; background: #111; color: #eee; }
 .crumb a { color: #6cf; text-decoration: none; }
 .crumb .home { font-size: 1.3rem; }
 .crumb .sep { color: #666; margin: 0 0.2rem; }
+/* Selection mode's bar (selection.js) takes the breadcrumb's place. */
+.select-bar { display: none; align-items: center; gap: 0.4rem; margin-right: auto;
+              min-width: 0; white-space: nowrap; }
+body.select-mode .crumb { display: none; }
+body.select-mode .select-bar { display: flex; }
+.select-bar button { background: none; border: 1px solid #444; border-radius: 5px;
+                     color: #ddd; cursor: pointer; font: inherit; font-size: 0.9rem;
+                     line-height: 1.4; padding: 0.1rem 0.5rem; }
+.select-bar button[disabled] { opacity: 0.35; cursor: default; }
+.select-bar .sel-exit { border: 0; font-size: 1.1rem; padding: 0 0.3rem; }
+.select-bar .sel-count { color: #f5c518; font-weight: 600; margin-right: 0.3rem; }
+/* Phones: icons only. */
+@media (max-width: 600px) {
+  .select-bar { gap: 0.25rem; }
+  .select-bar .lbl { display: none; }
+}
 /* Segmented radios used in the Filters menu: the media-type filter (📷🎥/📷/🎥),
    the aspect-ratio filter (▯▭/▯/▭) and the recursive [On|Off] toggle. The active
    segment is highlighted and inert; the others are plain links. */
@@ -81,6 +97,7 @@ body { font-family: sans-serif; margin: 1rem; background: #111; color: #eee; }
   .menu-item:hover { background: #3a3a3a; }
   .filter-btn:not(.active):hover { color: #fff; }
   .albums-toggle:hover { border-color: #6cf; }
+  .select-bar button:not([disabled]):hover { border-color: #6cf; color: #fff; }
 }
 h2 { font-size: 1rem; margin: 1.5rem 0 0.5rem; padding-bottom: 0.25rem;
      border-bottom: 1px solid #333; color: #aaa; }
@@ -114,27 +131,49 @@ h2 { font-size: 1rem; margin: 1.5rem 0 0.5rem; padding-bottom: 0.25rem;
                  font: inherit; font-size: 0.9rem; text-align: center; cursor: pointer; }
 .albums-toggle[hidden] { display: none; }
 .grid { display: flex; flex-wrap: wrap; gap: 4px; align-items: flex-end; }
-.grid img { height: 200px; width: auto; display: block; background: #222; cursor: pointer;
-            touch-action: manipulation; }
+/* A grid item (grid.js): a box around the thumbnail (+ the selection-mode
+   checkbox). No callout / text selection: a long press enters selection mode. */
+.grid .tile { position: relative; height: 200px; flex: none; cursor: pointer;
+              touch-action: manipulation; -webkit-touch-callout: none;
+              -webkit-user-select: none; user-select: none; }
 /* Thumbnails start src-less (thumbnails.js paints the decoded PGF). Until a tile has a
    src it's hidden entirely — invisible, with none of the placeholder box/frame a
    browser draws for an empty <img> — while the reserved width still holds its
    place so the layout doesn't reflow. Floor the width for unknown-aspect tiles.
    (Video posters sit over the .vtile box, which keeps its dark bg + ▶ badge.) */
-.grid img.thumb { min-width: 60px; background: transparent; }
-.grid img.thumb:not([src]) { visibility: hidden; }
-.grid .vtile { height: 200px; width: 300px; background: #222; border: 0; padding: 0;
-               position: relative; cursor: pointer; touch-action: manipulation; }
+.grid .tile img.thumb { height: 200px; width: auto; min-width: 60px; display: block; }
+.grid .tile img.thumb:not([src]) { visibility: hidden; }
+.grid .vtile { width: 300px; background: #222; }
 /* Video poster: the decoded thumbnail fills the tile beneath the ▶ badge. */
-.grid .vtile img.thumb { width: 100%; height: 100%; object-fit: cover; display: block; }
+.grid .vtile img.thumb { width: 100%; height: 100%; min-width: 0; object-fit: cover; }
 .grid .vtile::after { content: '▶'; position: absolute; inset: 0; display: flex;
                       align-items: center; justify-content: center; font-size: 3rem;
                       color: rgba(255, 255, 255, 0.85); text-shadow: 0 0 8px rgba(0, 0, 0, 0.8); }
+/* Selection mode (selection.js, `body.select-mode`): a round checkbox in each
+   item's top-left corner — a generous 44px tap target around the visible
+   circle, above the ▶ badge — gold and ticked when `.checked`, which also dims
+   the item. Outside the mode the checks are hidden (but remembered). */
+.grid .tile .check { display: none; position: absolute; top: 0; left: 0; z-index: 2;
+                     width: 44px; height: 44px; }
+body.select-mode .grid .tile .check { display: block; }
+.grid .tile .check::before { content: ''; position: absolute; top: 8px; left: 8px;
+                             box-sizing: border-box; width: 24px; height: 24px;
+                             border: 2px solid #fff; border-radius: 50%;
+                             background: rgba(0, 0, 0, 0.35);
+                             box-shadow: 0 0 3px rgba(0, 0, 0, 0.8);
+                             color: #111; font-size: 15px; font-weight: bold;
+                             line-height: 20px; text-align: center; }
+.grid .tile.checked .check::before { content: '✓'; background: #f5c518; border-color: #f5c518; }
+body.select-mode .grid .tile.checked img.thumb { filter: brightness(0.65); }
 /* Keyboard-navigation selection (arrow keys). Inset outline so it isn't clipped by
-   .album's overflow and doesn't reflow the packed grid; keep a selected tile
-   visible even before its thumbnail has decoded. */
+   .album's overflow and doesn't reflow the packed grid; on a grid tile it shows
+   even before the thumbnail inside has decoded. */
 .selected { outline: 3px solid #f5c518; outline-offset: -3px; }
-.grid img.thumb.selected { visibility: visible; }
+/* On a grid tile it's an overlay instead: a checked item's dimmed thumbnail
+   (its `filter`) paints in a layer above the tile's own outline, hiding it. */
+.grid .tile.selected { outline: none; }
+.grid .tile.selected::before { content: ''; position: absolute; inset: 0; z-index: 1;
+                               border: 3px solid #f5c518; pointer-events: none; }
 body.modal-open { overflow: hidden; }
 /* Sized in dynamic viewport units (dvw/dvh) so it tracks the *visible* viewport
    on mobile as the toolbars show/hide — plain vh/vw refer to the large viewport
@@ -273,52 +312,59 @@ body.modal-open { overflow: hidden; }
          opacity: 0; pointer-events: none; transition: opacity 0.25s ease; }
 #toast.show { opacity: 1; }
 #toast.failed { color: #f66; }
-/* Picker modal (`t` = tags, `v` = move to album): scrollable tree, MRU, quick
-   filter, Cancel(/Apply in tags mode) footer. Toggled via
-   `.lightbox.picker-open` like the info panel. */
-#lb-picker { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
-             z-index: 20; /* above the action row (z 10), which it can overlap on short screens */
-             display: none; flex-direction: column;
-             width: min(92vw, 24rem);
-             max-height: 80vh; max-height: 80dvh; /* dvh: minus mobile browser chrome */
-             padding: 0.6rem 0.85rem; border-radius: 6px;
-             background: rgba(0, 0, 0, 0.75); color: #fff; font-size: 0.9rem;
-             text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9); }
-.lightbox.picker-open #lb-picker { display: flex; }
-#lb-picker-filter { margin-top: 0.4rem; padding: 0.25rem 0.4rem;
+/* Picker modal (`t` = tags, `v` = move to album; picker.js): a full-screen
+   backdrop (`#picker`, shown via `.open`; a click on it discards the modal)
+   around the dialog box — scrollable tree, MRU, quick filter, Cancel(/Apply in
+   tags mode) footer. Above the lightbox (z 1000; or, hosted inside it while
+   it's fullscreen, above its controls) and below the toast. Over the grid
+   (hosted in the body) the backdrop dims the page. */
+#picker { position: fixed; inset: 0; z-index: 1050; display: none; }
+#picker.open { display: block; }
+body > #picker { background: rgba(0, 0, 0, 0.45); }
+#picker .picker-box { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+                      display: flex; flex-direction: column;
+                      width: min(92vw, 24rem);
+                      max-height: 80vh; max-height: 80dvh; /* dvh: minus mobile browser chrome */
+                      padding: 0.6rem 0.85rem; border-radius: 6px;
+                      background: rgba(0, 0, 0, 0.75); color: #fff; font-size: 0.9rem;
+                      text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9); }
+body > #picker .picker-box { background: rgba(20, 20, 20, 0.95); border: 1px solid #444; }
+/* Tags mode, several items: how many have a tag that only some have ("2/5"). */
+#picker .picker-count { color: #999; font-size: 0.8em; margin-left: 0.4rem; }
+#picker-filter { margin-top: 0.4rem; padding: 0.25rem 0.4rem;
                     background: #222; color: #fff; border: 1px solid #555;
                     border-radius: 4px; font: inherit; }
 /* Small grey section labels ("Tags"/"Albums", "Recently used") above the tree
    and the MRU; the MRU label hides together with its (empty/filtered-out)
    section. */
-#lb-picker .picker-label { font-size: 0.72rem; color: #999; margin: 0.25rem 0 0.1rem; }
+#picker .picker-label { font-size: 0.72rem; color: #999; margin: 0.25rem 0 0.1rem; }
 /* Most-recently-used entries: a flat, full-path list pinned between the
    (scrollable) tree and the filter. */
-#lb-picker .picker-mru:not(:empty) { margin-bottom: 0.15rem; }
+#picker .picker-mru:not(:empty) { margin-bottom: 0.15rem; }
 /* The scrollable part; pan-y re-enables native touch scrolling under the
    lightbox's touch-action: none. */
-#lb-picker .picker-list { flex: 1; min-height: 0; overflow-y: auto; touch-action: pan-y; }
-#lb-picker .picker-row { display: block; padding: 0.15rem 0.3rem;
+#picker .picker-list { flex: 1; min-height: 0; overflow-y: auto; touch-action: pan-y; }
+#picker .picker-row { display: block; padding: 0.15rem 0.3rem;
                          padding-left: calc(0.3rem + var(--depth, 0) * 1rem);
                          border-radius: 4px; cursor: pointer; white-space: nowrap;
                          overflow: hidden; text-overflow: ellipsis; }
-#lb-picker .picker-row[hidden] { display: none; } /* display:block above would win otherwise */
-#lb-picker .picker-row:focus-within { outline: 2px solid #f5c518; outline-offset: -2px; }
-#lb-picker .picker-row.ctx { color: #888; }  /* non-matching ancestor kept for context */
-#lb-picker .picker-row.current { color: #f5c518; } /* move mode: the photo's current album */
-#lb-picker .picker-row input { margin-right: 0.45rem; accent-color: #f5c518; }
-#lb-picker .picker-actions { display: flex; justify-content: flex-end; gap: 0.5rem; margin-top: 0.5rem; }
-#lb-picker .picker-actions button { font: inherit; cursor: pointer; padding: 0.2rem 0.9rem;
+#picker .picker-row[hidden] { display: none; } /* display:block above would win otherwise */
+#picker .picker-row:focus-within { outline: 2px solid #f5c518; outline-offset: -2px; }
+#picker .picker-row.ctx { color: #888; }  /* non-matching ancestor kept for context */
+#picker .picker-row.current { color: #f5c518; } /* move mode: the album all the items are in */
+#picker .picker-row input { margin-right: 0.45rem; accent-color: #f5c518; }
+#picker .picker-actions { display: flex; justify-content: flex-end; gap: 0.5rem; margin-top: 0.5rem; }
+#picker .picker-actions button { font: inherit; cursor: pointer; padding: 0.2rem 0.9rem;
                                     border: 1px solid #555; border-radius: 4px;
                                     background: #222; color: #fff;
                                     /* undo the generic translucent .lightbox button look */
                                     opacity: 1; text-shadow: none; }
-#lb-picker .picker-actions .picker-apply { background: #f5c518; border-color: #f5c518; color: #111; }
+#picker .picker-actions .picker-apply { background: #f5c518; border-color: #f5c518; color: #111; }
 /* Apply is disabled until something actually changed (see updateApplyState). */
-#lb-picker .picker-actions button[disabled] { opacity: 0.35; cursor: default; }
+#picker .picker-actions button[disabled] { opacity: 0.35; cursor: default; }
 @media (hover: hover) {
-  #lb-picker .picker-row:hover { background: rgba(255, 255, 255, 0.08); }
-  #lb-picker .picker-actions button:hover { filter: brightness(1.15); }
+  #picker .picker-row:hover { background: rgba(255, 255, 255, 0.08); }
+  #picker .picker-actions button:hover { filter: brightness(1.15); }
 }
 
 /* Auto-hide the controls after inactivity (lightbox.js toggles `.idle`); they

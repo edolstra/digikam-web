@@ -40,15 +40,15 @@ test('photo grid loads and paints real images', async ({ page }) => {
   await page.goto(ALBUM);
   await expect(page.locator('#photos .count')).toHaveText('3 photo(s) or video(s)');
   // Day-grouped grid (default `modified` sort): three items on three days.
-  await expect(page.locator('#photos .grid > img.thumb')).toHaveCount(2);
+  await expect(page.locator('#photos .grid > .tile:not(.vtile)')).toHaveCount(2);
   await expect(page.locator('#photos .grid > .vtile')).toHaveCount(1);
   await expect(page.locator('#photos h2').first()).toHaveText('2024-01-05');
   // The tiles paint real pixels: image 100's stored thumbnail is junk PGF, so
   // the decode fails and the pipeline falls back to the full-size /file (a
   // real JPEG in the fixture).
-  const tile = page.locator('#item-100');
+  const tile = page.locator('#item-100 img.thumb');
   await expect.poll(() => tile.evaluate((el) => el.naturalWidth)).toBeGreaterThan(0);
-  await expect.poll(() => page.locator('#item-107').evaluate((el) => el.naturalWidth)).toBeGreaterThan(0);
+  await expect.poll(() => page.locator('#item-107 img.thumb').evaluate((el) => el.naturalWidth)).toBeGreaterThan(0);
   await shot(page, '02-album-grid');
 });
 
@@ -115,7 +115,7 @@ test('autoplay=true opens the lightbox in slideshow mode', async ({ page }) => {
   // lands on the album grid, not off the site.
   await page.goBack();
   await expect(lb).not.toHaveClass(OPEN);
-  await expect(page.locator('#photos .grid > img.thumb')).toHaveCount(2);
+  await expect(page.locator('#photos .grid > .tile:not(.vtile)')).toHaveCount(2);
 });
 
 // The lightbox controls auto-hide (`.idle`, pointer-events: none) 2s after the
@@ -284,6 +284,7 @@ test('closing the picker with Esc gives the keyboard back to the lightbox', asyn
   await page.goto(ALBUM);
   await page.locator('#item-100').click();
   const lb = page.locator('#lightbox');
+  const picker = page.locator('#picker');
 
   // Both modes: Esc typed in the (focused) filter closes the picker, and the
   // very next key must reach the lightbox. Focus left on the now-hidden filter
@@ -292,13 +293,13 @@ test('closing the picker with Esc gives the keyboard back to the lightbox', asyn
   // sent immediately — no retrying assertion in between).
   for (const key of ['t', 'v']) {
     await page.keyboard.press(key);
-    await expect(lb).toHaveClass(/picker-open/);
-    await expect(page.locator('#lb-picker-filter')).toBeFocused();
-    await expect(page.locator('#lb-picker .picker-list .picker-row').first()).toBeVisible();
+    await expect(picker).toHaveClass(OPEN);
+    await expect(page.locator('#picker-filter')).toBeFocused();
+    await expect(page.locator('#picker .picker-list .picker-row').first()).toBeVisible();
     await shot(page, key === 't' ? 'picker-tags' : 'picker-move');
     await page.keyboard.press('Escape');
     await page.keyboard.press('i');
-    await expect(lb).not.toHaveClass(/picker-open/);
+    await expect(picker).not.toHaveClass(OPEN);
     await expect(lb).toHaveClass(/info-open/);
     await page.keyboard.press('i'); // close the panel again for the next round
     await expect(lb).not.toHaveClass(/info-open/);
@@ -316,7 +317,7 @@ test('the picker lists recently used entries oldest first, newest at the bottom'
   await page.goto(ALBUM);
   await page.locator('#item-100').click();
   await page.keyboard.press('v');
-  await expect(page.locator('#lb-picker .picker-mru .picker-row'))
+  await expect(page.locator('#picker .picker-mru .picker-row'))
     .toHaveText(['/Collection/Animals/Cats', '/Collection/Beach']);
   await shot(page, 'picker-move-mru');
 });
@@ -325,9 +326,9 @@ test('the picker arrow keys cycle through the rows and the filter below them', a
   await page.goto(ALBUM);
   await page.locator('#item-100').click();
   await page.keyboard.press('v');
-  const filter = page.locator('#lb-picker-filter');
+  const filter = page.locator('#picker-filter');
   await expect(filter).toBeFocused();
-  const rows = page.locator('#lb-picker .picker-list .picker-row');
+  const rows = page.locator('#picker .picker-list .picker-row');
   await expect(rows.first()).toBeVisible();
 
   // ArrowUp from the filter: the row just above it (the last one; no MRU yet).

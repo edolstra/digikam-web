@@ -98,6 +98,13 @@ The app lives at `/photos/<album path>` (`/` and `/photos` are the root); filter
 - **Photo grid**: grouped by day (by the sort's date) — or a flat A–Z grid when sorting by name. Thumbnails load lazily, ahead of scrolling. Videos show a ▶ badge. Middle-click opens the original in a new tab.
 - **Keyboard**: the arrow keys move a selection across the sub-albums and the photos (Home/End, PageUp/PageDown too); Enter opens it. The selection is kept in the URL fragment, so it survives reloads and Back/Forward, and closing the lightbox selects the item last viewed.
 
+### Selection mode
+For tagging or moving several items at once.
+- **Entering**: a long press (touch or mouse) on a grid item enters selection mode and checks that item; `x` toggles the mode from the keyboard. Each grid item then shows a checkbox in its corner; a long press or a click on the checkbox toggles it, Shift-click checks/unchecks the whole range from the previously toggled item, and Space toggles the keyboard-selected item (Shift+Space: a range). Clicking an item itself still opens the lightbox; closing it returns to the grid, still in selection mode. Sub-albums aren't selectable.
+- **Navbar**: the breadcrumb gives way to the selection bar: ✕ (leave), "N selected", All (Ctrl+A), None, 🏷 Tag (`t`) and 📂 Move (`v`).
+- **Tag / Move** open the same modals as in the lightbox, for all checked items. In the Tag modal a tag only some of the items have shows as a third, "some" state (with a k/N count); clicking it cycles some → on → off → some, and Apply changes, per item, only what's needed. In the Move modal the items' album is highlighted if they all share one. A bulk change is one undo step; if it fails for some items, the message says how many, and undo covers the rest.
+- **Leaving**: Esc or ✕ leaves the mode but remembers the checks, so re-entering shows them again. Navigating to another album or changing a filter clears them.
+
 ### Lightbox
 Clicking a photo or video opens it full-screen (browser fullscreen where supported), scaled to fit.
 - **Navigation**: ←/→, the ‹ › buttons, the mouse wheel, and swipes; Home/End; `r` (or swipe up) for a random item — random navigation shows every item once before repeating. Close with Esc, the ×, a click on the background, or the device's Back button. `f` toggles browser fullscreen without closing.
@@ -113,18 +120,18 @@ Clicking a photo or video opens it full-screen (browser fullscreen where support
 - **TV remotes**: a remote's Stop button stops the slideshow and Rewind / Fast-forward step through items (tested on LG webOS). Play/Pause aren't available to web pages there.
 
 ### Undo
-`u` undoes the last change (rating, tags, or move), anywhere in the app, as many steps back as you like within the session. Changes and undos are confirmed with a short message at the bottom of the screen (or, for a rating changed in the open info panel, by its stars). The undo history isn't saved across reloads.
+`u` undoes the last change (rating, tags, or move — a selection mode change to several items counts as one), anywhere in the app, as many steps back as you like within the session. Changes and undos are confirmed with a short message at the bottom of the screen (or, for a rating changed in the open info panel, by its stars). The undo history isn't saved across reloads.
 
 ## Deliberately out of scope (for now)
 - Auth, and search by date or location.
-- Writes beyond ratings, tags and moves. Planned: uploads, operations on a multi-selection in the grid, and moves across filesystems. New operations should be undoable like the existing ones.
+- Writes beyond ratings, tags and moves. Planned: uploads and moves across filesystems. New operations should be undoable like the existing ones.
 
 ## Source layout
 
 - `src/main.rs` — router + startup; `config.rs` — CLI config; `error.rs` — errors → JSON responses
 - `src/db.rs` — DB pools, album roots, path resolution; `query.rs` — the photo / sub-album queries and filter types; `models.rs` — the API's JSON types; `http.rs` — HTTP caching helpers
 - `src/handlers/` — the API handlers, by area: `browse.rs` (listings), `detail.rs`, `write.rs` (PATCH), `media.rs` (file / thumbnail / reverse search), `bookmarks.rs`; shared plumbing in `mod.rs`
-- `src/web.rs` — the page shell and static assets; `src/web/*.js` — the SPA, concatenated into one script in the order listed in `web.rs`: `state.js` (state + URL model), `undo.js`, `navbar.js`, `thumbnails.js`, `grid.js`, `lightbox.js` (core) + `lightbox-{info,slideshow,picker,gestures}.js`, `gridnav.js`, `main.js` (bootstrap, last)
+- `src/web.rs` — the page shell and static assets; `src/web/*.js` — the SPA, concatenated into one script in the order listed in `web.rs`: `state.js` (state + URL model), `undo.js`, `navbar.js`, `thumbnails.js`, `grid.js`, `meta.js` (the photo-detail cache), `picker.js` (the Tag / Move modal, shared by the lightbox and selection mode), `lightbox.js` (core) + `lightbox-{info,slideshow,gestures}.js`, `gridnav.js`, `selection.js` (selection mode), `main.js` (bootstrap, last)
 - `src/assets/` — stylesheet, icons, fixture images; `src/manifest.webmanifest`, `src/sw.js` — PWA
 - `src/fixture.rs` — the synthetic test fixture (API tests + e2e); `src/tests/` — the API integration tests
 - `tests/e2e/` — the Playwright suite

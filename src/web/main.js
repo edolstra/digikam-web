@@ -6,6 +6,9 @@
 function render() {
   renderNavbar();
   renderMenuFilters();
+  // A selection (and a picker open on it) belongs to the view it was made in.
+  if (PICKER.isOpen()) PICKER.close();
+  SELECTION.clear();
   var token = ++renderToken;
   var subsHost = document.getElementById('subalbums');
   var photosHost = document.getElementById('photos');
@@ -15,7 +18,7 @@ function render() {
   ]).then(function () {
     if (token !== renderToken) return; // superseded by a newer navigation
     // No photos below the sub-albums: nothing to collapse them out of the way of.
-    if (!photosHost.querySelector('.grid > img.thumb, .grid > .vtile')) uncollapseSubalbums();
+    if (!photosHost.querySelector(TILE_SEL)) uncollapseSubalbums();
     ensureDecoder();
     observeTiles(collectThumbs());
     LB.refresh();
@@ -75,11 +78,13 @@ function initNav() {
   // scroll restoration would race our refetch — manage scroll ourselves.
   if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
   readUrl();
+  initPicker();
   initLightbox();
   initNav();
   initMenu();
   initFilterMenu();
   initGridNav();
+  initSelection();
   var autoplay = state.autoplay; // consumed once, here (see readUrl)
   render().then(function () {
     // `autoplay=true`: once the grid is in, open the lightbox in slideshow mode

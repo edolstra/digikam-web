@@ -7,9 +7,10 @@
 // This file is the core: the item list, show/open/dismiss, navigation (incl. the
 // shuffle bag), fullscreen, the controls' auto-hide, and the click / keyboard
 // dispatch. The features live in lightbox-*.js, each an initLightbox*(core)
-// factory: the info panel + rating (info), the slideshow (slideshow), the tags /
-// move picker (picker), and zoom + touch/wheel gestures (zoom). `core` is what
-// they share; they reach each other through it (core.info, core.slideshow, …).
+// factory: the info panel + rating (info), the slideshow (slideshow), and zoom +
+// touch/wheel gestures (zoom); the tags / move picker is shared with the grid
+// (picker.js), wrapped as core.picker. `core` is what they share; they reach
+// each other through it (core.info, core.slideshow, …).
 var LB = null;
 function initLightbox() {
   // Recomputed per render(); the persistent handlers close over these vars.
@@ -45,7 +46,20 @@ function initLightbox() {
   };
   var info = core.info = initLightboxInfo(core);
   var slideshow = core.slideshow = initLightboxSlideshow(core);
-  var picker = core.picker = initLightboxPicker(core);
+  // The Tag / Move picker is shared with the grid's selection mode (picker.js);
+  // in the lightbox it edits the current item.
+  var picker = core.picker = {
+    isOpen: function () { return PICKER.isOpen(); },
+    close: function () { PICKER.close(); },
+    apply: function () { PICKER.apply(); },
+    toggle: function (mode) {
+      var p = core.photo();
+      if (!p) return;
+      if (slideshow.panelOpen()) slideshow.setPanel(false); // one modal at a time
+      PICKER.toggle(mode, [p]);
+      wake();
+    }
+  };
   var zoom = core.zoom = initLightboxGestures(core);
 
   function isOpen() { return lb.classList.contains('open'); }
@@ -64,16 +78,15 @@ function initLightbox() {
   // Recompute the item list from the (just-rebuilt) grid. Direct grid children
   // only: a video tile's inner poster <img> is not its own item.
   function refresh() {
-    tiles = Array.prototype.slice.call(document.querySelectorAll('.grid > img, .grid > .vtile'));
+    tiles = Array.prototype.slice.call(document.querySelectorAll(TILE_SEL));
     items = tiles.map(function (el) {
-      var video = el.classList.contains('vtile');
-      // Photos display a decoded thumbnail in the grid; the lightbox always shows
-      // the full-size original from `data-full`. `photo` is the PhotoSummary for
-      // the info panel.
+      // The grid shows a decoded thumbnail; the lightbox always shows the
+      // full-size original (`data-src`). `photo` is the PhotoSummary for the
+      // info panel.
       return {
-        src: video ? el.dataset.src : (el.dataset.full || el.src),
-        alt: el.getAttribute('alt') || '',
-        video: video,
+        src: el.dataset.src,
+        alt: '',
+        video: el.classList.contains('vtile'),
         photo: el._photo
       };
     });
@@ -420,7 +433,7 @@ function initLightbox() {
   // tiles are <img>/<button>, never <a>, so the nav controller's link handler
   // ignores them.
   document.addEventListener('click', function (e) {
-    var t = e.target.closest('.grid > img.thumb, .grid > .vtile');
+    var t = e.target.closest(TILE_SEL);
     if (!t) return;
     var i = tiles.indexOf(t);
     if (i >= 0) open(i);
@@ -431,14 +444,14 @@ function initLightbox() {
   // not `click`, so it doesn't also open the lightbox.
   document.addEventListener('auxclick', function (e) {
     if (e.button !== 1) return; // middle button only (leave right-click alone)
-    var t = e.target.closest('.grid > img.thumb, .grid > .vtile');
+    var t = e.target.closest(TILE_SEL);
     if (!t || !t._photo) return;
     e.preventDefault();
     window.open('/api/photos/' + t._photo.id + '/file', '_blank', 'noopener');
   });
   // Suppress the middle-button autoscroll so the above opens a clean new tab.
   document.addEventListener('mousedown', function (e) {
-    if (e.button === 1 && e.target.closest('.grid > img.thumb, .grid > .vtile')) e.preventDefault();
+    if (e.button === 1 && e.target.closest(TILE_SEL)) e.preventDefault();
   });
 
   // Is (cx, cy) over the displayed media (vs the letterbox)? The media fills the
@@ -462,11 +475,10 @@ function initLightbox() {
   // native controls' job. Touch taps are handled by the touch gestures
   // (lightbox-gestures.js); their synthetic click is swallowed here so this
   // doesn't re-fire.
+  // (With the picker open, clicks never get here: it covers the screen with
+  // its own backdrop, a click on which discards it.)
   lb.addEventListener('click', function (e) {
     if (tapConsumed()) return;
-    // With the picker open, any click outside it (its own handler stops
-    // propagation) discards the pending changes — never dismisses the lightbox.
-    if (picker.isOpen()) { picker.close(); return; }
     var hidden = lb.classList.contains('idle');
     wake();
     if (!onMedia(e.clientX, e.clientY) && !hidden) close();
@@ -572,5 +584,10 @@ function initLightbox() {
     }
   });
 
-  LB = { isOpen: isOpen, dismiss: dismiss, refresh: refresh, autoplay: autoplay };
+  // `photoChanged(id)`: photo `id`'s data changed (a tag edit or move, possibly
+  // made from the grid or by an undo) — re-render the info panel if it shows it.
+  LB = {
+    isOpen: isOpen, dismiss: dismiss, refresh: refresh, autoplay: autoplay,
+    photoChanged: function (id) { info.renderIfShowing(id); }
+  };
 }

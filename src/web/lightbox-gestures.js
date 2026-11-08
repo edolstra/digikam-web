@@ -91,7 +91,7 @@ function initLightboxGestures(core) {
     // Touches ending on the picker / the slideshow settings modal are left
     // entirely to native behavior: taps click checkboxes/rows/buttons/inputs,
     // drags scroll the list (touch-action: pan-y).
-    if (e.target.closest('#lb-picker') || e.target.closest('#lb-slideshow')) return;
+    if (e.target.closest('#picker') || e.target.closest('#lb-slideshow')) return;
     lastTouch = e.timeStamp; // suppress the ghost mouse events that follow a tap
     // A finger lifted but others remain: if a pinch dropped to one finger and
     // we're still zoomed, continue as a pan from that finger.
@@ -112,9 +112,8 @@ function initLightboxGestures(core) {
     var adx = Math.abs(dx), ady = Math.abs(dy);
     var moved = adx > 10 || ady > 10;
 
-    // Any touch outside the open picker discards it (the touch counterpart
-    // of the click-outside rule above); swipes don't navigate past it either.
-    if (core.picker.isOpen()) { core.picker.close(); core.suppressClick = true; return; }
+    // (No touch reaches here with the picker open: its backdrop covers the
+    // screen — see the early return above — and a tap on it discards it.)
     // A tap outside the open slideshow settings modal: leave it to its synthetic
     // click, which the capture-phase listener consumes to close the modal (one
     // code path for mouse and touch; and no suppressClick, which would outlive
@@ -182,7 +181,7 @@ function initLightboxGestures(core) {
   lb.addEventListener('wheel', function (e) {
     // Let the picker's list scroll natively (and a wheel over the slideshow
     // settings' number box adjust it) instead of flipping photos.
-    if (e.target.closest('#lb-picker') || e.target.closest('#lb-slideshow')) return;
+    if (e.target.closest('#picker') || e.target.closest('#lb-slideshow')) return;
     if (!e.deltaY) return; // ignore purely-horizontal scroll
     e.preventDefault();
     if (e.ctrlKey) {

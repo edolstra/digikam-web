@@ -1,39 +1,48 @@
 // ===== Grid + sub-album tiles ================================================
+// Every grid item is a `div.tile` (plus `.vtile` for a video) — a container, so
+// it can hold the selection-mode checkbox (selection.js) over the image. The
+// tile carries the item's id (`item-<id>`: keyboard-nav target + URL fragment),
+// the media URL for the lightbox (`data-src`), and its PhotoSummary (`_photo`,
+// for the lightbox info panel and the picker); the inner `img.thumb` is what
+// the thumbnail pipeline paints.
+var TILE_SEL = '.grid > .tile';
+
+// The current grid's PhotoSummaries by id — the same objects as the tiles'
+// `_photo`s and the lightbox items' `photo`s — so a change applied by id (a
+// move, possibly replayed later by undo) can update the local copy in place.
+var gridPhotos = {};
+
 function buildTile(p) {
   var full = '/api/photos/' + p.id + '/file';
-  // Reserve the tile's width from its aspect ratio (grid row height is 200px) so
-  // the layout doesn't reflow as thumbnails decode in.
-  var reserve = (p.width && p.height) ? ('width:' + Math.round(200 * p.width / p.height) + 'px') : '';
-  if (p.is_video) {
-    // Video tile: a ▶-badged button with an inner poster fed by the thumbnail
-    // pipeline (no data-full, so a missing thumbnail just leaves the ▶). The
-    // button (a direct grid child) carries the media URL for the lightbox.
-    var btn = document.createElement('button');
-    btn.className = 'vtile';
-    btn.id = 'item-' + p.id; // keyboard-nav selection target + URL fragment
-    btn.dataset.src = full;
-    btn.title = p.name || '';
-    if (reserve) btn.style.cssText = reserve;
-    var poster = document.createElement('img');
-    poster.className = 'thumb';
-    poster.dataset.id = p.id;
-    poster.alt = '';
-    btn.appendChild(poster);
-    btn._photo = p; // the PhotoSummary, for the lightbox info panel
-    return btn;
-  }
-  // Photo tile: src-less <img>; the pipeline paints the decoded thumbnail, and
-  // `data-full` is the original (lightbox + decode fallback).
+  var tile = document.createElement('div');
+  tile.className = p.is_video ? 'tile vtile' : 'tile';
+  tile.id = 'item-' + p.id;
+  tile.dataset.src = full;
+  tile.title = p.name || '';
+  tile._photo = p;
+  gridPhotos[p.id] = p;
   var img = document.createElement('img');
   img.className = 'thumb';
-  img.id = 'item-' + p.id; // keyboard-nav selection target + URL fragment
   img.dataset.id = p.id;
-  img.dataset.full = full;
   img.alt = '';
-  img.title = p.name || '';
-  if (reserve) img.style.cssText = reserve;
-  img._photo = p; // the PhotoSummary, for the lightbox info panel
-  return img;
+  img.draggable = false; // holding the mouse down (a long press) must not start a drag
+  // Reserve the width from the aspect ratio (grid row height is 200px) so the
+  // layout doesn't reflow as thumbnails decode in: on a photo's image (the
+  // tile shrink-wraps it), on a video's ▶-badged box (its poster fills it).
+  // A photo gets the original as its decode fallback; a video has no
+  // `data-full` (no still to fall back to: a missing thumbnail leaves the ▶).
+  var reserve = (p.width && p.height) ? Math.round(200 * p.width / p.height) + 'px' : '';
+  if (p.is_video) {
+    tile.style.width = reserve;
+  } else {
+    img.dataset.full = full;
+    img.style.width = reserve;
+  }
+  tile.appendChild(img);
+  var check = document.createElement('span');
+  check.className = 'check'; // the selection-mode checkbox (shown only in that mode)
+  tile.appendChild(check);
+  return tile;
 }
 
 // Fetch /api/photos for the current album + filters and build the day-grouped
@@ -45,6 +54,7 @@ function buildGrid(host, token) {
     .then(function (page) {
       if (token !== renderToken) return;
       host.textContent = '';
+      gridPhotos = {};
       if (!page.items.length) {
         // A real album with no direct photos gets a note; the virtual root just
         // shows its sub-albums, with no message.
@@ -90,6 +100,7 @@ function buildGrid(host, token) {
     .catch(function () {
       if (token !== renderToken) return;
       host.textContent = '';
+      gridPhotos = {};
       var err = document.createElement('p');
       err.textContent = 'Failed to load photos or videos.';
       host.appendChild(err);

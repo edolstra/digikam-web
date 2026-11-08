@@ -18,6 +18,10 @@ const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'digikam-e2e-'));
 module.exports = defineConfig({
   testDir: __dirname,
   reporter: 'list', // no HTML report (which tries to auto-open a browser)
+  // One server, shared by all spec files, and some tests write to it (each
+  // undoes its changes afterwards): run the files one at a time, so no test
+  // sees another one's changes in flight.
+  workers: 1,
   use: {
     baseURL: `http://127.0.0.1:${port}`,
     // channel 'chromium': headless-run the full Chromium instead of the

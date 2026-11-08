@@ -28,28 +28,8 @@ function initLightboxInfo(core) {
     return deg + '°' + min + "'" + sec + '"' + hemi;
   }
 
-  // The PhotoDetail fields not in the PhotoSummary (creation_date, tags as absolute
-  // paths, lat/long) come from /api/photos/:id — fetched lazily, only while the info
-  // panel is open, and cached per id for the session. Only successes are cached:
-  // a failed fetch (network error, non-2xx) rejects, and the next render retries
-  // — caching a fallback would show the photo as untagged until a reload. A
-  // request already in flight for the id is shared rather than repeated.
-  var metaCache = {};
-  var metaPending = {};
-  function loadMeta(id) {
-    if (metaCache[id] !== undefined) return Promise.resolve(metaCache[id]);
-    if (metaPending[id]) return metaPending[id];
-    var req = fetch('/api/photos/' + id)
-      .then(function (r) {
-        if (!r.ok) throw new Error('HTTP ' + r.status);
-        return r.json();
-      })
-      .then(function (m) { metaCache[id] = m; return m; });
-    metaPending[id] = req;
-    function settle() { delete metaPending[id]; }
-    req.then(settle, settle);
-    return req;
-  }
+  // The PhotoDetail fields not in the PhotoSummary come from the shared metadata
+  // cache (meta.js), fetched lazily — only while the panel is open.
 
   // Fill the info panel from the current item's PhotoSummary (skipping any
   // missing field). Called when the panel is open, including while navigating.
@@ -262,8 +242,6 @@ function initLightboxInfo(core) {
     render: renderInfo,
     renderIfShowing: renderIfShowing,
     toggle: toggleInfo,
-    loadMeta: loadMeta,
-    metaCache: metaCache,
     setRating: setRating,
     starClicked: starClicked,
     copyPath: copyPath
