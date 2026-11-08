@@ -305,6 +305,22 @@ test('closing the picker with Esc gives the keyboard back to the lightbox', asyn
   }
 });
 
+test('the picker lists recently used entries oldest first, newest at the bottom', async ({ page }) => {
+  // Stored newest first (fixture albums: 4 = /Beach, 3 = /Animals/Cats).
+  await page.addInitScript(() => {
+    localStorage.setItem('digikam.albumMru', JSON.stringify([
+      { id: 4, path: '/Collection/Beach' },
+      { id: 3, path: '/Collection/Animals/Cats' },
+    ]));
+  });
+  await page.goto(ALBUM);
+  await page.locator('#item-100').click();
+  await page.keyboard.press('v');
+  await expect(page.locator('#lb-picker .picker-mru .picker-row'))
+    .toHaveText(['/Collection/Animals/Cats', '/Collection/Beach']);
+  await shot(page, 'picker-move-mru');
+});
+
 test('the picker arrow keys cycle through the rows and the filter below them', async ({ page }) => {
   await page.goto(ALBUM);
   await page.locator('#item-100').click();

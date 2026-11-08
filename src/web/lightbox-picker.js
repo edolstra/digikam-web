@@ -33,7 +33,8 @@ function initLightboxPicker(core) {
 
   // A most-recently-used list — the last 10 tags added / move targets (each
   // use moves it to the front; tag removals don't touch it). Shown flat, as
-  // full paths, below the tree. Persisted in
+  // full paths, below the tree — oldest first, so the most recent entry ends
+  // up at the bottom, right next to the filter. Persisted (newest first) in
   // localStorage so it survives reloads; unavailable/corrupt storage (private
   // mode, quota) just degrades to session-only. Entries that no longer exist
   // in the hierarchy are skipped when the picker is built.
@@ -48,7 +49,8 @@ function initLightboxPicker(core) {
       }
     } catch (e) { /* start empty */ }
     return {
-      list: function () { return list; },
+      // In display order: oldest first, most recent last.
+      list: function () { return list.slice().reverse(); },
       used: function (ids, paths) {
         ids.forEach(function (id, i) {
           list = list.filter(function (t) { return t.id !== id; });
