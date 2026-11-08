@@ -366,3 +366,22 @@ test('a failed metadata fetch is retried, not cached', async ({ page }) => {
   await page.keyboard.press('ArrowRight');
   await expect(info).toContainText('/places/beach/sunset');
 });
+
+test('grid items show their rating, kept in sync with rating changes', async ({ page }) => {
+  // Fixture ratings: 100 → 5, 107 → 2, video 102 → 0 (no stars).
+  await page.goto(ALBUM);
+  const stars = (id) => page.locator(`#item-${id} .stars`);
+  await expect(stars(100)).toHaveText('★★★★★');
+  await expect(stars(107)).toHaveText('★★');
+  await expect(stars(102)).toHaveText('');
+  await expect(stars(100)).toBeVisible(); // once the thumbnail is painted
+  await expect(stars(107)).toBeVisible();
+  await shot(page, 'grid-ratings');
+
+  // Re-rate 107 in the lightbox: its grid stars follow, and so does an undo.
+  await page.locator('#item-107').click();
+  await page.keyboard.press('Control+3');
+  await expect(stars(107)).toHaveText('★★★');
+  await page.keyboard.press('u');
+  await expect(stars(107)).toHaveText('★★');
+});

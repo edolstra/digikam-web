@@ -165,6 +165,15 @@ body.select-mode .grid .tile .check { display: block; }
                              line-height: 20px; text-align: center; }
 .grid .tile.checked .check::before { content: '✓'; background: #f5c518; border-color: #f5c518; }
 body.select-mode .grid .tile.checked img.thumb { filter: brightness(0.65); }
+/* The item's rating (grid.js): gold stars at the bottom center, with a dark
+   glow to stay legible over a light thumbnail; above the ▶ badge. */
+.grid .tile .stars { position: absolute; left: 0; right: 0; bottom: 4px; z-index: 1;
+                     text-align: center; color: #f5c518; font-size: 0.9rem;
+                     line-height: 1; letter-spacing: 1px; pointer-events: none;
+                     text-shadow: 0 0 3px rgba(0, 0, 0, 0.9), 0 0 2px rgba(0, 0, 0, 0.9); }
+/* Not floating over the empty space of a photo whose thumbnail isn't painted
+   yet (a video's box is drawn regardless). */
+.grid .tile:not(.vtile):has(> img.thumb:not([src])) .stars { visibility: hidden; }
 /* Keyboard-navigation selection (arrow keys). Inset outline so it isn't clipped by
    .album's overflow and doesn't reflow the packed grid; on a grid tile it shows
    even before the thumbnail inside has decoded. */

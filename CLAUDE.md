@@ -95,7 +95,7 @@ The app lives at `/photos/<album path>` (`/` and `/photos` are the root); filter
 - **Bookmarks menu**: saved views (album + filters) by name; `+` saves the current view (confirming before overwriting), `✕` deletes one.
 - **Filters menu**: recursive on/off, minimum stars, media type (all / images / videos), aspect ratio (all / portrait / landscape), sort (modified / created / name), and a free-text tag filter, plus a clear-all. The funnel turns gold while any filter is active. The menus stay open while you click through them, so several filters can be adjusted in a row.
 - **Sub-albums**: tiles with a cover, the name, and the item count, collapsed to the first two rows (with a "Show all" toggle) when there are photos below to get to.
-- **Photo grid**: grouped by day (by the sort's date) — or a flat A–Z grid when sorting by name. Thumbnails load lazily, ahead of scrolling. Videos show a ▶ badge. Middle-click opens the original in a new tab.
+- **Photo grid**: grouped by day (by the sort's date) — or a flat A–Z grid when sorting by name. Thumbnails load lazily, ahead of scrolling. Videos show a ▶ badge, and rated items their stars at the bottom. Middle-click opens the original in a new tab.
 - **Keyboard**: the arrow keys move a selection across the sub-albums and the photos (Home/End, PageUp/PageDown too); Enter opens it. The selection is kept in the URL fragment, so it survives reloads and Back/Forward, and closing the lightbox selects the item last viewed.
 
 ### Selection mode

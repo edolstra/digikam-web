@@ -9,8 +9,26 @@ var TILE_SEL = '.grid > .tile';
 
 // The current grid's PhotoSummaries by id — the same objects as the tiles'
 // `_photo`s and the lightbox items' `photo`s — so a change applied by id (a
-// move, possibly replayed later by undo) can update the local copy in place.
+// move or rating, possibly replayed later by undo) can update the local copy
+// in place. `gridTiles` holds the tiles by id (not getElementById: a sub-album
+// tile's `item-<name>` id can clash with a photo's `item-<id>`).
 var gridPhotos = {};
+var gridTiles = {};
+
+// A tile's rating badge: one ★ per star, bottom center; empty when unrated
+// (or rated 0).
+function renderTileStars(tile) {
+  var k = tile._photo.rating || 0;
+  tile.querySelector('.stars').textContent = '★'.repeat(k);
+}
+
+// Photo `id`'s rating changed (k = 0..5, or null for unrated): update the local
+// copy and its tile, if it's in the current grid.
+function photoRated(id, k) {
+  var p = gridPhotos[id];
+  if (p) p.rating = k;
+  if (gridTiles[id]) renderTileStars(gridTiles[id]);
+}
 
 function buildTile(p) {
   var full = '/api/photos/' + p.id + '/file';
@@ -21,6 +39,7 @@ function buildTile(p) {
   tile.title = p.name || '';
   tile._photo = p;
   gridPhotos[p.id] = p;
+  gridTiles[p.id] = tile;
   var img = document.createElement('img');
   img.className = 'thumb';
   img.dataset.id = p.id;
@@ -42,6 +61,10 @@ function buildTile(p) {
   var check = document.createElement('span');
   check.className = 'check'; // the selection-mode checkbox (shown only in that mode)
   tile.appendChild(check);
+  var stars = document.createElement('span');
+  stars.className = 'stars';
+  tile.appendChild(stars);
+  renderTileStars(tile);
   return tile;
 }
 
@@ -55,6 +78,7 @@ function buildGrid(host, token) {
       if (token !== renderToken) return;
       host.textContent = '';
       gridPhotos = {};
+      gridTiles = {};
       if (!page.items.length) {
         // A real album with no direct photos gets a note; the virtual root just
         // shows its sub-albums, with no message.
@@ -101,6 +125,7 @@ function buildGrid(host, token) {
       if (token !== renderToken) return;
       host.textContent = '';
       gridPhotos = {};
+      gridTiles = {};
       var err = document.createElement('p');
       err.textContent = 'Failed to load photos or videos.';
       host.appendChild(err);

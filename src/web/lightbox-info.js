@@ -179,9 +179,7 @@ function initLightboxInfo(core) {
       body: JSON.stringify({ rating: k })
     }).then(function (r) {
       if (!r.ok) throw new Error('HTTP ' + r.status);
-      core.items().forEach(function (it) {
-        if (it.photo && it.photo.id === id) it.photo.rating = k;
-      });
+      photoRated(id, k); // the local copy (= the items' `photo`) + the grid's stars
       renderIfShowing(id);
     });
   }
