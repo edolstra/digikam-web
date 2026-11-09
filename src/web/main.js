@@ -70,6 +70,19 @@ function initNav() {
       navigateTo(photosUrl(state.album.slice(0, -1), filters()));
     }
   });
+
+  // `g` opens the Go to album picker (picker.js) — from the grid; the lightbox
+  // binds its own `g`. Not while typing, nor with a navbar menu open.
+  document.addEventListener('keydown', function (e) {
+    if (e.key !== 'g' && e.key !== 'G') return;
+    if (e.altKey || e.ctrlKey || e.metaKey) return;
+    if ((LB && LB.isOpen()) || PICKER.isOpen()) return;
+    var ae = document.activeElement;
+    if (ae && /^(input|textarea|select)$/i.test(ae.tagName)) return;
+    if (document.querySelector('.menu-dropdown.open')) return;
+    e.preventDefault();
+    PICKER.open('goto');
+  });
 }
 
 // ===== Bootstrap =============================================================
@@ -83,6 +96,7 @@ function initNav() {
   initNav();
   initMenu();
   initFilterMenu();
+  initGotoButton();
   initGridNav();
   initSelection();
   var autoplay = state.autoplay; // consumed once, here (see readUrl)

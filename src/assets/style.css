@@ -48,12 +48,12 @@ body.select-mode .select-bar { display: flex; }
    re-renders): the ☰ bookmarks menu (far left, `.menu`) and the funnel filters
    menu (far right, `.filter-menu`). The funnel is highlighted while any filter
    is active — visual feedback that filtering is in effect. */
-.menu, .filter-menu { position: relative; display: flex; }
+.menu, .filter-menu, .goto { position: relative; display: flex; }
 .menu-btn { background: none; border: 0; color: #ccc; cursor: pointer;
             font-size: 1.3rem; line-height: 1; padding: 0 0.2rem; }
-.filter-btn { background: none; border: 0; color: #888; cursor: pointer;
+.filter-btn, .goto-btn { background: none; border: 0; color: #888; cursor: pointer;
               padding: 0 0.2rem; display: inline-flex; align-items: center; line-height: 1; }
-.filter-btn svg { display: block; }
+.filter-btn svg, .goto-btn svg { display: block; }
 .filter-btn.active { color: #f5c518; }
 .menu-dropdown { position: absolute; top: 100%; left: 0; margin-top: 0.4rem;
                  min-width: 16rem; max-height: 80vh; overflow-y: auto;

@@ -47,6 +47,11 @@ function initPicker() {
   //   the filter moves to the first match (only with a non-empty query, so a
   //   stray Enter can't move anything). No primary footer button — a click/tap
   //   on a row IS the action.
+  // - 'goto' (no items): the same album tree, MRU and filter as 'move' — the
+  //   MRU is literally the same list, so move targets and jump targets share
+  //   it — but activating a row navigates to that album (carrying the active
+  //   filters) instead of moving anything. The current album is highlighted
+  //   (activating it just closes).
   // With several items some PATCHes can fail while others succeed: if all
   // fail the modal stays open (retry, or Esc); otherwise it closes, the toast
   // says how many failed, and the undo op covers the ones that succeeded.
@@ -62,15 +67,15 @@ function initPicker() {
   var pickerListLabel = pickerEl.querySelector('.picker-label-list');
   var pickerApplyBtn = pickerEl.querySelector('.picker-apply');
   var pickerOpen = false;
-  var pickerMode = null;    // 'tags' | 'move' while open
-  var pickerPhotos = null;  // the PhotoSummaries the open picker edits (≥ 1)
+  var pickerMode = null;    // 'tags' | 'move' | 'goto' while open
+  var pickerPhotos = null;  // the PhotoSummaries the open picker edits (≥ 1; none for 'goto')
   var busy = false;         // a commit's PATCHes are in flight (no second one)
   var photoTags = {};       // tags mode: photo id -> {tag path: true}, its tags
   var tagCounts = {};       // tags mode: tag path -> how many of the items have it
   var moveSources = {};     // move mode: photo id -> {id, path} of its album
-  var moveShared = null;    // move mode: the album path all the items share, or null
 
-  // A most-recently-used list — the last 10 tags added / move targets (each
+  // A most-recently-used list — the last 10 tags added / albums moved to or
+  // jumped to (each
   // use moves it to the front; tag removals don't touch it). Shown flat, as
   // full paths, below the tree — oldest first, so the most recent entry ends
   // up at the bottom, right next to the filter. Persisted (newest first) in
@@ -101,12 +106,15 @@ function initPicker() {
     };
   }
   var tagMru = makeMru('digikam.tagMru');
-  var albumMru = makeMru('digikam.albumMru');
+  var albumMru = makeMru('digikam.albumMru'); // shared by 'move' and 'goto'
+
+  // The modes whose rows are albums, activated directly (no Apply step).
+  function isAlbumMode() { return pickerMode === 'move' || pickerMode === 'goto'; }
 
   function openPicker(mode, photos) {
-    if (!photos || !photos.length) return;
+    if (mode !== 'goto' && (!photos || !photos.length)) return;
     if (pickerOpen) closePicker();
-    var ps = photos.slice();
+    var ps = mode === 'goto' ? [] : photos.slice();
     pickerMode = mode;
     pickerPhotos = ps;
     pickerOpen = true;
@@ -121,12 +129,13 @@ function initPicker() {
     pickerMru.replaceChildren();
     pickerList.replaceChildren();
     pickerMruLabel.hidden = true; // shown once the MRU rows are built (if any)
-    pickerListLabel.textContent = (mode === 'move' ? 'Albums' : 'Tags') +
+    pickerListLabel.textContent =
+      (mode === 'goto' ? 'Go to album' : mode === 'move' ? 'Albums' : 'Tags') +
       (ps.length > 1 ? ' · ' + ps.length + ' items' : '');
-    // Move mode has no commit step (activating a row IS the action), so the
-    // primary footer button only exists for tags mode — and starts disabled
+    // The album modes have no commit step (activating a row IS the action), so
+    // the primary footer button only exists for tags mode — and starts disabled
     // there (nothing changed yet).
-    pickerApplyBtn.hidden = mode === 'move';
+    pickerApplyBtn.hidden = mode !== 'tags';
     pickerApplyBtn.disabled = true;
     // Still the same open picker when an async load lands?
     function current() { return pickerOpen && pickerPhotos === ps && pickerMode === mode; }
@@ -157,7 +166,12 @@ function initPicker() {
     } else {
       fetch('/api/albums').then(function (r) { return r.json(); }).then(function (albums) {
         if (!current()) return;
-        buildAlbumRows(albums);
+        if (mode === 'move') {
+          var byPath = buildAlbumRows(albums, sharedAlbum(ps));
+          recordMoveSources(byPath);
+        } else {
+          buildAlbumRows(albums, currentAlbumPath());
+        }
         applyPickerFilter();
       }).catch(fail);
     }
@@ -291,13 +305,13 @@ function initPicker() {
     pickerMru.replaceChildren(mru);
   }
 
-  // Move mode: build the album tree from the flat /api/albums list — index by
-  // path, attach children to parents (every ancestor of an album is itself an
-  // album), sort siblings by name, DFS into indented item rows. The items'
-  // album is highlighted `.current` when they all share one (its display path
-  // comes from the same album_display_path as /api/albums, so they match
-  // textually). Also records each item's album id, for undo.
-  function buildAlbumRows(albums) {
+  // Move / goto mode: build the album tree from the flat /api/albums list —
+  // index by path, attach children to parents (every ancestor of an album is
+  // itself an album), sort siblings by name, DFS into indented item rows. The
+  // album at display path `currentPath` (if any) is highlighted `.current`:
+  // display paths come from the same album_display_path as /api/albums, so
+  // they match textually. Returns the path -> {a: album, children} index.
+  function buildAlbumRows(albums, currentPath) {
     var byPath = {};
     albums.forEach(function (a) { byPath[a.path] = { a: a, children: [] }; });
     var roots = [];
@@ -311,19 +325,12 @@ function initPicker() {
       var nx = baseName(x.a.path).toLowerCase(), ny = baseName(y.a.path).toLowerCase();
       return nx < ny ? -1 : nx > ny ? 1 : 0;
     }
-    moveSources = {};
-    moveShared = pickerPhotos[0].album_path;
-    pickerPhotos.forEach(function (p) {
-      var n = byPath[p.album_path];
-      moveSources[p.id] = n ? { id: n.a.id, path: p.album_path } : null;
-      if (p.album_path !== moveShared) moveShared = null;
-    });
     var frag = document.createDocumentFragment();
     function walk(nodes, depth) {
       nodes.sort(byName);
       nodes.forEach(function (n) {
         var row = pickerRow('item', n.a.id, n.a.path, baseName(n.a.path), depth);
-        if (n.a.path === moveShared) row.classList.add('current');
+        if (n.a.path === currentPath) row.classList.add('current');
         frag.appendChild(row);
         walk(n.children, depth + 1);
       });
@@ -331,7 +338,7 @@ function initPicker() {
     walk(roots, 0);
     pickerList.replaceChildren(frag);
 
-    // MRU move targets, skipping albums that no longer exist (or were renamed).
+    // MRU albums, skipping those that no longer exist (or were renamed).
     var mru = document.createDocumentFragment();
     albumMru.list().forEach(function (t) {
       if (byPath[t.path] && byPath[t.path].a.id === t.id) {
@@ -339,6 +346,27 @@ function initPicker() {
       }
     });
     pickerMru.replaceChildren(mru);
+    return byPath;
+  }
+
+  // Move mode: the album all the items share (highlighted), or null.
+  function sharedAlbum(ps) {
+    var shared = ps[0].album_path;
+    ps.forEach(function (p) { if (p.album_path !== shared) shared = null; });
+    return shared;
+  }
+  // Move mode: record each item's album (id + path), for undo.
+  function recordMoveSources(byPath) {
+    moveSources = {};
+    pickerPhotos.forEach(function (p) {
+      var n = byPath[p.album_path];
+      moveSources[p.id] = n ? { id: n.a.id, path: p.album_path } : null;
+    });
+  }
+  // Goto mode: the display path of the album being viewed (null at the
+  // virtual root, which isn't in the tree).
+  function currentAlbumPath() {
+    return state.album.length ? '/' + state.album.join('/') : null;
   }
 
   // Quick filter: case-insensitive substring match against the entry's full
@@ -391,7 +419,7 @@ function initPicker() {
   // section — the arrow keys walk them as one sequence): the checkboxes in
   // tags mode, the rows themselves in move mode.
   function visiblePickerBoxes() {
-    var suffix = pickerMode === 'move' ? '' : ' input';
+    var suffix = isAlbumMode() ? '' : ' input';
     return Array.prototype.slice.call(pickerEl.querySelectorAll(
       '.picker-list .picker-row:not([hidden])' + suffix + ', ' +
       '.picker-mru:not([hidden]) .picker-row:not([hidden])' + suffix));
@@ -457,7 +485,27 @@ function initPicker() {
     });
   }
 
-  // Activate a move-mode row (click, or Enter while focused): PATCH every item
+  // Activate an album row (click, Enter while focused, or type-and-Enter):
+  // move the items there, or go there.
+  function activateAlbumRow(row) {
+    if (pickerMode === 'move') moveToRow(row);
+    else if (pickerMode === 'goto') gotoRow(row);
+  }
+
+  // Activate a goto-mode row: navigate to that album, keeping the active
+  // filters, and record it in the (shared) album MRU. From the lightbox this
+  // goes through its album-link jump, which reuses the lightbox's history
+  // entry so Back returns to where it was. The current album just closes.
+  function gotoRow(row) {
+    var path = row.dataset.path;
+    closePicker();
+    if (path === currentAlbumPath()) return;
+    albumMru.used([+row.dataset.id], [path]);
+    var url = albumHref(path);
+    if (LB.isOpen()) LB.jumpToAlbum(url); else navigateTo(url);
+  }
+
+  // Activate a move-mode row: PATCH every item
   // not already there into that album, record the target in the MRU, and push
   // the reverse moves onto the undo stack. Activating the items' own album
   // just closes.
@@ -575,15 +623,15 @@ function initPicker() {
     if (e.key === 'Escape') { e.preventDefault(); closePicker(); }
     else if (e.key === 'Enter') {
       e.preventDefault();
-      if (pickerMode === 'move') {
-        // Type-and-Enter: move to the first real match (never a dim .ctx
+      if (isAlbumMode()) {
+        // Type-and-Enter: activate the first real match (never a dim .ctx
         // ancestor), and only with a non-empty query — a stray Enter on the
-        // empty filter must not move anything.
+        // empty filter must not move anything (or navigate away).
         if (pickerFilter.value.trim()) {
           var hit = pickerEl.querySelector(
             '.picker-list .picker-row:not([hidden]):not(.ctx), ' +
             '.picker-mru:not([hidden]) .picker-row:not([hidden])');
-          if (hit) moveToRow(hit);
+          if (hit) activateAlbumRow(hit);
         }
       } else {
         pickerApply();
@@ -610,8 +658,8 @@ function initPicker() {
     if (e.target.closest('button')) return; // Enter on Cancel/Apply = native click
     if (e.key === 'Enter') {
       e.preventDefault();
-      var row = pickerMode === 'move' && e.target.closest('.picker-row');
-      if (row) moveToRow(row); else pickerApply();
+      var row = isAlbumMode() && e.target.closest('.picker-row');
+      if (row) activateAlbumRow(row); else pickerApply();
       return;
     }
     if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
@@ -626,14 +674,14 @@ function initPicker() {
       boxes[n].closest('.picker-row').scrollIntoView({ block: 'nearest' });
     }
     // Space is the native checkbox toggle (tags mode), which the click
-    // handler below turns into the row's next state. Move-mode rows don't
-    // react to Space.
+    // handler below turns into the row's next state. Album rows don't react
+    // to Space.
   });
   // Clicks stay in the picker (it covers the page or the lightbox). One on the
   // backdrop itself — outside the dialog box — discards it. In tags mode a
   // checkbox click (also a click on its label, or Space) steps the row's state;
-  // in move mode a click on a row activates it directly — the click IS the
-  // move, no selection step.
+  // in the album modes a click on a row activates it directly — the click IS
+  // the move (or jump), no selection step.
   pickerEl.addEventListener('click', function (e) {
     e.stopPropagation();
     if (e.target === pickerEl) { closePicker(); return; }
@@ -643,7 +691,7 @@ function initPicker() {
       return;
     }
     var row = e.target.closest('.picker-row');
-    if (row) moveToRow(row);
+    if (row) activateAlbumRow(row);
   });
   pickerEl.querySelector('.picker-apply').addEventListener('click', pickerApply);
   pickerEl.querySelector('.picker-cancel').addEventListener('click', closePicker);

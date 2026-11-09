@@ -192,6 +192,26 @@ function initFilterMenu() {
   wireDropdown(host, dd, btn);
 }
 
+// The Go to album button: a folder-with-magnifier icon just left of the funnel
+// (the static `.goto` span) — the pointer / touch way into the picker's goto
+// mode, which is `g` from the keyboard (main.js).
+var GOTO_SVG = '<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="none" ' +
+  'stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+  '<path d="M11 19H4a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h5l2 2h9a1 1 0 0 1 1 1v3"/>' +
+  '<circle cx="16.5" cy="15.5" r="3"/><path d="M18.7 17.7 21.5 20.5"/></svg>';
+function initGotoButton() {
+  var host = document.querySelector('.goto');
+  if (!host) return;
+  var btn = document.createElement('button');
+  btn.className = 'goto-btn';
+  btn.type = 'button';
+  btn.title = 'Go to album (g)';
+  btn.setAttribute('aria-label', 'Go to album');
+  btn.innerHTML = GOTO_SVG;
+  btn.addEventListener('click', function () { PICKER.open('goto'); });
+  host.appendChild(btn);
+}
+
 // The Bookmarks menu: a hamburger (☰) at the navbar's far left (the static
 // `.menu` span, so it survives re-renders). Lists saved bookmarks and lets you
 // snapshot the current view as a new one. Bookmark links are plain /photos hrefs

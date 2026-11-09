@@ -112,10 +112,12 @@ function initLightbox() {
   // Jump from the info panel's album link to that album. The lightbox pushed a
   // URL-less history entry on open; repurpose it (replaceState) as the target so
   // Back still returns to where we were, then close the lightbox and re-render.
+  // (Dismiss first: it writes the last-viewed item into the URL fragment,
+  // which must not carry over to the target album.)
   function jumpToAlbum(url) {
     if (!url) return;
-    history.replaceState({}, '', url);
     dismiss();
+    history.replaceState({}, '', url);
     readUrl();
     window.scrollTo(0, 0);
     render();
@@ -570,6 +572,7 @@ function initLightbox() {
     else if (e.key === 't' || e.key === 'T') { e.preventDefault(); picker.toggle('tags'); }
     // `v` as in `mv` — `m` is taken by video mute (the convention everywhere).
     else if (e.key === 'v' || e.key === 'V') { e.preventDefault(); picker.toggle('move'); }
+    else if (e.key === 'g' || e.key === 'G') { e.preventDefault(); picker.toggle('goto'); }
     else if (e.key === 's' || e.key === 'S') { e.preventDefault(); slideshow.toggle(); }
     else if (e.key === 'f' || e.key === 'F') { e.preventDefault(); toggleFullscreen(); }
     // +/- zoom the image toward the viewport center (like Ctrl+wheel toward the
@@ -586,8 +589,11 @@ function initLightbox() {
 
   // `photoChanged(id)`: photo `id`'s data changed (a tag edit or move, possibly
   // made from the grid or by an undo) — re-render the info panel if it shows it.
+  // `jumpToAlbum(url)`: close the lightbox and go to that album (the picker's
+  // Go to album, while the lightbox is open).
   LB = {
     isOpen: isOpen, dismiss: dismiss, refresh: refresh, autoplay: autoplay,
+    jumpToAlbum: jumpToAlbum,
     photoChanged: function (id) { info.renderIfShowing(id); }
   };
 }

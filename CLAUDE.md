@@ -91,12 +91,13 @@ All endpoints are under `/api`, except the root-level `/random`. Album paths are
 The app lives at `/photos/<album path>` (`/` and `/photos` are the root); filters and the slideshow settings are query parameters, so any view can be bookmarked or shared. It's an installable PWA (installing needs HTTPS or `localhost` — e.g. behind a TLS reverse proxy or `tailscale serve`).
 
 ### The album page
-- **Navbar** (sticky, deliberately minimal for phones): a `☰` bookmarks menu on the left, the breadcrumb (`⌂ › Photos › Lego › …`, each segment a link), and a funnel filters menu on the right. **Alt+↑** goes to the parent album.
+- **Navbar** (sticky, deliberately minimal for phones): a `☰` bookmarks menu on the left, the breadcrumb (`⌂ › Photos › Lego › …`, each segment a link), and on the right a folder button (Go to album) and a funnel filters menu. **Alt+↑** goes to the parent album.
 - **Bookmarks menu**: saved views (album + filters) by name; `+` saves the current view (confirming before overwriting), `✕` deletes one.
 - **Filters menu**: recursive on/off, minimum stars, media type (all / images / videos), aspect ratio (all / portrait / landscape), sort (modified / created / name), and a free-text tag filter, plus a clear-all. The funnel turns gold while any filter is active. The menus stay open while you click through them, so several filters can be adjusted in a row.
 - **Sub-albums**: tiles with a cover, the name, and the item count, collapsed to the first two rows (with a "Show all" toggle) when there are photos below to get to.
 - **Photo grid**: grouped by day (by the sort's date) — or a flat A–Z grid when sorting by name. Thumbnails load lazily, ahead of scrolling. Videos show a ▶ badge, and rated items their stars at the bottom. Middle-click opens the original in a new tab.
 - **Keyboard**: the arrow keys move a selection across the sub-albums and the photos (Home/End, PageUp/PageDown too); Enter opens it. The selection is kept in the URL fragment, so it survives reloads and Back/Forward, and closing the lightbox selects the item last viewed.
+- **Go to album** (`g` or the navbar's folder button; `g` also in the lightbox): jump straight to an album, keeping the active filters. The modal is the Move modal's album picker — the album tree with the current album highlighted, the recently used albums (shared with Move: albums jumped to and moved to both land there) below it, and a filter box at the bottom; click a row, or type part of a name and press Enter for the first match.
 
 ### Selection mode
 For tagging or moving several items at once.
@@ -114,7 +115,7 @@ Clicking a photo or video opens it full-screen (browser fullscreen where support
 - **Action row** (top left): ⓘ info, ▶ slideshow, 🏷 Tag, 📂 Move, and 🔍 Yandex reverse-image search (images only, with a confirmation since it uploads the image).
 - **Info panel** (ⓘ or `i`): file name (with a copy-the-server-path button), album, rating, format, size, resolution, dates, description, location (a map link), and tags. The album and tags are links to that album / tag. The rating stars are editable; **Ctrl+0..5** sets the rating from the keyboard.
 - **Tags** (`t`): a checklist of the tag tree, with the recently used tags below it and a filter box at the bottom. Changes are staged and applied together with Enter / Apply; Esc or clicking outside discards them.
-- **Move** (`v`): pick a target album from the album tree (recently used below it, and a filter box at the bottom); the move happens immediately and also moves the file on disk.
+- **Move** (`v`): pick a target album from the album tree (recently used below it — the same list as Go to album's — and a filter box at the bottom); the move happens immediately and also moves the file on disk.
 - **Slideshow**: `s` starts/stops it; ▶ opens its settings (seconds per image, shuffle on/off, a "copy slideshow link" button). Images advance after the interval with a crossfade; videos play to the end. The screen is kept awake while it runs. During a shuffled slideshow, next/previous move through the shuffle order.
 - **Photo frame URLs**: `autoplay=true` starts a slideshow when the page loads; `interval=<seconds>` and `shuffle=false` set its options. Browsers don't allow fullscreen without a user action, so the first key press or tap enters fullscreen (unless the browser is set up as a kiosk). Browsers may also block a slideshow's videos from playing on their own (they're then skipped), so `video=false` makes for a more reliable photo frame.
 - **TV remotes**: a remote's Stop button stops the slideshow and Rewind / Fast-forward step through items (tested on LG webOS). Play/Pause aren't available to web pages there.
@@ -131,7 +132,7 @@ Clicking a photo or video opens it full-screen (browser fullscreen where support
 - `src/main.rs` — router + startup; `config.rs` — CLI config; `error.rs` — errors → JSON responses
 - `src/db.rs` — DB pools, album roots, path resolution; `query.rs` — the photo / sub-album queries and filter types; `models.rs` — the API's JSON types; `http.rs` — HTTP caching helpers
 - `src/handlers/` — the API handlers, by area: `browse.rs` (listings), `detail.rs`, `write.rs` (PATCH), `media.rs` (file / thumbnail / reverse search), `bookmarks.rs`; shared plumbing in `mod.rs`
-- `src/web.rs` — the page shell and static assets; `src/web/*.js` — the SPA, concatenated into one script in the order listed in `web.rs`: `state.js` (state + URL model), `undo.js`, `navbar.js`, `thumbnails.js`, `grid.js`, `meta.js` (the photo-detail cache), `picker.js` (the Tag / Move modal, shared by the lightbox and selection mode), `lightbox.js` (core) + `lightbox-{info,slideshow,gestures}.js`, `gridnav.js`, `selection.js` (selection mode), `main.js` (bootstrap, last)
+- `src/web.rs` — the page shell and static assets; `src/web/*.js` — the SPA, concatenated into one script in the order listed in `web.rs`: `state.js` (state + URL model), `undo.js`, `navbar.js`, `thumbnails.js`, `grid.js`, `meta.js` (the photo-detail cache), `picker.js` (the Tag / Move / Go to album modal, shared by the lightbox, selection mode and the grid), `lightbox.js` (core) + `lightbox-{info,slideshow,gestures}.js`, `gridnav.js`, `selection.js` (selection mode), `main.js` (bootstrap, last)
 - `src/assets/` — stylesheet, icons, fixture images; `src/manifest.webmanifest`, `src/sw.js` — PWA
 - `src/fixture.rs` — the synthetic test fixture (API tests + e2e); `src/tests/` — the API integration tests
 - `tests/e2e/` — the Playwright suite

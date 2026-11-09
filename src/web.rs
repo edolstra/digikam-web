@@ -222,6 +222,8 @@ fn page_html(title: &str, body: Markup) -> Markup {
                     // Selection mode's controls (filled by selection.js),
                     // shown in place of the breadcrumb while that mode is on.
                     span.select-bar {}
+                    // Go to album (filled by navbar.js; opens the picker).
+                    span.goto {}
                     span.filter-menu {}
                 }
                 (body)
@@ -270,12 +272,12 @@ fn page_html(title: &str, body: Markup) -> Markup {
                     // Metadata overlay, filled + toggled by lightbox-info.js (hidden by default).
                     div id="lb-info" {}
                 }
-                // Picker modal (`t` = tags, `v` = move to album), shared by the
-                // lightbox and the grid's selection mode: a full-screen backdrop
-                // around the dialog box — scrollable tree + MRU + quick filter +
-                // footer (Cancel always; Apply in tags mode only — move-mode
-                // rows activate directly), filled + toggled by picker.js per
-                // mode. picker.js moves it into #lightbox while that is
+                // Picker modal (`t` = tags, `v` = move to album, `g` = go to
+                // album), shared by the lightbox and the grid: a full-screen
+                // backdrop around the dialog box — scrollable tree + MRU +
+                // quick filter + footer (Cancel always; Apply in tags mode
+                // only — album rows activate directly), filled + toggled by
+                // picker.js per mode. picker.js moves it into #lightbox while that is
                 // fullscreen — a fullscreen element is the only thing the
                 // browser paints.
                 div id="picker" {
