@@ -6,10 +6,10 @@ description = "Read-only web backend for browsing a Digikam photo database"
 license = "Unlicense"
 
 [dependencies]
-axum = "0.7"
+axum = "0.8"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal"] }
 tower = "0.5"
-tower-http = { version = "0.6", features = ["trace", "fs"] }
+tower-http = { version = "0.7", features = ["trace", "fs"] }
 
 rusqlite = { version = "0.32", features = ["bundled", "trace", "collation"] }
 r2d2 = "0.8"
@@ -17,7 +17,7 @@ r2d2_sqlite = "0.25"
 
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-maud = { version = "0.26", features = ["axum"] }
+maud = { version = "0.27", features = ["axum"] }
 
 clap = { version = "4", features = ["derive", "env"] }
 tracing = "0.1"
