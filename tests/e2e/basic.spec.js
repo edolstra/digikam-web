@@ -358,6 +358,9 @@ test('a failed metadata fetch is retried, not cached', async ({ page }) => {
   await page.keyboard.press('i');
   await expect(info).toContainText('tagged.jpg');
   await expect.poll(() => failures).toBeLessThan(1); // the failing request happened
+  // …and has settled in the page (left meta.js's in-flight map). Until then a
+  // re-render joins that request instead of retrying, and gets its failure.
+  await expect.poll(() => page.evaluate(() => !(107 in metaPending))).toBe(true);
   await expect(info).not.toContainText('/places/beach/sunset');
 
   // Navigate away and back with the panel open: the re-render refetches.
