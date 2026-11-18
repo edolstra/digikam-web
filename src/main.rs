@@ -115,12 +115,12 @@ pub(crate) fn build_router(state: AppState) -> Router {
         .route("/health", get(handlers::health))
         .route("/photos", get(browse::list_photos))
         .route(
-            "/photos/:id",
+            "/photos/{id}",
             get(detail::get_photo).patch(write::patch_photo),
         )
-        .route("/photos/:id/file", get(media::get_photo_file))
-        .route("/photos/:id/reverse-search", get(media::reverse_search))
-        .route("/photos/:id/thumbnail", get(media::get_photo_thumbnail))
+        .route("/photos/{id}/file", get(media::get_photo_file))
+        .route("/photos/{id}/reverse-search", get(media::reverse_search))
+        .route("/photos/{id}/thumbnail", get(media::get_photo_thumbnail))
         .route("/albums", get(browse::list_albums))
         .route("/subalbums", get(browse::list_subalbums))
         .route("/tags", get(browse::list_tags))
@@ -129,7 +129,7 @@ pub(crate) fn build_router(state: AppState) -> Router {
             get(bookmarks::list_bookmarks).post(bookmarks::create_bookmark),
         )
         .route(
-            "/bookmarks/:name",
+            "/bookmarks/{name}",
             axum::routing::delete(bookmarks::delete_bookmark),
         );
 
@@ -137,7 +137,7 @@ pub(crate) fn build_router(state: AppState) -> Router {
         .nest("/api", api)
         .route("/", get(web::album_page))
         .route("/photos", get(web::album_page))
-        .route("/photos/*path", get(web::album_page))
+        .route("/photos/{*path}", get(web::album_page))
         .route("/random", get(browse::random_photo))
         .route("/webpgf.js", get(web::webpgf_js))
         .route("/webpgf.wasm", get(web::webpgf_wasm))
