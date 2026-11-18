@@ -1,0 +1,25 @@
+name: Update flake.lock
+
+# Dependabot doesn't handle Nix flakes, so this opens a PR that runs
+# `nix flake update` (nixpkgs stays on 26.05: its FlakeHub URL pins 0.2605).
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 6 * * 1" # Mondays 06:00 UTC
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: DeterminateSystems/determinate-nix-action@v3
+
+      - uses: DeterminateSystems/update-flake-lock@main
+        with:
+          pr-title: "Update flake.lock"
+          pr-labels: dependencies
