@@ -4,14 +4,14 @@ A web frontend for browsing (and, opt-in, lightly editing) the photos in a [Digi
 
 ## Build & run
 
-Everything goes through Nix (flakes). nixpkgs is pinned to **26.05**; the build uses [crane](https://github.com/ipetkov/crane) + [rust-overlay](https://github.com/oxalica/rust-overlay).
+Everything goes through Nix (flakes). nixpkgs is pinned to **26.05**, and its Rust toolchain is used. The build uses [increments-rust](https://github.com/DeterminateSystems/increments.nix/tree/main/increments-rust) (one derivation per crate, with the crate graph computed at evaluation time), so evaluating the package or checks needs [Determinate Nix](https://docs.determinate.systems/determinate-nix) with the `wasm-builtin` experimental feature; the dev shell doesn't. Only `x86_64-linux` is built.
 
 ```bash
 nix run                              # build + run with defaults
 nix develop --command cargo run      # iterate inside the dev shell
 nix develop --command cargo test     # unit + API integration tests (seeded temp SQLite)
 nix build                            # produce ./result/bin/digikam-web
-nix flake check                      # build + clippy (-D warnings) + Playwright e2e
+nix flake check                      # build + Rust tests + Playwright e2e
 ```
 
 Config (CLI flags or env vars):
@@ -26,14 +26,14 @@ A NixOS module is exposed as `nixosModules.default` ([nix/nixos-module.nix](nix/
 
 ### Tests
 
-- **API tests** (`cargo test`): in-crate integration tests that seed a synthetic Digikam DB and drive the real router.
+- **API tests** (`cargo test`): in-crate integration tests that seed a synthetic Digikam DB and drive the real router. Run in the sandbox as the flake's `tests` check.
 - **e2e tests** ([tests/e2e/](tests/e2e/)): Playwright + headless Chromium against the real server, serving the same synthetic fixture ([src/fixture.rs](src/fixture.rs), via the hidden `--seed-fixture` flag) with writes enabled. Runs as the flake's `e2e` check; locally: `nix develop --command sh -c 'cargo build && DIGIKAM_WEB_BIN=$PWD/target/debug/digikam-web playwright test -c tests/e2e'`. The specs also save per-stage screenshots for visual inspection: `nix build .#checks.x86_64-linux.e2e` leaves them in `./result/`; local runs write them to `tests/e2e/test-results/screenshots/`.
 
 > Nix flakes only see git-tracked files. After adding/renaming a file, `git add` it before `nix build`/`nix develop`, or Nix won't find it.
 
 ## Coding standards
 
-- **Always run `cargo fmt` and `cargo clippy` before committing** (e.g. `nix develop --command cargo fmt` and `nix develop --command cargo clippy --all-targets`). Keep both clean — `nix flake check` treats clippy warnings as errors (`-D warnings`).
+- **Always run `cargo fmt` and `cargo clippy` before committing** (e.g. `nix develop --command cargo fmt` and `nix develop --command cargo clippy --all-targets`). Keep both clean (no clippy warnings); `nix flake check` doesn't run clippy, so this is the only gate.
 - **Markdown**: don't hard-wrap paragraphs — keep each paragraph (and each list item, blockquote, or table cell) on a single line, letting the editor soft-wrap. Reserve line breaks for actual block boundaries (new paragraphs, list items, etc.).
 - **Where documentation goes**: this file describes the high-level design, goals, and the intended user interface (what the user sees and can do). Code-level details — how something is implemented, function and CSS class names, edge-case mechanics — belong in comments next to the code, not here, so there's one copy to keep current.
 

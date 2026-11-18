@@ -4,69 +4,50 @@
   inputs = {
     nixpkgs.url = "https://flakehub.com/f/NixOS/nixpkgs/0.2605.tar.gz";
     flake-utils.url = "github:numtide/flake-utils";
-    rust-overlay = {
-      url = "github:oxalica/rust-overlay";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
-    crane.url = "github:ipetkov/crane";
+    # Builds the crate graph with one derivation per crate. Evaluating it needs
+    # Determinate Nix with the `wasm-builtin` experimental feature.
+    increments-rust.url = "https://flakehub.com/f/DeterminateSystems/increments-rust/0.1";
   };
 
-  outputs = { self, nixpkgs, flake-utils, rust-overlay, crane }:
+  outputs = { self, nixpkgs, flake-utils, increments-rust }:
     {
       # System-agnostic NixOS module (the per-system outputs are merged in below).
       nixosModules.default = import ./nix/nixos-module.nix self;
       nixosModules.digikam-web = self.nixosModules.default;
     }
-    // flake-utils.lib.eachDefaultSystem (system:
+    # Only x86_64-linux is built and tested.
+    // flake-utils.lib.eachSystem [ "x86_64-linux" ] (system:
       let
         pkgs = import nixpkgs {
           inherit system;
-          overlays = [ (import rust-overlay) ];
+          overlays = [ increments-rust.overlays.default ];
         };
-
-        rustToolchain = pkgs.rust-bin.stable.latest.default;
-
-        craneLib = (crane.mkLib pkgs).overrideToolchain rustToolchain;
-
-        # Keep Cargo sources plus the web assets that `include_str!` pulls in
-        # (cleanCargoSource alone would drop the .css/.js files). The Playwright
-        # e2e suite is excluded: its .js files would otherwise churn the Rust
-        # build on every spec edit (it gets its own store copy in checks.e2e).
-        src = pkgs.lib.cleanSourceWith {
-          src = ./.;
-          name = "source";
-          filter = path: type:
-            !(pkgs.lib.hasInfix "/tests/e2e" path)
-            && ((pkgs.lib.hasSuffix ".css" path)
-              || (pkgs.lib.hasSuffix ".js" path)
-              || (pkgs.lib.hasSuffix ".jpg" path)
-              || (pkgs.lib.hasSuffix ".ico" path)
-              || (pkgs.lib.hasSuffix ".png" path)
-              || (pkgs.lib.hasSuffix ".webmanifest" path)
-              || (craneLib.filterCargoSources path type));
-        };
+        inherit (pkgs) lib;
 
         # WebAssembly PGF thumbnail decoder (built from haplo/webpgf). Its
         # `webpgf.{js,wasm}` are embedded into the binary via `include_bytes!`,
         # so WEBPGF_PATH must point at this output at compile time — set it both
-        # for the crane build (commonArgs) and in the dev shell below.
+        # for the crate build (crateOverrides) and in the dev shell below.
         webpgf = pkgs.callPackage ./nix/webpgf.nix { };
 
-        commonArgs = {
-          inherit src;
-          strictDeps = true;
+        # One derivation per crate (increments-rust); the build graph is
+        # computed at evaluation time from Cargo.lock and the manifests.
+        workspace = pkgs.increments.rust.buildCargoWorkspace {
+          src = ./.;
+          # What our own crate is compiled from: the Cargo files and src/,
+          # which also holds every asset that `include_str!`/`include_bytes!`
+          # embeds. Leaving out the rest (the e2e specs, docs, nix/) keeps
+          # edits there from rebuilding the crate.
+          localSource = lib.fileset.toSource {
+            root = ./.;
+            fileset = lib.fileset.unions [ ./Cargo.toml ./Cargo.lock ./src ];
+          };
           # rusqlite is built with the `bundled` feature, so no system SQLite
-          # or pkg-config is required.
-          nativeBuildInputs = [ ];
-          buildInputs = [ ];
-          WEBPGF_PATH = webpgf;
+          # is required.
+          crateOverrides.digikam-web.env.WEBPGF_PATH = "${webpgf}";
         };
 
-        cargoArtifacts = craneLib.buildDepsOnly commonArgs;
-
-        digikam-web = craneLib.buildPackage (commonArgs // {
-          inherit cargoArtifacts;
-        });
+        digikam-web = workspace.packages.digikam-web;
       in
       {
         packages.default = digikam-web;
@@ -80,10 +61,8 @@
 
         checks = {
           inherit digikam-web;
-          clippy = craneLib.cargoClippy (commonArgs // {
-            inherit cargoArtifacts;
-            cargoClippyExtraArgs = "--all-targets -- --deny warnings";
-          });
+          # The crate's unit and API integration tests (`cargo test`).
+          tests = workspace.tests.digikam-web;
           # Playwright e2e suite (tests/e2e): drives the real server — seeded
           # via --seed-fixture — with headless Chromium. playwright-test and
           # playwright-driver.browsers-chromium come from the same nixpkgs, so
@@ -111,9 +90,11 @@
         };
 
         devShells.default = pkgs.mkShell {
-          inputsFrom = [ digikam-web ];
           packages = [
-            rustToolchain
+            pkgs.rustc
+            pkgs.cargo
+            pkgs.clippy
+            pkgs.rustfmt
             pkgs.rust-analyzer
             pkgs.sqlite
             pkgs.curl
@@ -123,8 +104,10 @@
             pkgs.playwright-test
           ];
           # `cargo build` in the dev shell embeds these the same way `nix build`
-          # does (commonArgs.WEBPGF_PATH), so iterating here picks up the assets.
+          # does (the crateOverrides above), so iterating here picks up the assets.
           WEBPGF_PATH = webpgf;
+          # The standard library's source, for rust-analyzer.
+          RUST_SRC_PATH = "${pkgs.rustPlatform.rustLibSrc}";
           # Playwright e2e tests against a local build (see tests/e2e/):
           #   cargo build && DIGIKAM_WEB_BIN=target/debug/digikam-web playwright test -c tests/e2e
           PLAYWRIGHT_BROWSERS_PATH = pkgs.playwright-driver.browsers-chromium;
